@@ -41,26 +41,19 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         token = None
         
-        # Debug: imprimir headers recibidos
-        print(f"DEBUG - Headers recibidos: {dict(request.headers)}")
-        print(f"DEBUG - Authorization header: {request.headers.get('Authorization')}")
         
         # Buscar token en el header Authorization
         if 'Authorization' in request.headers:
             auth_header = request.headers['Authorization']
-            print(f"DEBUG - Auth header completo: {auth_header}")
             try:
                 token = auth_header.split(' ')[1]  # Formato: "Bearer <token>"
-                print(f"DEBUG - Token extraído: {token[:20]}..." if token else "DEBUG - Token vacío")
             except IndexError:
-                print("DEBUG - Error al extraer token del header Authorization")
                 return jsonify({
                     'success': False,
                     'error': 'Token inválido'
                 }), 401
         
         if not token:
-            print("DEBUG - No se encontró token")
             return jsonify({
                 'success': False,
                 'error': 'Token de autenticación requerido'
@@ -68,20 +61,16 @@ def admin_required(f):
         
         payload = verify_token(token)
         if not payload:
-            print(f"DEBUG - Token inválido o expirado: {token[:20]}...")
             return jsonify({
                 'success': False,
                 'error': 'Token inválido o expirado'
             }), 401
         
-        print(f"DEBUG - Token válido, admin_id: {payload.get('admin_id')}")
         
         # Obtener el usuario admin - convertir string a UUID
         try:
             admin_id = uuid.UUID(payload['admin_id'])
-            print(f"DEBUG - UUID convertido: {admin_id}")
         except (ValueError, KeyError) as e:
-            print(f"DEBUG - Error al convertir admin_id a UUID: {e}")
             return jsonify({
                 'success': False,
                 'error': 'ID de usuario inválido'
@@ -89,17 +78,13 @@ def admin_required(f):
         
         # Verificar si hay usuarios en la base de datos
         all_users = AdminUser.query.all()
-        print(f"DEBUG - Total de usuarios admin en DB: {len(all_users)}")
         for user in all_users:
-            print(f"DEBUG - Usuario encontrado: id={user.id}, email={user.email}")
         
         admin_user = AdminUser.query.get(admin_id)
         if not admin_user:
-            print(f"DEBUG - Usuario admin no encontrado con id: {admin_id} (tipo: {type(admin_id)})")
             # Intentar buscar por string también
             admin_user_str = AdminUser.query.filter_by(id=str(admin_id)).first()
             if admin_user_str:
-                print(f"DEBUG - Usuario encontrado buscando por string")
                 admin_user = admin_user_str
             else:
                 return jsonify({
