@@ -11,11 +11,13 @@ class Product(db.Model):
     description = db.Column(db.Text)
     sku = db.Column(db.String(100))
     category_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=True)
+    category_option_id = db.Column(UUID(as_uuid=True), db.ForeignKey('category_options.id'), nullable=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
     variants = db.relationship('ProductVariant', backref='product', lazy=True, cascade='all, delete-orphan')
+    category_option = db.relationship('CategoryOption', backref='products', lazy=True)
 
     def get_min_price(self, locality_id=None):
         """Obtiene el precio mínimo del producto, opcionalmente filtrado por localidad"""
@@ -66,6 +68,8 @@ class Product(db.Model):
             'sku': self.sku,
             'category_id': str(self.category_id) if self.category_id else None,
             'category_name': self.category.name if self.category else None,
+            'category_option_id': str(self.category_option_id) if self.category_option_id else None,
+            'category_option_value': self.category_option.value if self.category_option else None,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'has_stock': self.has_stock(),
