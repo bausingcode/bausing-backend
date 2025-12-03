@@ -6,6 +6,7 @@ from models.locality import Locality
 from models.admin_user import AdminUser, AdminRole
 from sqlalchemy.exc import IntegrityError
 import jwt
+import uuid
 from datetime import datetime, timedelta
 from config import Config
 from functools import wraps
@@ -40,18 +41,26 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         token = None
         
+        # Debug: imprimir headers recibidos
+        print(f"DEBUG - Headers recibidos: {dict(request.headers)}")
+        print(f"DEBUG - Authorization header: {request.headers.get('Authorization')}")
+        
         # Buscar token en el header Authorization
         if 'Authorization' in request.headers:
             auth_header = request.headers['Authorization']
+            print(f"DEBUG - Auth header completo: {auth_header}")
             try:
                 token = auth_header.split(' ')[1]  # Formato: "Bearer <token>"
+                print(f"DEBUG - Token extraído: {token[:20]}..." if token else "DEBUG - Token vacío")
             except IndexError:
+                print("DEBUG - Error al extraer token del header Authorization")
                 return jsonify({
                     'success': False,
                     'error': 'Token inválido'
                 }), 401
         
         if not token:
+            print("DEBUG - No se encontró token")
             return jsonify({
                 'success': False,
                 'error': 'Token de autenticación requerido'
@@ -59,18 +68,44 @@ def admin_required(f):
         
         payload = verify_token(token)
         if not payload:
+            print(f"DEBUG - Token inválido o expirado: {token[:20]}...")
             return jsonify({
                 'success': False,
                 'error': 'Token inválido o expirado'
             }), 401
         
-        # Obtener el usuario admin
-        admin_user = AdminUser.query.get(payload['admin_id'])
-        if not admin_user:
+        print(f"DEBUG - Token válido, admin_id: {payload.get('admin_id')}")
+        
+        # Obtener el usuario admin - convertir string a UUID
+        try:
+            admin_id = uuid.UUID(payload['admin_id'])
+            print(f"DEBUG - UUID convertido: {admin_id}")
+        except (ValueError, KeyError) as e:
+            print(f"DEBUG - Error al convertir admin_id a UUID: {e}")
             return jsonify({
                 'success': False,
-                'error': 'Usuario admin no encontrado'
+                'error': 'ID de usuario inválido'
             }), 401
+        
+        # Verificar si hay usuarios en la base de datos
+        all_users = AdminUser.query.all()
+        print(f"DEBUG - Total de usuarios admin en DB: {len(all_users)}")
+        for user in all_users:
+            print(f"DEBUG - Usuario encontrado: id={user.id}, email={user.email}")
+        
+        admin_user = AdminUser.query.get(admin_id)
+        if not admin_user:
+            print(f"DEBUG - Usuario admin no encontrado con id: {admin_id} (tipo: {type(admin_id)})")
+            # Intentar buscar por string también
+            admin_user_str = AdminUser.query.filter_by(id=str(admin_id)).first()
+            if admin_user_str:
+                print(f"DEBUG - Usuario encontrado buscando por string")
+                admin_user = admin_user_str
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Usuario admin no encontrado'
+                }), 401
         
         # Agregar el usuario admin al contexto de la request
         request.admin_user = admin_user
@@ -581,6 +616,59 @@ def get_catalog_summary():
             }
         }), 200
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin_bp.route('/users', methods=['GET'])
+@admin_required
+def get_admin_users():
+    """
+    Obtener todos los usuarios admin
+    """
+    try:
+        admin_users = AdminUser.query.all()
+        return jsonify({
+            'success': True,
+            'data': [user.to_dict(include_role=True) for user in admin_users]
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin_bp.route('/users/<uuid:user_id>', methods=['DELETE'])
+@admin_required
+def delete_admin_user(user_id):
+    """
+    Eliminar un usuario admin
+    """
+    try:
+        # No permitir que un usuario se elimine a sí mismo
+        if request.admin_user.id == user_id:
+            return jsonify({
+                'success': False,
+                'error': 'No puedes eliminar tu propio usuario'
+            }), 400
+        
+        admin_user = AdminUser.query.get(user_id)
+        if not admin_user:
+            return jsonify({
+                'success': False,
+                'error': 'Usuario no encontrado'
+            }), 404
+        
+        db.session.delete(admin_user)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Usuario eliminado correctamente'
+        }), 200
+    except Exception as e:
+        db.session.rollback()
         return jsonify({
             'success': False,
             'error': str(e)

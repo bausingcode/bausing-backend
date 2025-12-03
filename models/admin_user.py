@@ -1,5 +1,6 @@
 from database import db
 from sqlalchemy.dialects.postgresql import UUID
+from datetime import datetime
 import uuid
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -26,6 +27,7 @@ class AdminUser(db.Model):
     email = db.Column(db.String(255), nullable=False, unique=True)
     password_hash = db.Column(db.Text, nullable=False)
     role_id = db.Column(UUID(as_uuid=True), db.ForeignKey('admin_roles.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def set_password(self, password):
         """Genera el hash de la contraseña"""
@@ -39,7 +41,8 @@ class AdminUser(db.Model):
         data = {
             'id': str(self.id),
             'email': self.email,
-            'role_id': str(self.role_id)
+            'role_id': str(self.role_id),
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
         if include_role and self.role:
             data['role'] = self.role.to_dict()
