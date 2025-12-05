@@ -10,14 +10,16 @@ def register_routes(app):
     from .admin_auth import admin_auth_bp
     from .images import images_bp
     from .promos import promos_bp
+    from .settings import settings_bp
 
-    app.register_blueprint(categories_bp, url_prefix='/api/categories')
-    app.register_blueprint(products_bp, url_prefix='/api/products')
-    app.register_blueprint(variants_bp, url_prefix='/api/product-variants')
-    app.register_blueprint(prices_bp, url_prefix='/api/product-prices')
-    app.register_blueprint(localities_bp, url_prefix='/api/localities')
-    app.register_blueprint(admin_bp, url_prefix='/api/admin')
-    app.register_blueprint(admin_auth_bp, url_prefix='/api/admin/auth')
-    app.register_blueprint(images_bp, url_prefix='/api')
-    app.register_blueprint(promos_bp, url_prefix='/api/promos')
+    app.register_blueprint(categories_bp, url_prefix='/categories')
+    app.register_blueprint(products_bp, url_prefix='/products')
+    app.register_blueprint(variants_bp, url_prefix='/product-variants')
+    app.register_blueprint(prices_bp, url_prefix='/product-prices')
+    app.register_blueprint(localities_bp, url_prefix='/localities')
+    app.register_blueprint(admin_bp, url_prefix='/admin')
+    app.register_blueprint(admin_auth_bp, url_prefix='/admin/auth')
+    app.register_blueprint(images_bp, url_prefix='')
+    app.register_blueprint(promos_bp, url_prefix='/promos')
+    app.register_blueprint(settings_bp, url_prefix='/admin')
 

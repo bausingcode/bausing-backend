@@ -4,6 +4,7 @@ from .locality import Locality
 from .admin_user import AdminUser, AdminRole
 from .image import ProductImage, HeroImage
 from .promo import Promo, PromoApplicability
+from .settings import SystemSettings, MessageTemplate, NotificationSetting, SecuritySetting
 
 __all__ = [
     'Category',
@@ -17,6 +18,10 @@ __all__ = [
     'ProductImage',
     'HeroImage',
     'Promo',
-    'PromoApplicability'
+    'PromoApplicability',
+    'SystemSettings',
+    'MessageTemplate',
+    'NotificationSetting',
+    'SecuritySetting'
 ]
 

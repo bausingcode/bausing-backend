@@ -18,22 +18,22 @@ def index():
         'message': 'Bienvenido a Bausing Backend',
         'status': 'ok',
         'endpoints': {
-            'categorias': '/api/categories',
-            'productos': '/api/products',
-            'productos_busqueda': '/api/products?search=...&category_id=...&min_price=...&max_price=...',
-            'producto_detalle': '/api/products/{id}',
-            'productos_relacionados': '/api/products/{id}/related',
-            'productos_destacados': '/api/products/featured',
-            'sugerencias_busqueda': '/api/products/search-suggestions?q=...',
-            'rango_precios': '/api/products/price-range',
-            'variantes': '/api/product-variants',
-            'precios': '/api/product-prices',
-            'localidades': '/api/localities',
-            'admin': '/api/admin',
-            'admin_auth': '/api/admin/auth',
-            'product_images': '/api/products/{id}/images',
-            'hero_images': '/api/hero-images',
-            'promos': '/api/promos'
+            'categorias': '/categories',
+            'productos': '/products',
+            'productos_busqueda': '/products?search=...&category_id=...&min_price=...&max_price=...',
+            'producto_detalle': '/products/{id}',
+            'productos_relacionados': '/products/{id}/related',
+            'productos_destacados': '/products/featured',
+            'sugerencias_busqueda': '/products/search-suggestions?q=...',
+            'rango_precios': '/products/price-range',
+            'variantes': '/product-variants',
+            'precios': '/product-prices',
+            'localidades': '/localities',
+            'admin': '/admin',
+            'admin_auth': '/admin/auth',
+            'product_images': '/products/{id}/images',
+            'hero_images': '/hero-images',
+            'promos': '/promos'
         }
     })
 
