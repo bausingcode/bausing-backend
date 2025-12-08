@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.image import ProductImage, HeroImage
 from sqlalchemy.exc import IntegrityError
@@ -207,7 +207,7 @@ def get_hero_images():
         active_only = request.args.get('active', 'false').lower() == 'true'
         
         query = HeroImage.query
-        if position_filter:
+        if position_filter is not None:
             query = query.filter_by(position=position_filter)
         if active_only:
             query = query.filter_by(is_active=True)
@@ -220,9 +220,14 @@ def get_hero_images():
         }), 200
         
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in get_hero_images: {str(e)}")
+        print(f"Traceback: {error_trace}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'traceback': error_trace if current_app.config.get('DEBUG', False) else None
         }), 500
 
 @images_bp.route('/hero-images/<uuid:image_id>', methods=['GET'])

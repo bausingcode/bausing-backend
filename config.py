@@ -10,4 +10,18 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    
+    # Configuración del pool de conexiones para Supabase
+    # Transaction mode (puerto 6543) permite más conexiones que Session mode
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 5,  # Número de conexiones en el pool (Transaction mode permite más)
+        'max_overflow': 3,  # Máximo de conexiones adicionales
+        'pool_timeout': 20,  # Tiempo de espera para obtener una conexión
+        'pool_recycle': 3600,  # Reciclar conexiones después de 1 hora
+        'pool_pre_ping': True,  # Verificar que las conexiones estén vivas antes de usarlas
+        'connect_args': {
+            'connect_timeout': 10,
+            'application_name': 'bausing_backend'
+        }
+    }
 

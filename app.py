@@ -2,12 +2,33 @@ from flask import Flask, jsonify
 from config import Config
 from database import db
 from routes import register_routes
+import os
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Forzar la lectura de DATABASE_URL desde .env (asegurar que se use el puerto correcto)
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    # Verificar que esté usando el puerto 6543 (Transaction mode)
+    if ':6543/' in database_url:
+        print(f"✅ Usando Transaction mode (puerto 6543)")
+    elif ':5432/' in database_url:
+        print(f"⚠️  ADVERTENCIA: Aún usando Session mode (puerto 5432)")
+
+# Configurar opciones del engine de SQLAlchemy
+if hasattr(Config, 'SQLALCHEMY_ENGINE_OPTIONS'):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = Config.SQLALCHEMY_ENGINE_OPTIONS
+
 # Inicializar base de datos
 db.init_app(app)
+
+# Asegurar que las sesiones se cierren después de cada request
+@app.teardown_appcontext
+def close_db(error):
+    """Cerrar la sesión de la base de datos después de cada request"""
+    db.session.remove()
 
 # Registrar todas las rutas
 register_routes(app)
@@ -50,6 +71,21 @@ def health():
     return jsonify({
         'status': 'healthy',
         'database': db_status
+    })
+
+@app.route('/debug/db-config')
+def debug_db_config():
+    """Endpoint de debug para verificar la configuración de la base de datos"""
+    database_url = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    # Ocultar la contraseña en la respuesta
+    safe_url = database_url.split('@')[1] if '@' in database_url else database_url
+    
+    return jsonify({
+        'database_url_host': safe_url,
+        'port': '6543' if ':6543/' in database_url else ('5432' if ':5432/' in database_url else 'unknown'),
+        'mode': 'Transaction' if ':6543/' in database_url else ('Session' if ':5432/' in database_url else 'unknown'),
+        'pool_size': app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}).get('pool_size', 'not set'),
+        'max_overflow': app.config.get('SQLALCHEMY_ENGINE_OPTIONS', {}).get('max_overflow', 'not set')
     })
 
 if __name__ == '__main__':
