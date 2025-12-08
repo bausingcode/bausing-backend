@@ -199,12 +199,16 @@ def get_hero_images():
     """
     Listar hero images
     Query params:
+    - position: 1, 2 o 3 para filtrar por posición
     - active: true/false para filtrar solo activas
     """
     try:
+        position_filter = request.args.get('position', type=int)
         active_only = request.args.get('active', 'false').lower() == 'true'
         
         query = HeroImage.query
+        if position_filter:
+            query = query.filter_by(position=position_filter)
         if active_only:
             query = query.filter_by(is_active=True)
         
