@@ -293,10 +293,59 @@ def update_hero_image(image_id):
 def delete_hero_image(image_id):
     """
     Eliminar hero image (requiere token admin)
+    También elimina el archivo de Supabase Storage
     """
     try:
         hero_image = HeroImage.query.get_or_404(image_id)
+        image_url = hero_image.image_url
         
+        # Intentar eliminar el archivo de Supabase Storage usando API REST
+        try:
+            import os
+            import re
+            import ssl
+            from urllib.request import Request, urlopen
+            from urllib.error import HTTPError, URLError
+            
+            SUPABASE_URL = os.getenv('SUPABASE_URL')
+            SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+            HERO_IMAGES_BUCKET = 'hero-images'
+            
+            if SUPABASE_URL and SUPABASE_KEY:
+                # Extraer la ruta del archivo desde la URL
+                # Formato esperado: https://...supabase.co/storage/v1/object/public/hero-images/position-X/filename
+                match = re.search(r'/hero-images/(.+)$', image_url)
+                if match:
+                    file_path = match.group(1)
+                    # Eliminar el archivo usando la API REST de Supabase
+                    delete_url = f"{SUPABASE_URL}/storage/v1/object/{HERO_IMAGES_BUCKET}/{file_path}"
+                    req = Request(
+                        delete_url,
+                        method='DELETE',
+                        headers={
+                            "Authorization": f"Bearer {SUPABASE_KEY}",
+                            "apikey": SUPABASE_KEY
+                        }
+                    )
+                    # Crear contexto SSL que no verifica certificados (solo para desarrollo)
+                    # En producción, deberías usar certificados válidos
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    
+                    try:
+                        with urlopen(req, context=ssl_context) as response:
+                            if response.status not in [200, 204]:
+                                print(f"Warning: No se pudo eliminar el archivo de Supabase Storage. Status: {response.status}")
+                    except HTTPError as e:
+                        if e.code not in [200, 204]:
+                            print(f"Warning: No se pudo eliminar el archivo de Supabase Storage. Status: {e.code}")
+        except Exception as storage_error:
+            # Si falla la eliminación del storage, registrar el error pero continuar
+            # para eliminar el registro de la base de datos
+            print(f"Warning: No se pudo eliminar el archivo de Supabase Storage: {str(storage_error)}")
+        
+        # Eliminar el registro de la base de datos
         db.session.delete(hero_image)
         db.session.commit()
         
