@@ -11,6 +11,18 @@ class Config:
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     
+    # Configuración de Resend para emails
+    RESEND_API_KEY = os.getenv('RESEND_API_KEY')
+    RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'noreply@bausing.com')
+    
+    # Configuración de Frontend URL
+    # Si DEBUG_MODE está activado, usar localhost:3000, sino usar FRONTEND_URL del .env
+    DEBUG_MODE = os.getenv('DEBUG_MODE', 'False').lower() == 'true'
+    if DEBUG_MODE:
+        FRONTEND_URL = 'http://localhost:3000'
+    else:
+        FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    
     # Configuración del pool de conexiones para Supabase
     # Transaction mode (puerto 6543) permite más conexiones que Session mode
     SQLALCHEMY_ENGINE_OPTIONS = {

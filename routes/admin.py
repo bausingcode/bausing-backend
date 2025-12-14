@@ -4,6 +4,7 @@ from models.category import Category
 from models.product import Product, ProductVariant, ProductPrice
 from models.locality import Locality
 from models.admin_user import AdminUser, AdminRole
+from models.user import User
 from sqlalchemy.exc import IntegrityError
 import jwt
 import uuid
@@ -654,6 +655,24 @@ def delete_admin_user(user_id):
         }), 200
     except Exception as e:
         db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin_bp.route('/customers', methods=['GET'])
+@admin_required
+def get_customers():
+    """
+    Obtener todos los usuarios regulares (clientes)
+    """
+    try:
+        users = User.query.all()
+        return jsonify({
+            'success': True,
+            'data': [user.to_dict() for user in users]
+        }), 200
+    except Exception as e:
         return jsonify({
             'success': False,
             'error': str(e)

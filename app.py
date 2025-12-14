@@ -54,7 +54,12 @@ def index():
             'admin_auth': '/admin/auth',
             'product_images': '/products/{id}/images',
             'hero_images': '/hero-images',
-            'promos': '/promos'
+            'promos': '/promos',
+            'auth_register': '/auth/register',
+            'auth_login': '/auth/login',
+            'auth_verify_email': '/auth/verify-email',
+            'auth_resend_verification': '/auth/resend-verification',
+            'auth_me': '/auth/me'
         }
     })
 

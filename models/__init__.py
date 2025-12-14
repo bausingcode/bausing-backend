@@ -5,6 +5,7 @@ from .admin_user import AdminUser, AdminRole
 from .image import ProductImage, HeroImage
 from .promo import Promo, PromoApplicability
 from .settings import SystemSettings, MessageTemplate, NotificationSetting, SecuritySetting
+from .user import User
 
 __all__ = [
     'Category',
@@ -22,6 +23,7 @@ __all__ = [
     'SystemSettings',
     'MessageTemplate',
     'NotificationSetting',
-    'SecuritySetting'
+    'SecuritySetting',
+    'User'
 ]
 

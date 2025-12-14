@@ -11,6 +11,7 @@ def register_routes(app):
     from .images import images_bp
     from .promos import promos_bp
     from .settings import settings_bp, public_settings_bp
+    from .auth import auth_bp
 
     app.register_blueprint(categories_bp, url_prefix='/categories')
     app.register_blueprint(products_bp, url_prefix='/products')
@@ -23,4 +24,5 @@ def register_routes(app):
     app.register_blueprint(promos_bp, url_prefix='/promos')
     app.register_blueprint(settings_bp, url_prefix='/admin')
     app.register_blueprint(public_settings_bp, url_prefix='')
+    app.register_blueprint(auth_bp, url_prefix='/auth')
 
