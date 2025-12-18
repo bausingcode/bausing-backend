@@ -678,3 +678,100 @@ def get_customers():
             'error': str(e)
         }), 500
 
+@admin_bp.route('/customers', methods=['POST'])
+@admin_required
+def create_customer():
+    """
+    Crear un nuevo cliente
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        # Validar campos requeridos
+        required_fields = ['email', 'password', 'first_name', 'last_name']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({
+                    'success': False,
+                    'error': f'El campo {field} es requerido'
+                }), 400
+        
+        # Verificar si el email ya existe
+        existing_user = User.query.filter_by(email=data['email']).first()
+        if existing_user:
+            return jsonify({
+                'success': False,
+                'error': 'Ya existe un usuario con este email'
+            }), 400
+        
+        # Crear nuevo usuario
+        new_user = User(
+            email=data['email'],
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            phone=data.get('phone'),
+            dni=data.get('dni'),
+            email_verified=data.get('email_verified', False),
+            is_suspended=data.get('is_suspended', False)
+        )
+        new_user.set_password(data['password'])
+        
+        db.session.add(new_user)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': new_user.to_dict()
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin_bp.route('/customers/<uuid:user_id>/suspend', methods=['PUT'])
+@admin_required
+def toggle_suspend_customer(user_id):
+    """
+    Suspender o activar un cliente
+    """
+    try:
+        data = request.get_json()
+        is_suspended = data.get('is_suspended')
+        
+        if is_suspended is None:
+            return jsonify({
+                'success': False,
+                'error': 'El campo is_suspended es requerido'
+            }), 400
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'Usuario no encontrado'
+            }), 404
+        
+        user.is_suspended = bool(is_suspended)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+

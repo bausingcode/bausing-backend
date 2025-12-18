@@ -273,7 +273,7 @@ def login():
             try:
                 # Consulta directa solo con columnas básicas
                 result = db.session.execute(
-                    text("SELECT id, first_name, last_name, email, phone, dni, password_hash, created_at FROM users WHERE email = :email LIMIT 1"),
+                    text("SELECT id, first_name, last_name, email, phone, dni, password_hash, is_suspended, created_at FROM users WHERE email = :email LIMIT 1"),
                     {"email": email}
                 ).fetchone()
                 
@@ -291,6 +291,15 @@ def login():
                         'error': 'La contraseña es incorrecta'
                     }), 401
                 
+                # Verificar si el usuario está suspendido
+                is_suspended = getattr(result, 'is_suspended', False) if hasattr(result, 'is_suspended') else False
+                
+                if is_suspended:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Tu cuenta ha sido suspendida. Contacta con el administrador.'
+                    }), 403
+                
                 # Crear respuesta manual
                 user_dict = {
                     'id': str(result.id),
@@ -300,6 +309,7 @@ def login():
                     'phone': result.phone,
                     'dni': result.dni,
                     'email_verified': False,  # Por defecto
+                    'is_suspended': is_suspended,
                     'created_at': result.created_at.isoformat() if result.created_at else None
                 }
                 
@@ -332,6 +342,14 @@ def login():
                 'success': False,
                 'error': 'No existe una cuenta con este email'
             }), 401
+        
+        # Verificar si el usuario está suspendido
+        is_suspended = getattr(user, 'is_suspended', False)
+        if is_suspended:
+            return jsonify({
+                'success': False,
+                'error': 'Tu cuenta ha sido suspendida. Contacta con el administrador.'
+            }), 403
         
         # Verificar contraseña
         try:
