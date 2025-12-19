@@ -1,13 +1,14 @@
 from flask import Blueprint, request, jsonify
 from database import db
 from models.user import User
+from models.address import Address
 from sqlalchemy.exc import IntegrityError, ProgrammingError, OperationalError
 from sqlalchemy import text
 from functools import wraps
 import jwt
 import uuid
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from config import Config
 from utils.email_service import email_service
 
@@ -520,4 +521,303 @@ def get_current_user():
         'success': True,
         'data': request.user.to_dict()
     }), 200
+
+@auth_bp.route('/profile', methods=['PUT'])
+@user_required
+def update_profile():
+    """
+    Actualizar perfil del usuario
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        user = request.user
+        
+        # Actualizar campos permitidos
+        if 'first_name' in data:
+            user.first_name = data['first_name']
+        if 'last_name' in data:
+            user.last_name = data['last_name']
+        if 'phone' in data:
+            user.phone = data['phone']
+        if 'dni' in data:
+            user.dni = data['dni']
+        if 'gender' in data:
+            user.gender = data['gender']
+        if 'birth_date' in data:
+            if data['birth_date']:
+                try:
+                    user.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+                except ValueError:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Formato de fecha inválido. Use YYYY-MM-DD'
+                    }), 400
+            else:
+                user.birth_date = None
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': user.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Error al actualizar perfil: {str(e)}'
+        }), 500
+
+@auth_bp.route('/password', methods=['PUT'])
+@user_required
+def change_password():
+    """
+    Cambiar contraseña del usuario
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not current_password or not new_password:
+            return jsonify({
+                'success': False,
+                'error': 'Contraseña actual y nueva contraseña son requeridas'
+            }), 400
+        
+        if len(new_password) < 8:
+            return jsonify({
+                'success': False,
+                'error': 'La nueva contraseña debe tener al menos 8 caracteres'
+            }), 400
+        
+        user = request.user
+        
+        # Verificar contraseña actual
+        if not user.check_password(current_password):
+            return jsonify({
+                'success': False,
+                'error': 'Contraseña actual incorrecta'
+            }), 401
+        
+        # Actualizar contraseña
+        user.set_password(new_password)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Contraseña actualizada correctamente'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Error al cambiar contraseña: {str(e)}'
+        }), 500
+
+@auth_bp.route('/addresses', methods=['GET'])
+@user_required
+def get_addresses():
+    """
+    Obtener todas las direcciones del usuario
+    """
+    try:
+        user = request.user
+        addresses = Address.query.filter_by(user_id=user.id).order_by(Address.created_at.desc()).all()
+        
+        return jsonify({
+            'success': True,
+            'data': [addr.to_dict() for addr in addresses]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener direcciones: {str(e)}'
+        }), 500
+
+@auth_bp.route('/addresses', methods=['POST'])
+@user_required
+def create_address():
+    """
+    Crear una nueva dirección
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        # Validar campos requeridos
+        required_fields = ['full_name', 'phone', 'street', 'number', 'postal_code', 'city', 'province']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({
+                    'success': False,
+                    'error': f'El campo {field} es requerido'
+                }), 400
+        
+        user = request.user
+        
+        # Si se marca como default, quitar default de otras direcciones
+        if data.get('is_default', False):
+            Address.query.filter_by(user_id=user.id, is_default=True).update({'is_default': False})
+        
+        # Crear nueva dirección
+        address = Address(
+            user_id=user.id,
+            full_name=data['full_name'],
+            phone=data['phone'],
+            street=data['street'],
+            number=data['number'],
+            additional_info=data.get('additional_info'),
+            postal_code=data['postal_code'],
+            city=data['city'],
+            province=data['province'],
+            is_default=data.get('is_default', False)
+        )
+        
+        db.session.add(address)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': address.to_dict()
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Error al crear dirección: {str(e)}'
+        }), 500
+
+@auth_bp.route('/addresses/<address_id>', methods=['PUT'])
+@user_required
+def update_address(address_id):
+    """
+    Actualizar una dirección
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        user = request.user
+        
+        try:
+            address_uuid = uuid.UUID(address_id)
+        except ValueError:
+            return jsonify({
+                'success': False,
+                'error': 'ID de dirección inválido'
+            }), 400
+        
+        address = Address.query.filter_by(id=address_uuid, user_id=user.id).first()
+        
+        if not address:
+            return jsonify({
+                'success': False,
+                'error': 'Dirección no encontrada'
+            }), 404
+        
+        # Actualizar campos
+        if 'full_name' in data:
+            address.full_name = data['full_name']
+        if 'phone' in data:
+            address.phone = data['phone']
+        if 'street' in data:
+            address.street = data['street']
+        if 'number' in data:
+            address.number = data['number']
+        if 'additional_info' in data:
+            address.additional_info = data['additional_info']
+        if 'postal_code' in data:
+            address.postal_code = data['postal_code']
+        if 'city' in data:
+            address.city = data['city']
+        if 'province' in data:
+            address.province = data['province']
+        if 'is_default' in data:
+            # Si se marca como default, quitar default de otras direcciones
+            if data['is_default']:
+                Address.query.filter_by(user_id=user.id, is_default=True).filter(Address.id != address_uuid).update({'is_default': False})
+            address.is_default = data['is_default']
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': address.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Error al actualizar dirección: {str(e)}'
+        }), 500
+
+@auth_bp.route('/addresses/<address_id>', methods=['DELETE'])
+@user_required
+def delete_address(address_id):
+    """
+    Eliminar una dirección
+    """
+    try:
+        user = request.user
+        
+        try:
+            address_uuid = uuid.UUID(address_id)
+        except ValueError:
+            return jsonify({
+                'success': False,
+                'error': 'ID de dirección inválido'
+            }), 400
+        
+        address = Address.query.filter_by(id=address_uuid, user_id=user.id).first()
+        
+        if not address:
+            return jsonify({
+                'success': False,
+                'error': 'Dirección no encontrada'
+            }), 404
+        
+        db.session.delete(address)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Dirección eliminada correctamente'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Error al eliminar dirección: {str(e)}'
+        }), 500
 

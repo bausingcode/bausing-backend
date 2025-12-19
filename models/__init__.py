@@ -6,6 +6,7 @@ from .image import ProductImage, HeroImage
 from .promo import Promo, PromoApplicability
 from .settings import SystemSettings, MessageTemplate, NotificationSetting, SecuritySetting
 from .user import User
+from .address import Address
 
 __all__ = [
     'Category',
@@ -24,6 +25,7 @@ __all__ = [
     'MessageTemplate',
     'NotificationSetting',
     'SecuritySetting',
-    'User'
+    'User',
+    'Address'
 ]
 

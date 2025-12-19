@@ -16,6 +16,8 @@ class User(db.Model):
     password_hash = db.Column(db.Text, nullable=False)
     email_verified = db.Column(db.Boolean, default=False, nullable=True)
     is_suspended = db.Column(db.Boolean, default=False, nullable=False)
+    gender = db.Column(db.String(50), nullable=True)
+    birth_date = db.Column(db.Date, nullable=True)
     # Columnas de verificación de email (comentadas hasta que se agreguen a la BD)
     # email_verification_token = db.Column(db.String(255), nullable=True)
     # email_verification_token_expires = db.Column(db.DateTime, nullable=True)
@@ -53,6 +55,8 @@ class User(db.Model):
             'dni': self.dni,
             'email_verified': getattr(self, 'email_verified', False),
             'is_suspended': getattr(self, 'is_suspended', False),
+            'gender': getattr(self, 'gender', None),
+            'birth_date': self.birth_date.isoformat() if self.birth_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
         return data
