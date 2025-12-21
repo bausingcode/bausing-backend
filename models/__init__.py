@@ -7,6 +7,7 @@ from .promo import Promo, PromoApplicability
 from .settings import SystemSettings, MessageTemplate, NotificationSetting, SecuritySetting
 from .user import User
 from .address import Address
+from .blog import BlogPost, BlogPostKeyword, BlogPostImage
 
 __all__ = [
     'Category',
@@ -26,6 +27,9 @@ __all__ = [
     'NotificationSetting',
     'SecuritySetting',
     'User',
-    'Address'
+    'Address',
+    'BlogPost',
+    'BlogPostKeyword',
+    'BlogPostImage'
 ]
 
