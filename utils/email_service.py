@@ -11,8 +11,12 @@ class EmailService:
     
     def __init__(self):
         self.api_key_configured = False
+        self.api_key = None
         if Config.RESEND_API_KEY:
-            resend.api_key = Config.RESEND_API_KEY
+            # Guardar la API key para usarla en cada llamada
+            self.api_key = Config.RESEND_API_KEY.strip()  # Asegurar que no hay espacios
+            # Configurar globalmente para compatibilidad
+            resend.api_key = self.api_key
             self.api_key_configured = True
         self.from_email = Config.RESEND_FROM_EMAIL
     
@@ -36,12 +40,16 @@ class EmailService:
             True si se envió correctamente, False en caso contrario
         """
         try:
-            if not self.api_key_configured:
+            if not self.api_key_configured or not self.api_key:
                 print("⚠️  RESEND_API_KEY no configurada. Email no enviado (modo desarrollo).")
                 print(f"📧 Email que se habría enviado:")
                 print(f"   Para: {to}")
                 print(f"   Asunto: {subject}")
                 return False
+            
+            # Asegurar que la API key esté configurada antes de enviar
+            # Configurar globalmente para Resend
+            resend.api_key = self.api_key
             
             # Asegurar que 'to' sea una lista
             if isinstance(to, str):
@@ -54,6 +62,7 @@ class EmailService:
                 "html": html,
             }
             
+            # Enviar el email
             email = resend.Emails.send(params)
             
             print(f"✅ Email enviado correctamente a {', '.join(to)}")

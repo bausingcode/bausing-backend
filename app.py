@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from config import Config
 from database import db
 from routes import register_routes
@@ -6,6 +6,25 @@ import os
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# Manejar CORS manualmente
+@app.after_request
+def after_request(response):
+    """Agregar headers CORS a todas las respuestas"""
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
+@app.before_request
+def handle_preflight():
+    """Manejar requests OPTIONS (preflight de CORS)"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        return response
 
 # Forzar la lectura de DATABASE_URL desde .env (asegurar que se use el puerto correcto)
 database_url = os.getenv('DATABASE_URL')

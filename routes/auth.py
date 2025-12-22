@@ -194,8 +194,9 @@ def register():
             last_name=last_name,
             phone=phone,
             dni=dni,
-            email_verified=False
-            # email_verification_token y email_verification_token_expires se agregarán cuando existan las columnas en la BD
+            email_verified=False,
+            email_verification_token=verification_token,
+            email_verification_token_expires=verification_expires
         )
         user.set_password(password)
         
@@ -416,34 +417,37 @@ def verify_email():
             }), 400
         
         # Buscar usuario con este token
-        # Por ahora, como las columnas de token no existen, usamos una búsqueda alternativa
-        # TODO: Implementar búsqueda por token cuando existan las columnas email_verification_token
-        # Por ahora, este endpoint no funcionará hasta que se agreguen las columnas
-        return jsonify({
-            'success': False,
-            'error': 'La verificación de email aún no está disponible. Las columnas necesarias no existen en la base de datos.'
-        }), 501
+        user = User.query.filter_by(email_verification_token=token).first()
         
-        # Código comentado hasta que existan las columnas:
-        # user = User.query.filter_by(email_verification_token=token).first()
-        # 
-        # if not user:
-        #     return jsonify({
-        #         'success': False,
-        #         'error': 'Token de verificación inválido'
-        #     }), 400
-        # 
-        # # Verificar que el token no haya expirado
-        # if user.email_verification_token_expires and user.email_verification_token_expires < datetime.utcnow():
-        #     return jsonify({
-        #         'success': False,
-        #         'error': 'El token de verificación ha expirado'
-        #     }), 400
-        # 
-        # # Verificar el email
-        # user.email_verified = True
-        # user.email_verification_token = None
-        # user.email_verification_token_expires = None
+        if not user:
+            # Si no se encuentra con el token, verificar si el email ya está verificado
+            # (puede ser que el token ya fue usado)
+            return jsonify({
+                'success': False,
+                'error': 'Token de verificación inválido o ya utilizado'
+            }), 400
+        
+        # Si el email ya está verificado, retornar éxito sin hacer cambios
+        if user.email_verified:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'user': user.to_dict(),
+                    'message': 'El email ya estaba verificado'
+                }
+            }), 200
+        
+        # Verificar que el token no haya expirado
+        if user.email_verification_token_expires and user.email_verification_token_expires < datetime.utcnow():
+            return jsonify({
+                'success': False,
+                'error': 'El token de verificación ha expirado'
+            }), 400
+        
+        # Verificar el email
+        user.email_verified = True
+        user.email_verification_token = None
+        user.email_verification_token_expires = None
         
         db.session.commit()
         
@@ -479,13 +483,13 @@ def resend_verification():
                 'error': 'El email ya está verificado'
             }), 400
         
-        # Generar nuevo token (por ahora solo en memoria, no se guarda en BD)
+        # Generar nuevo token
         verification_token = generate_verification_token()
         verification_expires = datetime.utcnow() + timedelta(days=7)
         
-        # TODO: Guardar token cuando existan las columnas email_verification_token y email_verification_token_expires
-        # user.email_verification_token = verification_token
-        # user.email_verification_token_expires = verification_expires
+        # Guardar token en la base de datos
+        user.email_verification_token = verification_token
+        user.email_verification_token_expires = verification_expires
         
         db.session.commit()
         

@@ -18,9 +18,9 @@ class User(db.Model):
     is_suspended = db.Column(db.Boolean, default=False, nullable=False)
     gender = db.Column(db.String(50), nullable=True)
     birth_date = db.Column(db.Date, nullable=True)
-    # Columnas de verificación de email (comentadas hasta que se agreguen a la BD)
-    # email_verification_token = db.Column(db.String(255), nullable=True)
-    # email_verification_token_expires = db.Column(db.DateTime, nullable=True)
+    # Columnas de verificación de email
+    email_verification_token = db.Column(db.String(255), nullable=True)
+    email_verification_token_expires = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
     def __init__(self, **kwargs):
