@@ -9,4 +9,6 @@ PyJWT==2.8.0
 supabase==2.3.4
 python-multipart==0.0.9
 resend==2.1.0
+requests==2.31.0
+beautifulsoup4==4.12.2
 
