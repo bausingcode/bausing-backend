@@ -664,13 +664,30 @@ def delete_admin_user(user_id):
 @admin_required
 def get_customers():
     """
-    Obtener todos los usuarios regulares (clientes)
+    Obtener todos los usuarios regulares (clientes) con información de billetera
     """
     try:
+        from models.wallet import Wallet
         users = User.query.all()
+        results = []
+        for user in users:
+            user_dict = user.to_dict()
+            # Obtener información de la billetera
+            wallet = Wallet.query.filter_by(user_id=user.id).first()
+            if wallet:
+                user_dict['wallet'] = {
+                    'balance': float(wallet.balance) if wallet.balance else 0.0,
+                    'is_blocked': wallet.is_blocked
+                }
+            else:
+                user_dict['wallet'] = {
+                    'balance': 0.0,
+                    'is_blocked': False
+                }
+            results.append(user_dict)
         return jsonify({
             'success': True,
-            'data': [user.to_dict() for user in users]
+            'data': results
         }), 200
     except Exception as e:
         return jsonify({
@@ -723,6 +740,16 @@ def create_customer():
         new_user.set_password(data['password'])
         
         db.session.add(new_user)
+        db.session.flush()  # Para obtener el ID del usuario
+        
+        # Crear billetera automáticamente para el usuario
+        from models.wallet import Wallet
+        wallet = Wallet(
+            user_id=new_user.id,
+            balance=0.00,
+            is_blocked=False
+        )
+        db.session.add(wallet)
         db.session.commit()
         
         return jsonify({

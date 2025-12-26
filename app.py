@@ -4,6 +4,10 @@ from database import db
 from routes import register_routes
 import os
 
+# Importar todos los modelos para que SQLAlchemy pueda resolver las foreign keys
+# Esto asegura que todos los modelos estén registrados antes de db.create_all()
+import models  # noqa: F401
+
 app = Flask(__name__)
 app.config.from_object(Config)
 

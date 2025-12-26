@@ -8,6 +8,8 @@ from .settings import SystemSettings, MessageTemplate, NotificationSetting, Secu
 from .user import User
 from .address import Address
 from .blog import BlogPost, BlogPostKeyword, BlogPostImage
+from .wallet import Wallet, WalletMovement, AuditLog
+from .order import Order
 
 __all__ = [
     'Category',
@@ -30,6 +32,10 @@ __all__ = [
     'Address',
     'BlogPost',
     'BlogPostKeyword',
-    'BlogPostImage'
+    'BlogPostImage',
+    'Wallet',
+    'WalletMovement',
+    'AuditLog',
+    'Order'
 ]
 

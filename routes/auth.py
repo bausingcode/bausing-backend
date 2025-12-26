@@ -201,6 +201,16 @@ def register():
         user.set_password(password)
         
         db.session.add(user)
+        db.session.flush()  # Para obtener el ID del usuario
+        
+        # Crear billetera automáticamente para el usuario
+        from models.wallet import Wallet
+        wallet = Wallet(
+            user_id=user.id,
+            balance=0.00,
+            is_blocked=False
+        )
+        db.session.add(wallet)
         db.session.commit()
         
         # Enviar email de verificación
