@@ -82,7 +82,11 @@ def index():
             'auth_login': '/auth/login',
             'auth_verify_email': '/auth/verify-email',
             'auth_resend_verification': '/auth/resend-verification',
-            'auth_me': '/auth/me'
+            'auth_me': '/auth/me',
+            'public_api_products': '/public/products (requiere API key)',
+            'public_api_product': '/public/products/{id} (requiere API key)',
+            'public_api_categories': '/public/categories (requiere API key)',
+            'public_api_health': '/public/health (requiere API key)'
         }
     })
 

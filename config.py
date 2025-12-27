@@ -10,6 +10,7 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    API_KEY = os.getenv('API_KEY', 'dev-api-key-change-in-production')
     
     # Configuración de Resend para emails
     RESEND_API_KEY = os.getenv('RESEND_API_KEY')
