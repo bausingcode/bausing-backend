@@ -5,6 +5,7 @@ from models.image import ProductImage
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_, func
 from sqlalchemy.orm import joinedload
+from routes.admin import admin_required
 
 products_bp = Blueprint('products', __name__)
 
@@ -221,6 +222,7 @@ def get_product(product_id):
         }), 404
 
 @products_bp.route('', methods=['POST'])
+@admin_required
 def create_product():
     """Crear un nuevo producto"""
     try:
@@ -261,6 +263,7 @@ def create_product():
         }), 500
 
 @products_bp.route('/<uuid:product_id>', methods=['PUT'])
+@admin_required
 def update_product(product_id):
     """Actualizar un producto"""
     try:
@@ -298,6 +301,7 @@ def update_product(product_id):
         }), 500
 
 @products_bp.route('/<uuid:product_id>', methods=['DELETE'])
+@admin_required
 def delete_product(product_id):
     """Eliminar un producto"""
     try:
@@ -318,6 +322,7 @@ def delete_product(product_id):
         }), 500
 
 @products_bp.route('/<uuid:product_id>/toggle-active', methods=['PATCH'])
+@admin_required
 def toggle_product_active(product_id):
     """Activar/desactivar un producto"""
     try:

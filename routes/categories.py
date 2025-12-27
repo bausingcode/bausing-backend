@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.category import Category, CategoryOption
 from sqlalchemy.exc import IntegrityError
+from routes.admin import admin_required
 
 categories_bp = Blueprint('categories', __name__)
 
@@ -61,6 +62,7 @@ def get_category(category_id):
         }), 404
 
 @categories_bp.route('', methods=['POST'])
+@admin_required
 def create_category():
     """Crear una nueva categoría"""
     try:
@@ -99,6 +101,7 @@ def create_category():
         }), 500
 
 @categories_bp.route('/<uuid:category_id>', methods=['PUT'])
+@admin_required
 def update_category(category_id):
     """Actualizar una categoría"""
     try:
@@ -136,6 +139,7 @@ def update_category(category_id):
         }), 500
 
 @categories_bp.route('/<uuid:category_id>', methods=['DELETE'])
+@admin_required
 def delete_category(category_id):
     """Eliminar una categoría"""
     try:
@@ -205,6 +209,7 @@ def get_category_options(category_id):
         }), 500
 
 @categories_bp.route('/<uuid:category_id>/options', methods=['POST'])
+@admin_required
 def create_category_option(category_id):
     """Crear una nueva opción para una categoría"""
     try:
@@ -261,6 +266,7 @@ def get_category_option(category_id, option_id):
         }), 404
 
 @categories_bp.route('/<uuid:category_id>/options/<uuid:option_id>', methods=['PUT'])
+@admin_required
 def update_category_option(category_id, option_id):
     """Actualizar una opción de categoría"""
     try:
@@ -293,6 +299,7 @@ def update_category_option(category_id, option_id):
         }), 500
 
 @categories_bp.route('/<uuid:category_id>/options/<uuid:option_id>', methods=['DELETE'])
+@admin_required
 def delete_category_option(category_id, option_id):
     """Eliminar una opción de categoría"""
     try:

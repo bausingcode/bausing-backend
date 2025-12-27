@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
+from routes.admin import admin_required
 
 localities_bp = Blueprint('localities', __name__)
 
@@ -44,6 +45,7 @@ def get_locality(locality_id):
         }), 404
 
 @localities_bp.route('', methods=['POST'])
+@admin_required
 def create_locality():
     """Crear una nueva localidad"""
     try:
@@ -81,6 +83,7 @@ def create_locality():
         }), 500
 
 @localities_bp.route('/<uuid:locality_id>', methods=['PUT'])
+@admin_required
 def update_locality(locality_id):
     """Actualizar una localidad"""
     try:
@@ -112,6 +115,7 @@ def update_locality(locality_id):
         }), 500
 
 @localities_bp.route('/<uuid:locality_id>', methods=['DELETE'])
+@admin_required
 def delete_locality(locality_id):
     """Eliminar una localidad"""
     try:

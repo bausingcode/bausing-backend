@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.product import ProductPrice
 from sqlalchemy.exc import IntegrityError
+from routes.admin import admin_required
 
 prices_bp = Blueprint('prices', __name__)
 
@@ -48,6 +49,7 @@ def get_price(price_id):
         }), 404
 
 @prices_bp.route('', methods=['POST'])
+@admin_required
 def create_price():
     """Crear un nuevo precio"""
     try:
@@ -98,6 +100,7 @@ def create_price():
         }), 500
 
 @prices_bp.route('/<uuid:price_id>', methods=['PUT'])
+@admin_required
 def update_price(price_id):
     """Actualizar un precio"""
     try:
@@ -129,6 +132,7 @@ def update_price(price_id):
         }), 500
 
 @prices_bp.route('/<uuid:price_id>', methods=['DELETE'])
+@admin_required
 def delete_price(price_id):
     """Eliminar un precio"""
     try:

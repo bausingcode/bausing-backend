@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.product import ProductVariant
 from sqlalchemy.exc import IntegrityError
+from routes.admin import admin_required
 
 variants_bp = Blueprint('variants', __name__)
 
@@ -47,6 +48,7 @@ def get_variant(variant_id):
         }), 404
 
 @variants_bp.route('', methods=['POST'])
+@admin_required
 def create_variant():
     """Crear una nueva variante de producto"""
     try:
@@ -105,6 +107,7 @@ def create_variant():
         }), 500
 
 @variants_bp.route('/<uuid:variant_id>', methods=['PUT'])
+@admin_required
 def update_variant(variant_id):
     """Actualizar una variante de producto"""
     try:
@@ -154,6 +157,7 @@ def update_variant(variant_id):
         }), 500
 
 @variants_bp.route('/<uuid:variant_id>', methods=['DELETE'])
+@admin_required
 def delete_variant(variant_id):
     """Eliminar una variante de producto"""
     try:
@@ -174,6 +178,7 @@ def delete_variant(variant_id):
         }), 500
 
 @variants_bp.route('/<uuid:variant_id>/stock', methods=['PATCH'])
+@admin_required
 def update_stock(variant_id):
     """Actualizar el stock de una variante"""
     try:

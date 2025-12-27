@@ -34,7 +34,7 @@ def api_key_required(f):
         if api_key != Config.API_KEY:
             return jsonify({
                 'success': False,
-                'error': 'API key inválida'
+                'error': 'API key incorrecta.'
             }), 401
         
         return f(*args, **kwargs)

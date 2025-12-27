@@ -4,6 +4,7 @@ from models.promo import Promo, PromoApplicability
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 import uuid
+from routes.admin import admin_required
 
 promos_bp = Blueprint('promos', __name__)
 
@@ -58,6 +59,7 @@ def get_promo(promo_id):
         }), 404
 
 @promos_bp.route('', methods=['POST'])
+@admin_required
 def create_promo():
     """Crear una nueva promoción"""
     try:
@@ -188,6 +190,7 @@ def create_promo():
         }), 500
 
 @promos_bp.route('/<uuid:promo_id>', methods=['PUT'])
+@admin_required
 def update_promo(promo_id):
     """Actualizar una promoción"""
     try:
@@ -281,6 +284,7 @@ def update_promo(promo_id):
         }), 500
 
 @promos_bp.route('/<uuid:promo_id>', methods=['DELETE'])
+@admin_required
 def delete_promo(promo_id):
     """Eliminar una promoción"""
     try:
@@ -301,6 +305,7 @@ def delete_promo(promo_id):
         }), 500
 
 @promos_bp.route('/<uuid:promo_id>/toggle-active', methods=['PATCH'])
+@admin_required
 def toggle_promo_active(promo_id):
     """Activar/desactivar una promoción"""
     try:
