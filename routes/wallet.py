@@ -11,6 +11,7 @@ import uuid
 import csv
 import io
 from routes.admin import admin_required
+from routes.auth import user_required
 
 wallet_bp = Blueprint('wallet', __name__)
 
@@ -1058,5 +1059,204 @@ def detect_anomalies():
             'success': False,
             'error': str(e),
             'traceback': error_trace
+        }), 500
+
+
+# ==================== ENDPOINTS PARA USUARIOS ====================
+
+@wallet_bp.route('/wallet/balance', methods=['GET'])
+@user_required
+def get_user_wallet_balance():
+    """
+    Obtener el balance de la billetera del usuario autenticado
+    """
+    try:
+        user = request.user
+        wallet = get_or_create_wallet(user.id)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'balance': float(wallet.balance) if wallet.balance else 0.0,
+                'is_blocked': wallet.is_blocked
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@wallet_bp.route('/wallet/movements', methods=['GET'])
+@user_required
+def get_user_wallet_movements():
+    """
+    Obtener historial de movimientos de billetera del usuario autenticado
+    
+    Query parameters:
+    - page: número de página (default: 1)
+    - per_page: items por página (default: 50)
+    - type: filtrar por tipo de movimiento
+    """
+    try:
+        user = request.user
+        wallet = get_or_create_wallet(user.id)
+        
+        # Paginación
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 50, type=int), 100)
+        movement_type = request.args.get('type')
+        
+        # Query base
+        query = WalletMovement.query.filter_by(wallet_id=wallet.id)
+        
+        # Filtro por tipo
+        if movement_type:
+            query = query.filter_by(type=movement_type)
+        
+        # Ordenar por fecha descendente
+        query = query.order_by(desc(WalletMovement.created_at))
+        
+        # Paginación
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        movements = pagination.items
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'movements': [movement.to_dict(include_admin=False) for movement in movements],
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': pagination.total,
+                    'pages': pagination.pages
+                }
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@wallet_bp.route('/wallet/transfer', methods=['POST'])
+@user_required
+def transfer_wallet_balance():
+    """
+    Transferir saldo de billetera a otro usuario
+    
+    Body:
+    - recipient_email: email del destinatario
+    - amount: monto a transferir
+    """
+    try:
+        user = request.user
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        recipient_email = data.get('recipient_email', '').strip().lower()
+        amount = data.get('amount')
+        
+        # Validaciones
+        if not recipient_email or '@' not in recipient_email:
+            return jsonify({
+                'success': False,
+                'error': 'Email del destinatario inválido'
+            }), 400
+        
+        if not amount or not isinstance(amount, (int, float)) or amount <= 0:
+            return jsonify({
+                'success': False,
+                'error': 'Monto inválido. Debe ser mayor a 0'
+            }), 400
+        
+        # No permitir transferirse a sí mismo
+        if recipient_email == user.email.lower():
+            return jsonify({
+                'success': False,
+                'error': 'No puedes transferir saldo a tu propia cuenta'
+            }), 400
+        
+        # Buscar usuario destinatario
+        recipient = User.query.filter(func.lower(User.email) == recipient_email).first()
+        if not recipient:
+            return jsonify({
+                'success': False,
+                'error': 'Usuario destinatario no encontrado'
+            }), 404
+        
+        # Obtener billeteras
+        sender_wallet = get_or_create_wallet(user.id)
+        recipient_wallet = get_or_create_wallet(recipient.id)
+        
+        # Verificar que la billetera del remitente no esté bloqueada
+        if sender_wallet.is_blocked:
+            return jsonify({
+                'success': False,
+                'error': 'Tu billetera está bloqueada. No puedes realizar transferencias'
+            }), 400
+        
+        # Verificar saldo suficiente
+        sender_balance = float(sender_wallet.balance) if sender_wallet.balance else 0.0
+        if sender_balance < amount:
+            return jsonify({
+                'success': False,
+                'error': 'Saldo insuficiente'
+            }), 400
+        
+        # Realizar transferencia
+        try:
+            # Debitar del remitente
+            sender_movement = WalletMovement(
+                wallet_id=sender_wallet.id,
+                type='transfer_out',
+                amount=-amount,
+                description=f'Transferencia a {recipient_email}'
+            )
+            db.session.add(sender_movement)
+            sender_wallet.balance = sender_wallet.balance - amount
+            
+            # Acreditar al destinatario
+            recipient_movement = WalletMovement(
+                wallet_id=recipient_wallet.id,
+                type='transfer_in',
+                amount=amount,
+                description=f'Transferencia recibida de {user.email}'
+            )
+            db.session.add(recipient_movement)
+            recipient_wallet.balance = (recipient_wallet.balance or 0) + amount
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'transfer_id': str(sender_movement.id),
+                    'amount': amount,
+                    'recipient_email': recipient_email,
+                    'new_balance': float(sender_wallet.balance) if sender_wallet.balance else 0.0
+                },
+                'message': f'Transferencia de ${amount:.2f} realizada exitosamente'
+            }), 200
+            
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': 'Error al procesar la transferencia'
+            }), 500
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
