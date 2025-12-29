@@ -10,6 +10,7 @@ from .address import Address
 from .blog import BlogPost, BlogPostKeyword, BlogPostImage
 from .wallet import Wallet, WalletMovement, AuditLog
 from .order import Order
+from .test_table import TestTable
 
 __all__ = [
     'Category',
@@ -36,6 +37,7 @@ __all__ = [
     'Wallet',
     'WalletMovement',
     'AuditLog',
-    'Order'
+    'Order',
+    'TestTable'
 ]
 
