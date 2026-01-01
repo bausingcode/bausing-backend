@@ -239,9 +239,8 @@ def search_customers():
                 wallet_blocked = False
                 if wallet:
                     try:
-                        # Calcular balance excluyendo créditos vencidos (igual que en el frontend de usuarios)
-                        calculated_balance = calculate_wallet_balance(wallet.id, include_expired=False)
-                        wallet_balance = float(calculated_balance) if calculated_balance else 0.0
+                        # Usar el balance guardado en la DB (ya excluye créditos vencidos)
+                        wallet_balance = float(wallet.balance) if wallet.balance else 0.0
                         wallet_blocked = wallet.is_blocked if hasattr(wallet, 'is_blocked') else False
                     except Exception as wallet_error:
                         print(f"DEBUG ERROR processing wallet for user {user.id}: {str(wallet_error)}")
@@ -297,9 +296,7 @@ def get_customer_wallet_summary(user_id):
         # Obtener último movimiento
         last_movement = WalletMovement.query.filter_by(wallet_id=wallet.id).order_by(desc(WalletMovement.created_at)).first()
 
-        # Calcular balance excluyendo créditos vencidos (igual que en el frontend de usuarios)
-        calculated_balance = calculate_wallet_balance(wallet.id, include_expired=False)
-        
+        # Usar el balance guardado en la DB (ya excluye créditos vencidos)
         return jsonify({
             'success': True,
             'data': {
@@ -312,7 +309,7 @@ def get_customer_wallet_summary(user_id):
                     'dni': user.dni
                 },
                 'wallet': {
-                    'balance': float(calculated_balance) if calculated_balance else 0.0,
+                    'balance': float(wallet.balance) if wallet.balance else 0.0,
                     'is_blocked': wallet.is_blocked,
                     'last_movement': {
                         'id': str(last_movement.id),
@@ -1206,19 +1203,17 @@ def detect_anomalies():
 def get_user_wallet_balance():
     """
     Obtener el balance de la billetera del usuario autenticado
-    Calcula el balance excluyendo créditos vencidos, pero NO modifica el balance guardado
+    El balance ya está calculado correctamente en la DB (excluyendo créditos vencidos)
     """
     try:
         user = request.user
         wallet = get_or_create_wallet(user.id)
         
-        # Calcular balance actual excluyendo vencidos (solo para mostrar, NO guardar)
-        calculated_balance = calculate_wallet_balance(wallet.id)
-        
+        # Usar el balance guardado en la DB (ya excluye créditos vencidos)
         return jsonify({
             'success': True,
             'data': {
-                'balance': float(calculated_balance) if calculated_balance else 0.0,
+                'balance': float(wallet.balance) if wallet.balance else 0.0,
                 'is_blocked': wallet.is_blocked
             }
         }), 200
