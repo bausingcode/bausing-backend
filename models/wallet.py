@@ -45,6 +45,7 @@ class WalletMovement(db.Model):
     description = db.Column(db.Text)
     order_id = db.Column(UUID(as_uuid=True), db.ForeignKey('orders.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=True)  # Fecha de vencimiento del movimiento
     
     # Nota: Los campos admin_user_id, reason, internal_comment no existen en la BD
     # La información del admin se guarda en audit_logs en su lugar
@@ -58,7 +59,8 @@ class WalletMovement(db.Model):
             'amount': float(self.amount) if self.amount else 0.0,
             'description': self.description,
             'order_id': str(self.order_id) if self.order_id else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None
         }
         
         # Intentar obtener información del admin desde audit_logs si se requiere

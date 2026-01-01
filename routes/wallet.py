@@ -3,6 +3,7 @@ from database import db
 from models.user import User
 from models.wallet import Wallet, WalletMovement, AuditLog
 from models.admin_user import AdminUser
+from models.settings import SystemSettings
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_, func, desc
 from sqlalchemy.orm import joinedload
@@ -24,6 +25,111 @@ def get_or_create_wallet(user_id):
         db.session.add(wallet)
         db.session.flush()
     return wallet
+
+# Helper function to calculate expiration date for wallet movements
+def calculate_expiration_date(created_at=None):
+    """
+    Calcula la fecha de vencimiento para un movimiento de wallet basado en la configuración del sistema.
+    Solo aplica para movimientos de crédito (cashback, manual_credit, transfer_in, etc.)
+    
+    Returns:
+        datetime o None si no hay configuración de vencimiento
+    """
+    if created_at is None:
+        created_at = datetime.utcnow()
+    
+    # Obtener días de vencimiento desde la configuración
+    expiration_days = SystemSettings.get_value('wallet.expiration_days', default=None)
+    
+    if expiration_days is None or expiration_days <= 0:
+        return None
+    
+    # Calcular fecha de vencimiento sumando los días configurados
+    expires_at = created_at + timedelta(days=int(expiration_days))
+    return expires_at
+
+# Helper function to calculate wallet balance excluding expired movements
+def calculate_wallet_balance(wallet_id, include_expired=False):
+    """
+    Calcula el balance de una wallet excluyendo movimientos vencidos.
+    Solo cuenta movimientos de crédito que no hayan vencido.
+    
+    Tipos de movimientos que RESTAN (débitos):
+    - manual_debit, order_payment, purchase, payment, transfer_out
+    
+    Tipos de movimientos que SUMAN (créditos):
+    - manual_credit, cashback, refund, transfer_in, accreditation
+    
+    Args:
+        wallet_id: ID de la wallet
+        include_expired: Si es True, incluye créditos vencidos (para cálculos internos)
+    
+    Returns:
+        Balance calculado (Decimal)
+    """
+    now = datetime.utcnow()
+    
+    # Tipos que son débitos (restan dinero)
+    debit_types = ['manual_debit', 'order_payment', 'purchase', 'payment', 'transfer_out']
+    # Tipos que son créditos (suman dinero)
+    credit_types = ['manual_credit', 'cashback', 'refund', 'transfer_in', 'accreditation', 'credit']
+    
+    if include_expired:
+        # Sumar TODOS los créditos (incluidos vencidos)
+        credits = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(credit_types),
+            WalletMovement.amount > 0  # Solo créditos positivos
+        ).scalar() or 0
+        
+        # Sumar todos los débitos (pueden ser positivos o negativos según cómo se guardaron)
+        debits_query = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(debit_types)
+        )
+        # Si el amount es positivo, hacerlo negativo; si ya es negativo, dejarlo así
+        debits = debits_query.scalar() or 0
+        # Si hay débitos con amount positivo (error histórico), convertirlos a negativo
+        positive_debits = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(debit_types),
+            WalletMovement.amount > 0
+        ).scalar() or 0
+        negative_debits = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(debit_types),
+            WalletMovement.amount < 0
+        ).scalar() or 0
+        debits = negative_debits - positive_debits  # Restar los positivos (convertirlos a negativos)
+    else:
+        # Sumar solo créditos que NO hayan vencido
+        credits = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(credit_types),
+            WalletMovement.amount > 0,  # Solo créditos positivos
+            or_(
+                WalletMovement.expires_at.is_(None),  # Sin vencimiento
+                WalletMovement.expires_at > now  # No vencidos
+            )
+        ).scalar() or 0
+        
+        # Sumar todos los débitos (convertir positivos a negativos)
+        positive_debits = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(debit_types),
+            WalletMovement.amount > 0
+        ).scalar() or 0
+        negative_debits = db.session.query(func.coalesce(func.sum(WalletMovement.amount), 0)).filter(
+            WalletMovement.wallet_id == wallet_id,
+            WalletMovement.type.in_(debit_types),
+            WalletMovement.amount < 0
+        ).scalar() or 0
+        debits = negative_debits - positive_debits  # Restar los positivos (convertirlos a negativos)
+    
+    # El balance es créditos válidos más débitos (débitos ya son negativos)
+    balance = credits + debits
+    
+    return balance
 
 # Helper function to create audit log
 def create_audit_log(admin_user_id, action, entity, entity_id, details=None):
@@ -133,7 +239,9 @@ def search_customers():
                 wallet_blocked = False
                 if wallet:
                     try:
-                        wallet_balance = float(wallet.balance) if wallet.balance else 0.0
+                        # Calcular balance excluyendo créditos vencidos (igual que en el frontend de usuarios)
+                        calculated_balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                        wallet_balance = float(calculated_balance) if calculated_balance else 0.0
                         wallet_blocked = wallet.is_blocked if hasattr(wallet, 'is_blocked') else False
                     except Exception as wallet_error:
                         print(f"DEBUG ERROR processing wallet for user {user.id}: {str(wallet_error)}")
@@ -189,6 +297,9 @@ def get_customer_wallet_summary(user_id):
         # Obtener último movimiento
         last_movement = WalletMovement.query.filter_by(wallet_id=wallet.id).order_by(desc(WalletMovement.created_at)).first()
 
+        # Calcular balance excluyendo créditos vencidos (igual que en el frontend de usuarios)
+        calculated_balance = calculate_wallet_balance(wallet.id, include_expired=False)
+        
         return jsonify({
             'success': True,
             'data': {
@@ -201,7 +312,7 @@ def get_customer_wallet_summary(user_id):
                     'dni': user.dni
                 },
                 'wallet': {
-                    'balance': float(wallet.balance) if wallet.balance else 0.0,
+                    'balance': float(calculated_balance) if calculated_balance else 0.0,
                     'is_blocked': wallet.is_blocked,
                     'last_movement': {
                         'id': str(last_movement.id),
@@ -286,7 +397,8 @@ def manual_credit(user_id):
     {
         "amount": 100.00,
         "reason": "promoción",
-        "internal_comment": "Promoción de verano"
+        "internal_comment": "Promoción de verano",
+        "expires_at": "2025-12-31" (opcional, formato YYYY-MM-DD)
     }
     """
     try:
@@ -306,7 +418,8 @@ def manual_credit(user_id):
         amount = data.get('amount')
         reason = data.get('reason', '')
         internal_comment = data.get('internal_comment', '')
-        print(f"DEBUG: amount={amount}, reason={reason}, internal_comment={internal_comment}")
+        expires_at_str = data.get('expires_at')  # Fecha de vencimiento opcional (ISO format)
+        print(f"DEBUG: amount={amount}, reason={reason}, internal_comment={internal_comment}, expires_at={expires_at_str}")
 
         if not amount or amount <= 0:
             print("DEBUG ERROR: Invalid amount")
@@ -338,19 +451,41 @@ def manual_credit(user_id):
             }), 400
 
         print("DEBUG: Creating wallet movement")
+        # Calcular fecha de vencimiento
+        # Si se proporciona una fecha personalizada, usarla; si no, usar la configuración del sistema
+        if expires_at_str:
+            try:
+                # Parsear la fecha proporcionada (formato ISO: YYYY-MM-DD)
+                expires_at = datetime.strptime(expires_at_str, '%Y-%m-%d')
+                # Asegurar que sea al final del día
+                expires_at = expires_at.replace(hour=23, minute=59, second=59)
+                print(f"DEBUG: Using custom expiration date: {expires_at}")
+            except ValueError as e:
+                print(f"DEBUG ERROR: Invalid date format: {expires_at_str}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Formato de fecha inválido. Use YYYY-MM-DD'
+                }), 400
+        else:
+            # Usar la configuración del sistema
+            expires_at = calculate_expiration_date()
+            print(f"DEBUG: Using system expiration date: {expires_at}")
+        
         # Crear movimiento (sin admin_user_id, reason, internal_comment porque no existen en BD)
         movement = WalletMovement(
             wallet_id=wallet.id,
             type='manual_credit',
             amount=amount,
-            description=f'Carga manual: {reason}'
+            description=f'Carga manual: {reason}',
+            expires_at=expires_at
         )
         db.session.add(movement)
         print("DEBUG: Movement added to session")
 
-        # Actualizar saldo
+        # Actualizar saldo excluyendo créditos vencidos (igual que en el frontend)
+        # El balance guardado debe coincidir con el balance mostrado al usuario
         print("DEBUG: Updating wallet balance")
-        wallet.balance = (wallet.balance or 0) + amount
+        wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
         wallet.updated_at = datetime.utcnow()
         print(f"DEBUG: New balance: {wallet.balance}")
 
@@ -493,18 +628,20 @@ def manual_debit(user_id):
 
         print("DEBUG: Creating wallet movement")
         # Crear movimiento (sin admin_user_id, reason, internal_comment porque no existen en BD)
+        # Los débitos deben tener amount negativo para que se resten correctamente
         movement = WalletMovement(
             wallet_id=wallet.id,
             type='manual_debit',
-            amount=amount,
+            amount=-amount,  # Negativo para que reste del balance
             description=f'Descuento manual: {reason}'
         )
         db.session.add(movement)
         print("DEBUG: Movement added to session")
 
-        # Actualizar saldo
+        # Actualizar saldo excluyendo créditos vencidos (igual que en el frontend)
+        # El balance guardado debe coincidir con el balance mostrado al usuario
         print("DEBUG: Updating wallet balance")
-        wallet.balance = current_balance - amount
+        wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
         wallet.updated_at = datetime.utcnow()
         print(f"DEBUG: New balance: {wallet.balance}")
 
@@ -1069,15 +1206,19 @@ def detect_anomalies():
 def get_user_wallet_balance():
     """
     Obtener el balance de la billetera del usuario autenticado
+    Calcula el balance excluyendo créditos vencidos, pero NO modifica el balance guardado
     """
     try:
         user = request.user
         wallet = get_or_create_wallet(user.id)
         
+        # Calcular balance actual excluyendo vencidos (solo para mostrar, NO guardar)
+        calculated_balance = calculate_wallet_balance(wallet.id)
+        
         return jsonify({
             'success': True,
             'data': {
-                'balance': float(wallet.balance) if wallet.balance else 0.0,
+                'balance': float(calculated_balance) if calculated_balance else 0.0,
                 'is_blocked': wallet.is_blocked
             }
         }), 200
@@ -1221,17 +1362,19 @@ def transfer_wallet_balance():
                 description=f'Transferencia a {recipient_email}'
             )
             db.session.add(sender_movement)
-            sender_wallet.balance = sender_wallet.balance - amount
+            sender_wallet.balance = calculate_wallet_balance(sender_wallet.id, include_expired=False)
             
             # Acreditar al destinatario
+            expires_at = calculate_expiration_date()
             recipient_movement = WalletMovement(
                 wallet_id=recipient_wallet.id,
                 type='transfer_in',
                 amount=amount,
-                description=f'Transferencia recibida de {user.email}'
+                description=f'Transferencia recibida de {user.email}',
+                expires_at=expires_at
             )
             db.session.add(recipient_movement)
-            recipient_wallet.balance = (recipient_wallet.balance or 0) + amount
+            recipient_wallet.balance = calculate_wallet_balance(recipient_wallet.id, include_expired=False)
             
             db.session.commit()
             
