@@ -280,7 +280,7 @@ def health_check():
     )
 
 
-@public_api_bp.route('/public/sync-data-test', methods=['POST'])
+@public_api_bp.route('/public/sincronizar', methods=['POST'])
 @api_key_required
 def sync_data():
     """
