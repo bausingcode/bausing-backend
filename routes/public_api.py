@@ -280,7 +280,7 @@ def health_check():
     )
 
 
-@public_api_bp.route('/public/sincronizar', methods=['POST'])
+@public_api_bp.route('/public/sincronizar-test', methods=['POST'])
 @api_key_required
 def sync_data():
     """
@@ -354,3 +354,122 @@ def sync_data():
     except Exception as e:
         return server_error(f"Error del servidor: {str(e)}")
 
+
+@public_api_bp.route('/public/sincronizar', methods=['POST'])
+@api_key_required
+def sync_data_new():
+    """
+    Endpoint para sincronizar datos desde CRM.
+    
+    - Si tipo es "productos": usa la función crm_sync_products
+    - Si tipo es "zonas": usa la función crm_sync_zones
+    - Si tipo es "medios_pago": omite la sincronización
+    
+    Request Body:
+    {
+        "tipo": "productos" | "zonas" | "medios_pago",
+        "datos": [...],
+        "status": true,
+        "filtros": {...},
+        "sincronizar": {
+            "accion": "update" | "create",
+            "timestamp": "2026-01-02 13:33:31"
+        }
+    }
+    
+    Response - Éxito:
+    HTTP Status: 200 OK
+    {
+        "status": true,
+        "data": {},
+        "message": "Datos sincronizados correctamente"
+    }
+    
+    Response - Error de Validación:
+    HTTP Status: 200 OK
+    {
+        "status": false,
+        "message": "Error de validación: [descripción]"
+    }
+    
+    Response - Error de Procesamiento:
+    HTTP Status: 200 OK
+    {
+        "status": false,
+        "message": "Error al procesar la operación: [descripción del error]"
+    }
+    
+    Response - Error del Servidor:
+    HTTP Status: 500 Internal Server Error
+    {
+        "status": false,
+        "message": "Error interno del servidor"
+    }
+    """
+    try:
+        # Validar que se recibió un body
+        if not request.is_json:
+            return validation_error("El body debe ser JSON")
+        
+        body_data = request.get_json()
+        
+        if body_data is None:
+            return validation_error("El body es requerido")
+        
+        # Validar estructura básica
+        if 'tipo' not in body_data:
+            return validation_error("El campo 'tipo' es requerido")
+        
+        if 'datos' not in body_data:
+            return validation_error("El campo 'datos' es requerido")
+        
+        if 'sincronizar' not in body_data:
+            return validation_error("El campo 'sincronizar' es requerido")
+        
+        tipo = body_data.get('tipo')
+        
+        # Si es medios_pago, hacer pass (no procesar)
+        if tipo == 'medios_pago':
+            return success_response(
+                data={},
+                message="Sincronización de medios_pago omitida"
+            )
+        
+        # Determinar qué función usar según el tipo
+        if tipo == 'productos':
+            function_name = 'crm_sync_products'
+        elif tipo == 'zonas':
+            function_name = 'crm_sync_zones'
+        else:
+            return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, medios_pago")
+        
+        # Llamar a la función correspondiente
+        try:
+            from sqlalchemy import text, bindparam
+            from sqlalchemy.dialects.postgresql import JSONB
+            
+            # Llamar a la función usando bindparam con tipo JSONB
+            # SQLAlchemy JSONB acepta dict directamente o string JSON
+            result = db.session.execute(
+                text(f"SELECT {function_name}(:json_data)").bindparams(
+                    bindparam('json_data', type_=JSONB)
+                ),
+                {"json_data": body_data}
+            )
+            
+            db.session.commit()
+            
+            return success_response(
+                data={},
+                message="Datos sincronizados correctamente"
+            )
+            
+        except Exception as e:
+            db.session.rollback()
+            return processing_error(f"Error al sincronizar datos: {str(e)}")
+            
+    except Exception as e:
+        return server_error(f"Error del servidor: {str(e)}")
+
+# SELECT pg_get_functiondef('crm_sync_products(jsonb)'::regprocedure);
+# SELECT crm_sync_zones('{"tipo":"zonas","datos":[...],"sincronizar":{"accion":"update","timestamp":"2026-01-02 12:46:16"}}'::jsonb);
