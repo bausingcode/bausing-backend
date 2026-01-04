@@ -15,6 +15,7 @@ def register_routes(app):
     from .blog import blog_bp
     from .wallet import wallet_bp
     from .public_api import public_api_bp
+    from .crm_products import crm_products_bp
 
     app.register_blueprint(categories_bp, url_prefix='/categories')
     app.register_blueprint(products_bp, url_prefix='/products')
@@ -31,4 +32,5 @@ def register_routes(app):
     app.register_blueprint(blog_bp, url_prefix='/blog')
     app.register_blueprint(wallet_bp, url_prefix='')
     app.register_blueprint(public_api_bp, url_prefix='')
+    app.register_blueprint(crm_products_bp, url_prefix='')
 

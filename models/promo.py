@@ -78,7 +78,7 @@ class PromoApplicability(db.Model):
         
         if self.variant_id:
             data['variant_id'] = str(self.variant_id)
-            data['variant_name'] = self.variant.variant_name if self.variant else None
+            data['variant_name'] = self.variant.get_display_name() if self.variant else None
         
         return data
 

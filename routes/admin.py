@@ -348,37 +348,11 @@ def create_complete_product():
         created_variants = []
         
         for variant_data in variants_data:
-            if not variant_data.get('variant_name'):
-                db.session.rollback()
-                return jsonify({
-                    'success': False,
-                    'error': 'Cada variante debe tener un variant_name'
-                }), 400
-            
-            # Construir variant_name automáticamente si se proporcionan atributos
-            variant_name = variant_data.get('variant_name')
-            attributes = variant_data.get('attributes', {})
-            
-            # Si no hay variant_name pero hay atributos, generar uno
-            if not variant_name and attributes:
-                parts = []
-                if attributes.get('size'):
-                    parts.append(attributes['size'])
-                if attributes.get('combo'):
-                    parts.append(attributes['combo'])
-                if attributes.get('model'):
-                    parts.append(attributes['model'])
-                if attributes.get('color'):
-                    parts.append(attributes['color'])
-                if attributes.get('dimensions'):
-                    parts.append(attributes['dimensions'])
-                variant_name = ' - '.join(parts) if parts else 'Variante'
-            
             variant = ProductVariant(
                 product_id=product.id,
-                variant_name=variant_name or 'Variante',
+                sku=variant_data.get('sku'),
                 stock=variant_data.get('stock', 0),
-                attributes=attributes if attributes else None
+                price=variant_data.get('price')
             )
             
             db.session.add(variant)
@@ -470,30 +444,11 @@ def update_complete_product(product_id):
             
             # Crear nuevas variantes
             for variant_data in data['variants']:
-                # Construir variant_name automáticamente si se proporcionan atributos
-                variant_name = variant_data.get('variant_name')
-                attributes = variant_data.get('attributes', {})
-                
-                # Si no hay variant_name pero hay atributos, generar uno
-                if not variant_name and attributes:
-                    parts = []
-                    if attributes.get('size'):
-                        parts.append(attributes['size'])
-                    if attributes.get('combo'):
-                        parts.append(attributes['combo'])
-                    if attributes.get('model'):
-                        parts.append(attributes['model'])
-                    if attributes.get('color'):
-                        parts.append(attributes['color'])
-                    if attributes.get('dimensions'):
-                        parts.append(attributes['dimensions'])
-                    variant_name = ' - '.join(parts) if parts else 'Variante'
-                
                 variant = ProductVariant(
                     product_id=product.id,
-                    variant_name=variant_name or 'Variante',
+                    sku=variant_data.get('sku'),
                     stock=variant_data.get('stock', 0),
-                    attributes=attributes if attributes else None
+                    price=variant_data.get('price')
                 )
                 
                 db.session.add(variant)

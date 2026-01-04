@@ -9,9 +9,21 @@ class Product(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
+    technical_description = db.Column(db.Text)
+    warranty_months = db.Column(db.Integer)
+    warranty_description = db.Column(db.Text)
+    materials = db.Column(db.Text)
+    filling_type = db.Column(db.String(255))
+    max_supported_weight_kg = db.Column(db.Integer)
+    has_pillow_top = db.Column(db.Boolean, default=False)
+    is_bed_in_box = db.Column(db.Boolean, default=False)
+    mattress_firmness = db.Column(db.String(255))
+    size_label = db.Column(db.String(255))
     sku = db.Column(db.String(100))
+    crm_product_id = db.Column(db.Integer, unique=True, nullable=True)
     category_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=True)
     category_option_id = db.Column(UUID(as_uuid=True), db.ForeignKey('category_options.id'), nullable=True)
+    is_combo = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
@@ -65,7 +77,18 @@ class Product(db.Model):
             'id': str(self.id),
             'name': self.name,
             'description': self.description,
+            'technical_description': self.technical_description,
+            'warranty_months': self.warranty_months,
+            'warranty_description': self.warranty_description,
+            'materials': self.materials,
+            'filling_type': self.filling_type,
+            'max_supported_weight_kg': self.max_supported_weight_kg,
+            'has_pillow_top': self.has_pillow_top,
+            'is_bed_in_box': self.is_bed_in_box,
+            'mattress_firmness': self.mattress_firmness,
+            'size_label': self.size_label,
             'sku': self.sku,
+            'crm_product_id': self.crm_product_id,
             'category_id': str(self.category_id) if self.category_id else None,
             'category_name': self.category.name if self.category else None,
             'category_option_id': str(self.category_option_id) if self.category_option_id else None,
@@ -141,10 +164,10 @@ class ProductVariant(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=False)
-    variant_name = db.Column(db.String(255), nullable=False)
+    sku = db.Column(db.String(100), nullable=True)
     stock = db.Column(db.Integer, default=0, nullable=False)
-    # Atributos estructurados para variantes complejas (tamaño, combo, modelo, color, etc.)
-    attributes = db.Column(db.JSON, nullable=True)
+    price = db.Column(db.Numeric(10, 2), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
     prices = db.relationship('ProductPrice', backref='product_variant', lazy=True, cascade='all, delete-orphan')
@@ -153,32 +176,17 @@ class ProductVariant(db.Model):
         data = {
             'id': str(self.id),
             'product_id': str(self.product_id),
-            'variant_name': self.variant_name,
+            'sku': self.sku,
             'stock': self.stock,
-            'attributes': self.attributes or {}
+            'price': float(self.price) if self.price else None
         }
         if include_prices:
             data['prices'] = [price.to_dict() for price in self.prices]
         return data
     
     def get_display_name(self):
-        """Genera un nombre de visualización basado en los atributos"""
-        if not self.attributes:
-            return self.variant_name
-        
-        parts = []
-        if self.attributes.get('size'):
-            parts.append(self.attributes['size'])
-        if self.attributes.get('combo'):
-            parts.append(self.attributes['combo'])
-        if self.attributes.get('model'):
-            parts.append(self.attributes['model'])
-        if self.attributes.get('color'):
-            parts.append(self.attributes['color'])
-        if self.attributes.get('dimensions'):
-            parts.append(self.attributes['dimensions'])
-        
-        return ' - '.join(parts) if parts else self.variant_name
+        """Genera un nombre de visualización basado en el SKU o un valor por defecto"""
+        return self.sku or 'Variante'
 
 
 class ProductPrice(db.Model):

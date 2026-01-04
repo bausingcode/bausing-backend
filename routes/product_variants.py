@@ -54,36 +54,17 @@ def create_variant():
     try:
         data = request.get_json()
         
-        if not data or not data.get('product_id') or not data.get('variant_name'):
+        if not data or not data.get('product_id'):
             return jsonify({
                 'success': False,
-                'error': 'product_id y variant_name son requeridos'
+                'error': 'product_id es requerido'
             }), 400
-        
-        # Construir variant_name automáticamente si se proporcionan atributos
-        variant_name = data.get('variant_name')
-        attributes = data.get('attributes', {})
-        
-        # Si no hay variant_name pero hay atributos, generar uno
-        if not variant_name and attributes:
-            parts = []
-            if attributes.get('size'):
-                parts.append(attributes['size'])
-            if attributes.get('combo'):
-                parts.append(attributes['combo'])
-            if attributes.get('model'):
-                parts.append(attributes['model'])
-            if attributes.get('color'):
-                parts.append(attributes['color'])
-            if attributes.get('dimensions'):
-                parts.append(attributes['dimensions'])
-            variant_name = ' - '.join(parts) if parts else 'Variante'
         
         variant = ProductVariant(
             product_id=data['product_id'],
-            variant_name=variant_name or data.get('variant_name', 'Variante'),
+            sku=data.get('sku'),
             stock=data.get('stock', 0),
-            attributes=attributes if attributes else None
+            price=data.get('price')
         )
         
         db.session.add(variant)
@@ -114,28 +95,12 @@ def update_variant(variant_id):
         variant = ProductVariant.query.get_or_404(variant_id)
         data = request.get_json()
         
-        if 'attributes' in data:
-            variant.attributes = data.get('attributes', {})
-            # Regenerar variant_name si se actualizaron atributos
-            if variant.attributes:
-                parts = []
-                if variant.attributes.get('size'):
-                    parts.append(variant.attributes['size'])
-                if variant.attributes.get('combo'):
-                    parts.append(variant.attributes['combo'])
-                if variant.attributes.get('model'):
-                    parts.append(variant.attributes['model'])
-                if variant.attributes.get('color'):
-                    parts.append(variant.attributes['color'])
-                if variant.attributes.get('dimensions'):
-                    parts.append(variant.attributes['dimensions'])
-                if parts:
-                    variant.variant_name = ' - '.join(parts)
-        
-        if 'variant_name' in data:
-            variant.variant_name = data['variant_name']
+        if 'sku' in data:
+            variant.sku = data.get('sku')
         if 'stock' in data:
             variant.stock = data.get('stock', 0)
+        if 'price' in data:
+            variant.price = data.get('price')
         
         db.session.commit()
         
