@@ -365,12 +365,13 @@ def sync_data_new():
     - Si tipo es "zonas": usa la función crm_sync_zones
     - Si tipo es "provincias": usa la función sync_crm_provincias
     - Si tipo es "tipos_documento": usa la función sync_crm_tipos_documento
+    - Si tipo es "tipos_venta": usa la función sync_crm_tipos_venta
     - Si tipo es "ventas": usa la función sync_crm_ventas (detecta cambios de estado)
     - Si tipo es "medios_pago": omite la sincronización (simulado)
     
     Request Body:
     {
-        "tipo": "productos" | "zonas" | "provincias" | "tipos_documento" | "ventas" | "medios_pago",
+        "tipo": "productos" | "zonas" | "provincias" | "tipos_documento" | "tipos_venta" | "ventas" | "medios_pago",
         "datos": [...],
         "status": true,
         "filtros": {...},
@@ -450,10 +451,12 @@ def sync_data_new():
             function_name = 'sync_crm_provincias'
         elif tipo == 'tipos_documento':
             function_name = 'sync_crm_tipos_documento'
+        elif tipo == 'tipos_venta':
+            function_name = 'sync_crm_tipos_venta'
         elif tipo == 'ventas':
             function_name = 'sync_crm_ventas'
         else:
-            return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, provincias, tipos_documento, ventas, medios_pago")
+            return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, provincias, tipos_documento, tipos_venta, ventas, medios_pago")
         
         # Llamar a la función correspondiente
         try:
