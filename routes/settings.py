@@ -194,7 +194,7 @@ def update_message_templates():
             },
             'enCamino': {
                 'type': 'order_shipping',
-                'subject': 'Tu Pedido Está en Camino',
+                'subject': 'Tu Pedido Está en Reparto',
                 'variables': ['nombre', 'pedido', 'tracking']
             }
         }

@@ -1948,6 +1948,7 @@ def crear_venta():
                         "tipo_documento_cliente": data.get('tipo_documento_cliente'),
                         "documento_cliente": data.get('documento_cliente', ''),
                         "cliente_telefono": data.get('cliente_telefono'),
+                        "email_cliente": data.get('email_cliente'),
                         "provincia_id": data.get('provincia_id'),
                         "localidad": data.get('localidad'),
                         "zona_id": data.get('zona_id')
