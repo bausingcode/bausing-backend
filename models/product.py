@@ -59,11 +59,19 @@ class Product(db.Model):
     
     def has_stock(self):
         """Verifica si el producto tiene stock disponible"""
-        return any(variant.stock > 0 for variant in self.variants)
+        # El stock está en las options, no en las variants
+        for variant in self.variants:
+            if any(option.stock > 0 for option in variant.options):
+                return True
+        return False
     
     def get_total_stock(self):
-        """Obtiene el stock total del producto sumando todas las variantes"""
-        return sum(variant.stock for variant in self.variants)
+        """Obtiene el stock total del producto sumando todas las opciones de variantes"""
+        # El stock está en las options, no en las variants
+        total = 0
+        for variant in self.variants:
+            total += sum(option.stock for option in variant.options)
+        return total
     
     def get_main_image(self):
         """Obtiene la imagen principal del producto (primera por posición)"""
@@ -124,7 +132,7 @@ class Product(db.Model):
         
         # Variantes
         if include_variants:
-            data['variants'] = [variant.to_dict(include_prices=True) for variant in self.variants]
+            data['variants'] = [variant.to_dict(include_prices=True, include_options=True) for variant in self.variants]
         
         # Promociones aplicables
         if include_promos:
@@ -165,28 +173,51 @@ class ProductVariant(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=False)
     sku = db.Column(db.String(100), nullable=True)
-    stock = db.Column(db.Integer, default=0, nullable=False)
     price = db.Column(db.Numeric(10, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
     prices = db.relationship('ProductPrice', backref='product_variant', lazy=True, cascade='all, delete-orphan')
+    options = db.relationship('ProductVariantOption', backref='product_variant', lazy=True, cascade='all, delete-orphan')
 
-    def to_dict(self, include_prices=False):
+    def to_dict(self, include_prices=False, include_options=False):
         data = {
             'id': str(self.id),
             'product_id': str(self.product_id),
             'sku': self.sku,
-            'stock': self.stock,
             'price': float(self.price) if self.price else None
         }
         if include_prices:
             data['prices'] = [price.to_dict() for price in self.prices]
+        if include_options:
+            data['options'] = [option.to_dict() for option in self.options]
         return data
     
     def get_display_name(self):
         """Genera un nombre de visualización basado en el SKU o un valor por defecto"""
         return self.sku or 'Variante'
+
+
+class ProductVariantOption(db.Model):
+    __tablename__ = 'product_variant_options'
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_variant_id = db.Column(UUID(as_uuid=True), db.ForeignKey('product_variants.id'), nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    stock = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self, include_prices=False):
+        data = {
+            'id': str(self.id),
+            'product_variant_id': str(self.product_variant_id),
+            'name': self.name,
+            'stock': self.stock,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+        if include_prices:
+            data['prices'] = [price.to_dict() for price in self.prices]
+        return data
 
 
 class ProductPrice(db.Model):

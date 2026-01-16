@@ -53,13 +53,13 @@ class PromoApplicability(db.Model):
     promo_id = db.Column(UUID(as_uuid=True), db.ForeignKey('promos.id'), nullable=False)
     product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=True)
     category_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=True)
-    variant_id = db.Column(UUID(as_uuid=True), db.ForeignKey('product_variants.id'), nullable=True)
+    # product_variant_id = db.Column(UUID(as_uuid=True), db.ForeignKey('product_variants.id'), nullable=True)  # Column doesn't exist in DB
     applies_to = db.Column(db.String(50), nullable=False)  # "product", "category", "variant", "all"
 
     # Relaciones
     product = db.relationship('Product', backref='promo_applicabilities', lazy=True)
     category = db.relationship('Category', backref='promo_applicabilities', lazy=True)
-    variant = db.relationship('ProductVariant', backref='promo_applicabilities', lazy=True)
+    # variant = db.relationship('ProductVariant', backref='promo_applicabilities', lazy=True)  # Column doesn't exist
 
     def to_dict(self):
         data = {
@@ -76,9 +76,9 @@ class PromoApplicability(db.Model):
             data['category_id'] = str(self.category_id)
             data['category_name'] = self.category.name if self.category else None
         
-        if self.variant_id:
-            data['variant_id'] = str(self.variant_id)
-            data['variant_name'] = self.variant.get_display_name() if self.variant else None
+        # if self.product_variant_id:
+        #     data['product_variant_id'] = str(self.product_variant_id)
+        #     data['variant_name'] = self.variant.get_display_name() if self.variant else None
         
         return data
 

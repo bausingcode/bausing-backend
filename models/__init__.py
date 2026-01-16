@@ -1,5 +1,5 @@
 from .category import Category, CategoryOption
-from .product import Product, ProductVariant, ProductPrice
+from .product import Product, ProductVariant, ProductVariantOption, ProductPrice
 from .locality import Locality
 from .admin_user import AdminUser, AdminRole
 from .image import ProductImage, HeroImage
@@ -17,6 +17,7 @@ __all__ = [
     'CategoryOption',
     'Product',
     'ProductVariant',
+    'ProductVariantOption',
     'ProductPrice',
     'Locality',
     'AdminUser',

@@ -30,12 +30,12 @@ def get_variants():
             'error': str(e)
         }), 500
 
-@variants_bp.route('/<uuid:variant_id>', methods=['GET'])
-def get_variant(variant_id):
+@variants_bp.route('/<uuid:product_variant_id>', methods=['GET'])
+def get_variant(product_variant_id):
     """Obtener una variante por ID"""
     try:
         include_prices = request.args.get('include_prices', 'true').lower() == 'true'
-        variant = ProductVariant.query.get_or_404(variant_id)
+        variant = ProductVariant.query.get_or_404(product_variant_id)
         
         return jsonify({
             'success': True,
@@ -87,18 +87,19 @@ def create_variant():
             'error': str(e)
         }), 500
 
-@variants_bp.route('/<uuid:variant_id>', methods=['PUT'])
+@variants_bp.route('/<uuid:product_variant_id>', methods=['PUT'])
 @admin_required
-def update_variant(variant_id):
+def update_variant(product_variant_id):
     """Actualizar una variante de producto"""
     try:
-        variant = ProductVariant.query.get_or_404(variant_id)
+        variant = ProductVariant.query.get_or_404(product_variant_id)
         data = request.get_json()
         
         if 'sku' in data:
             variant.sku = data.get('sku')
-        if 'stock' in data:
-            variant.stock = data.get('stock', 0)
+        # El stock ahora está en options, no en variants
+        # if 'stock' in data:
+        #     variant.stock = data.get('stock', 0)
         if 'price' in data:
             variant.price = data.get('price')
         
@@ -121,12 +122,12 @@ def update_variant(variant_id):
             'error': str(e)
         }), 500
 
-@variants_bp.route('/<uuid:variant_id>', methods=['DELETE'])
+@variants_bp.route('/<uuid:product_variant_id>', methods=['DELETE'])
 @admin_required
-def delete_variant(variant_id):
+def delete_variant(product_variant_id):
     """Eliminar una variante de producto"""
     try:
-        variant = ProductVariant.query.get_or_404(variant_id)
+        variant = ProductVariant.query.get_or_404(product_variant_id)
         
         db.session.delete(variant)
         db.session.commit()
@@ -142,31 +143,12 @@ def delete_variant(variant_id):
             'error': str(e)
         }), 500
 
-@variants_bp.route('/<uuid:variant_id>/stock', methods=['PATCH'])
+@variants_bp.route('/<uuid:product_variant_id>/stock', methods=['PATCH'])
 @admin_required
-def update_stock(variant_id):
-    """Actualizar el stock de una variante"""
-    try:
-        variant = ProductVariant.query.get_or_404(variant_id)
-        data = request.get_json()
-        
-        if 'stock' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'El stock es requerido'
-            }), 400
-        
-        variant.stock = data['stock']
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'data': variant.to_dict()
-        }), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+def update_stock(product_variant_id):
+    """Actualizar el stock de una variante (deprecated - el stock ahora está en options)"""
+    return jsonify({
+        'success': False,
+        'error': 'El stock ahora se maneja a través de las options. Use el endpoint de options.'
+    }), 400
 

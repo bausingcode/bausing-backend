@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app as app
 from database import db
-from models.product import Product
+from models.product import Product, ProductVariant, ProductVariantOption, ProductPrice
+from models.locality import Locality
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from routes.admin import admin_required
@@ -319,6 +320,115 @@ def complete_crm_product(product_id):
                 is_active=data.get('is_active', True)
             )
             db.session.add(product)
+        
+        db.session.flush()  # Para obtener el ID del producto
+        
+        # Crear variantes y precios si se proporcionaron
+        if data.get('variants'):
+            # Eliminar variantes existentes si es actualización
+            if data.get('product_id'):
+                # Eliminar options primero (por foreign key)
+                variants_to_delete = ProductVariant.query.filter_by(product_id=product.id).all()
+                for v in variants_to_delete:
+                    ProductVariantOption.query.filter_by(product_variant_id=v.id).delete()
+                ProductVariant.query.filter_by(product_id=product.id).delete()
+                db.session.flush()
+            
+            variants_data = data.get('variants', [])
+            # Primero, agrupar todas las options por atributo
+            variants_dict = {}  # {attr_name: {variant_obj, options: {attr_value: {stock, prices}}}}
+            
+            for idx, variant_data in enumerate(variants_data):
+                attributes = variant_data.get('attributes', {})
+                prices_data = variant_data.get('prices', [])
+                stock = variant_data.get('stock', 0)
+                
+                # Para cada atributo en esta variant_data
+                for attr_name, attr_value in attributes.items():
+                    # Si no existe la variant para este atributo, crearla
+                    if attr_name not in variants_dict:
+                        variant = ProductVariant(
+                            product_id=product.id,
+                            sku=attr_name,  # Nombre del atributo (ej: "Tamaño")
+                            price=None
+                        )
+                        db.session.add(variant)
+                        db.session.flush()
+                        variants_dict[attr_name] = {
+                            'variant': variant,
+                            'options': {}
+                        }
+                    
+                    # Si no existe la option para este valor, crearla o actualizar stock
+                    if attr_value not in variants_dict[attr_name]['options']:
+                        option = ProductVariantOption(
+                            product_variant_id=variants_dict[attr_name]['variant'].id,
+                            name=attr_value,  # Valor de la opción (ej: "M")
+                            stock=stock
+                        )
+                        db.session.add(option)
+                        db.session.flush()
+                        variants_dict[attr_name]['options'][attr_value] = {
+                            'option': option,
+                            'prices': prices_data.copy()
+                        }
+                    else:
+                        # Si ya existe, sumar el stock (o manejar como prefieras)
+                        existing_option = variants_dict[attr_name]['options'][attr_value]['option']
+                        existing_option.stock += stock
+            
+            # Ahora crear los precios para cada variant (compartidos entre todas las options)
+            created_variants = []
+            for attr_name, variant_info in variants_dict.items():
+                variant = variant_info['variant']
+                created_prices = []
+                prices_added = set()  # Para evitar duplicados en la misma transacción
+                
+                # Agrupar precios únicos de todas las options de esta variant
+                # Recopilar todos los precios únicos de todas las options
+                all_prices_data = []
+                for option_data in variant_info['options'].values():
+                    for price_data in option_data['prices']:
+                        locality_id = price_data.get('locality_id')
+                        price_value = price_data.get('price')
+                        if locality_id and price_value is not None:
+                            price_key = (locality_id, float(price_value))
+                            if price_key not in prices_added:
+                                all_prices_data.append(price_data)
+                                prices_added.add(price_key)
+                
+                # Crear los precios únicos
+                for price_data in all_prices_data:
+                    locality_id = price_data.get('locality_id')
+                    price_value = price_data.get('price')
+                    
+                    if not locality_id or price_value is None:
+                        continue
+                    
+                    # Verificar que la localidad existe
+                    locality = Locality.query.get(locality_id)
+                    if not locality:
+                        continue
+                    
+                    # Crear el precio (no verificamos existing_price porque estamos en una nueva creación)
+                    price = ProductPrice(
+                        product_variant_id=variant.id,
+                        locality_id=locality_id,
+                        price=price_value
+                    )
+                    db.session.add(price)
+                
+                # Hacer flush para obtener los IDs de los precios creados
+                db.session.flush()
+                
+                # Ahora obtener los precios creados para el response
+                prices_query = ProductPrice.query.filter_by(product_variant_id=variant.id).all()
+                created_prices = [p.to_dict() for p in prices_query]
+                
+                created_variants.append({
+                    **variant.to_dict(),
+                    'prices': created_prices
+                })
         
         db.session.commit()
         

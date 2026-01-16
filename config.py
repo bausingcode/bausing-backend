@@ -11,6 +11,7 @@ class Config:
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     API_KEY = os.getenv('API_KEY', 'dev-api-key-change-in-production')
+    VENDEDOR_ID = int(os.getenv('VENDEDOR_ID', '1'))
     
     # Configuración de Resend para emails
     RESEND_API_KEY = os.getenv('RESEND_API_KEY')

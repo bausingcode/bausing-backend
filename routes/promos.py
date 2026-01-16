@@ -145,17 +145,18 @@ def create_promo():
                     category_id=app_data['category_id'],
                     applies_to='category'
                 )
-            elif applies_to == 'variant':
-                if not app_data.get('variant_id'):
-                    return jsonify({
-                        'success': False,
-                        'error': 'variant_id es requerido cuando applies_to es "variant"'
-                    }), 400
-                applicability = PromoApplicability(
-                    promo_id=promo.id,
-                    variant_id=app_data['variant_id'],
-                    applies_to='variant'
-                )
+            # elif applies_to == 'variant':
+            #     # Variant support disabled - column doesn't exist in DB
+            #     if not app_data.get('product_variant_id'):
+            #         return jsonify({
+            #             'success': False,
+            #             'error': 'product_variant_id es requerido cuando applies_to es "variant"'
+            #         }), 400
+            #     applicability = PromoApplicability(
+            #         promo_id=promo.id,
+            #         product_variant_id=app_data['product_variant_id'],
+            #         applies_to='variant'
+            #     )
             else:
                 return jsonify({
                     'success': False,
@@ -247,12 +248,13 @@ def update_promo(promo_id):
                         category_id=app_data.get('category_id'),
                         applies_to='category'
                     )
-                elif applies_to == 'variant':
-                    applicability = PromoApplicability(
-                        promo_id=promo.id,
-                        variant_id=app_data.get('variant_id'),
-                        applies_to='variant'
-                    )
+                # elif applies_to == 'variant':
+                #     # Variant support disabled - column doesn't exist in DB
+                #     applicability = PromoApplicability(
+                #         promo_id=promo.id,
+                #         product_variant_id=app_data.get('product_variant_id'),
+                #         applies_to='variant'
+                #     )
                 else:
                     continue
                 
@@ -331,12 +333,12 @@ def get_applicable_promos():
     try:
         product_id = request.args.get('product_id')
         category_id = request.args.get('category_id')
-        variant_id = request.args.get('variant_id')
+        product_variant_id = request.args.get('product_variant_id')
         
-        if not any([product_id, category_id, variant_id]):
+        if not any([product_id, category_id, product_variant_id]):
             return jsonify({
                 'success': False,
-                'error': 'Se requiere al menos uno de: product_id, category_id, variant_id'
+                'error': 'Se requiere al menos uno de: product_id, category_id, product_variant_id'
             }), 400
         
         now = datetime.utcnow()
@@ -363,9 +365,9 @@ def get_applicable_promos():
                 elif app.applies_to == 'category' and category_id and str(app.category_id) == category_id:
                     is_applicable = True
                     break
-                elif app.applies_to == 'variant' and variant_id and str(app.variant_id) == variant_id:
-                    is_applicable = True
-                    break
+                # elif app.applies_to == 'variant' and product_variant_id and str(app.product_variant_id) == product_variant_id:
+                #     is_applicable = True
+                #     break
             
             if is_applicable:
                 applicable_promos.append(promo)

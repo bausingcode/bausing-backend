@@ -10,13 +10,13 @@ prices_bp = Blueprint('prices', __name__)
 def get_prices():
     """Obtener todos los precios"""
     try:
-        variant_id = request.args.get('variant_id')
+        product_variant_id = request.args.get('product_variant_id')
         locality_id = request.args.get('locality_id')
         
         query = ProductPrice.query
         
-        if variant_id:
-            query = query.filter_by(product_variant_id=variant_id)
+        if product_variant_id:
+            query = query.filter_by(product_variant_id=product_variant_id)
         if locality_id:
             query = query.filter_by(locality_id=locality_id)
         
@@ -152,12 +152,12 @@ def delete_price(price_id):
             'error': str(e)
         }), 500
 
-@prices_bp.route('/variant/<uuid:variant_id>/locality/<uuid:locality_id>', methods=['GET'])
-def get_price_by_variant_locality(variant_id, locality_id):
+@prices_bp.route('/variant/<uuid:product_variant_id>/locality/<uuid:locality_id>', methods=['GET'])
+def get_price_by_variant_locality(product_variant_id, locality_id):
     """Obtener precio por variante y localidad"""
     try:
         price = ProductPrice.query.filter_by(
-            product_variant_id=variant_id,
+            product_variant_id=product_variant_id,
             locality_id=locality_id
         ).first()
         
