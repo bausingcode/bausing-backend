@@ -512,12 +512,45 @@ def sync_data_new():
                     # Obtener estado anterior
                     estado_anterior = estados_anteriores.get(crm_order_id)
                     
-                    # Si el estado cambió, hacer print
+                    # Si el estado cambió, hacer print y enviar email
                     if estado_anterior and estado_anterior != nuevo_estado:
                         print(f"⚠️ CAMBIO DE ESTADO - Venta ID: {crm_order_id}")
                         print(f"   Estado anterior: {estado_anterior}")
                         print(f"   Estado nuevo: {nuevo_estado}")
                         print(f"   Acción: {accion}")
+                        
+                        # Obtener información del cliente para enviar email
+                        try:
+                            cliente_query = text("""
+                                SELECT client_email, client_name, receipt_number
+                                FROM crm_orders
+                                WHERE crm_order_id = :order_id
+                            """)
+                            cliente_result = db.session.execute(
+                                cliente_query,
+                                {"order_id": crm_order_id}
+                            )
+                            cliente_row = cliente_result.fetchone()
+                            
+                            if cliente_row and cliente_row[0]:  # Si existe client_email
+                                client_email = cliente_row[0]
+                                client_name = cliente_row[1] or "Cliente"
+                                receipt_number = cliente_row[2]
+                                
+                                # Enviar email de notificación de estado
+                                from utils.email_service import email_service
+                                email_service.send_delivery_status_email(
+                                    client_email=client_email,
+                                    client_name=client_name,
+                                    estado=nuevo_estado,
+                                    order_number=receipt_number
+                                )
+                                print(f"✅ Email de notificación enviado a {client_email}")
+                            else:
+                                print(f"⚠️ No se encontró client_email para la venta {crm_order_id}")
+                        except Exception as email_error:
+                            # No fallar la sincronización si falla el envío de email
+                            print(f"❌ Error al enviar email de notificación: {str(email_error)}")
             else:
                 # Otras funciones retornan void o un valor simple
                 result = db.session.execute(

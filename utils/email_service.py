@@ -221,6 +221,34 @@ class EmailService:
             subject=title,
             html=html
         )
+    
+    def send_delivery_status_email(
+        self,
+        client_email: str,
+        client_name: str,
+        estado: str,
+        order_number: Optional[str] = None
+    ) -> bool:
+        """
+        Envía email de notificación de cambio de estado de entrega.
+        
+        Args:
+            client_email: Email del cliente
+            client_name: Nombre del cliente
+            estado: Estado de entrega actual
+            order_number: Número de pedido (opcional)
+        
+        Returns:
+            True si se envió correctamente
+        """
+        from .email_templates import get_delivery_status_template
+        
+        html = get_delivery_status_template(client_name, order_number, estado)
+        return self._send_email(
+            to=client_email,
+            subject="Actualización de estado de entrega - Bausing",
+            html=html
+        )
 
 
 # Instancia global del servicio de email

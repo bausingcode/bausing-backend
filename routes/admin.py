@@ -6,6 +6,7 @@ from models.locality import Locality
 from models.admin_user import AdminUser, AdminRole
 from models.user import User
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 import jwt
 import uuid
 from datetime import datetime, timedelta

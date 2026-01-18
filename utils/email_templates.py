@@ -363,3 +363,74 @@ def get_custom_email_template(
         footer_text=footer_note
     )
 
+
+def get_delivery_status_template(
+    client_name: str,
+    order_number: Optional[str],
+    estado: str
+) -> str:
+    """
+    Plantilla para email de notificación de estado de entrega.
+    
+    Args:
+        client_name: Nombre del cliente
+        order_number: Número de pedido (opcional)
+        estado: Estado de entrega actual
+    
+    Returns:
+        HTML completo del email
+    """
+    # Formatear el nombre del estado para mostrarlo de forma amigable
+    estado_display = estado.replace('_', ' ').title()
+    
+    # Mensaje según el estado
+    mensaje_estado = {
+        'pendiente de entrega': 'Tu pedido está siendo preparado y pronto será enviado.',
+        'en camino': '¡Tu pedido está en camino! Estaremos en contacto contigo.',
+        'entregado': '¡Tu pedido ha sido entregado! Esperamos que disfrutes tu compra.',
+        'cancelado': 'Tu pedido ha sido cancelado. Si tienes alguna pregunta, contáctanos.'
+    }.get(estado.lower(), 'El estado de tu pedido ha sido actualizado.')
+    
+    order_info = ""
+    if order_number:
+        order_info = f"""
+                                <div style="background-color: {BG_FOOTER}; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                                    <p style="margin: 0; color: {TEXT_DARK}; font-size: 14px; font-weight: 600;">
+                                        Número de pedido: <span style="color: {BRAND_COLOR};">{order_number}</span>
+                                    </p>
+                                </div>
+        """
+    
+    content = f"""
+                                <p style="margin: 0 0 20px; color: {TEXT_DARK}; font-size: 16px; line-height: 1.6;">
+                                    Hola <strong style="color: {BRAND_COLOR};">{client_name}</strong>,
+                                </p>
+                                <p style="margin: 0 0 30px; color: {TEXT_MEDIUM}; font-size: 16px; line-height: 1.6;">
+                                    Te informamos que el estado de tu pedido ha sido actualizado.
+                                </p>
+                                
+                                {order_info}
+                                
+                                <div style="background-color: {BG_FOOTER}; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid {BRAND_COLOR};">
+                                    <p style="margin: 0 0 10px; color: {TEXT_DARK}; font-size: 14px; font-weight: 600;">
+                                        Estado actual:
+                                    </p>
+                                    <p style="margin: 0; color: {BRAND_COLOR}; font-size: 16px; font-weight: 700;">
+                                        {estado_display}
+                                    </p>
+                                    <p style="margin: 15px 0 0; color: {TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                        {mensaje_estado}
+                                    </p>
+                                </div>
+                                
+                                <p style="margin: 30px 0 0; color: {TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
+                                    Si tienes alguna pregunta sobre tu pedido, no dudes en contactarnos.
+                                </p>
+    """
+    
+    return get_base_email_structure(
+        title="Actualización de estado de entrega - Bausing",
+        header_text="Actualización de tu pedido",
+        content_html=content
+    )
+

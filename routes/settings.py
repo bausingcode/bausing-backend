@@ -33,6 +33,59 @@ def get_public_phone():
             'error': str(e)
         }), 500
 
+
+@public_settings_bp.route('/settings/public/footer', methods=['GET'])
+def get_public_footer():
+    """
+    Obtener datos de contacto del footer (sin autenticación)
+    """
+    try:
+        settings = SystemSettings.query.filter(
+            SystemSettings.key.in_([
+                'general.phone',
+                'general.email',
+                'general.address',
+                'general.instagram_url',
+                'general.facebook_url',
+                'general.tiktok_url'
+            ])
+        ).all()
+        
+        footer_data = {
+            'phone': None,
+            'email': None,
+            'address': None,
+            'instagram_url': None,
+            'facebook_url': None,
+            'tiktok_url': None
+        }
+        
+        for setting in settings:
+            key = setting.key.replace('general.', '')
+            if key == 'phone':
+                footer_data['phone'] = setting.value
+            elif key == 'email':
+                footer_data['email'] = setting.value
+            elif key == 'address':
+                footer_data['address'] = setting.value
+            elif key == 'instagram_url':
+                footer_data['instagram_url'] = setting.value
+            elif key == 'facebook_url':
+                footer_data['facebook_url'] = setting.value
+            elif key == 'tiktok_url':
+                footer_data['tiktok_url'] = setting.value
+        
+        return jsonify({
+            'success': True,
+            'data': footer_data
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @settings_bp.route('/settings', methods=['GET'])
 @admin_required
 def get_settings():
@@ -382,7 +435,13 @@ def update_general_settings():
 
         # Mapeo de campos del frontend a keys de la base de datos
         general_mappings = {
-            'telefono': ('general.phone', 'string', 'Número de teléfono de Bausing')
+            'telefono': ('general.phone', 'string', 'Número de teléfono de Bausing'),
+            'diasEstimadosEnvio': ('general.estimated_shipping_days', 'number', 'Días estimados para envío de pedidos'),
+            'email': ('general.email', 'string', 'Email de contacto de Bausing'),
+            'direccion': ('general.address', 'string', 'Dirección física de Bausing'),
+            'instagramUrl': ('general.instagram_url', 'string', 'URL de Instagram'),
+            'facebookUrl': ('general.facebook_url', 'string', 'URL de Facebook'),
+            'tiktokUrl': ('general.tiktok_url', 'string', 'URL de TikTok')
         }
 
         updated_settings = []

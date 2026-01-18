@@ -8,6 +8,7 @@ def register_routes(app):
     from .localities import localities_bp
     from .admin import admin_bp
     from .admin_auth import admin_auth_bp
+    from .admin_stats import admin_stats_bp
     from .images import images_bp
     from .promos import promos_bp
     from .settings import settings_bp, public_settings_bp
@@ -25,6 +26,7 @@ def register_routes(app):
     app.register_blueprint(localities_bp, url_prefix='/localities')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(admin_auth_bp, url_prefix='/admin/auth')
+    app.register_blueprint(admin_stats_bp, url_prefix='/admin')
     app.register_blueprint(images_bp, url_prefix='')
     app.register_blueprint(promos_bp, url_prefix='/promos')
     app.register_blueprint(settings_bp, url_prefix='/admin')
