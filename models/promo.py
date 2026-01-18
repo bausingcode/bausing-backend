@@ -15,7 +15,9 @@ class Promo(db.Model):
     start_at = db.Column(db.DateTime, nullable=False)
     end_at = db.Column(db.DateTime, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    allows_wallet = db.Column(db.Boolean, default=True, nullable=False)  # Compatible con Pesos Bausing
+    # created_at puede no existir en la tabla - comentar hasta agregar la columna en DB
+    # created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
     applicability = db.relationship('PromoApplicability', backref='promo', lazy=True, cascade='all, delete-orphan')
@@ -31,8 +33,12 @@ class Promo(db.Model):
             'start_at': self.start_at.isoformat() if self.start_at else None,
             'end_at': self.end_at.isoformat() if self.end_at else None,
             'is_active': self.is_active,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'allows_wallet': self.allows_wallet
         }
+        # created_at puede no existir si la columna no está en la DB
+        if hasattr(self, 'created_at') and self.created_at:
+            data['created_at'] = self.created_at.isoformat()
+        
         if include_applicability:
             data['applicability'] = [app.to_dict() for app in self.applicability]
         return data

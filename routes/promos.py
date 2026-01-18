@@ -29,16 +29,28 @@ def get_promos():
                 Promo.end_at >= now
             )
         
-        promos = query.order_by(Promo.created_at.desc()).all()
+        # Ordenar por id (created_at puede no existir en la tabla)
+        promos = query.order_by(Promo.id.desc()).all()
         
         return jsonify({
             'success': True,
             'data': [promo.to_dict(include_applicability=include_applicability) for promo in promos]
         }), 200
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print("=" * 50)
+        print("ERROR in get_promos:")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        print("Traceback:")
+        print(error_trace)
+        print("=" * 50)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'error_type': type(e).__name__,
+            'traceback': error_trace if request.args.get('debug') == 'true' else None
         }), 500
 
 @promos_bp.route('/<uuid:promo_id>', methods=['GET'])
@@ -107,7 +119,8 @@ def create_promo():
             extra_config=data.get('extra_config'),
             start_at=start_at,
             end_at=end_at,
-            is_active=data.get('is_active', True)
+            is_active=data.get('is_active', True),
+            allows_wallet=data.get('allows_wallet', True)
         )
         
         db.session.add(promo)
@@ -214,6 +227,8 @@ def update_promo(promo_id):
             promo.end_at = datetime.fromisoformat(data['end_at'].replace('Z', '+00:00'))
         if 'is_active' in data:
             promo.is_active = data.get('is_active')
+        if 'allows_wallet' in data:
+            promo.allows_wallet = data.get('allows_wallet', True)
         
         # Validar fechas si ambas están presentes
         if promo.start_at and promo.end_at and promo.start_at >= promo.end_at:
