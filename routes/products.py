@@ -33,6 +33,14 @@ def get_products():
     - include_promos: incluir promociones aplicables (true/false)
     """
     try:
+        # Pre-cargar el catálogo "Cordoba capital" para optimizar (si no hay locality_id)
+        from models.product import get_cordoba_capital_catalog_id
+        locality_id = request.args.get('locality_id')
+        if not locality_id:
+            # Pre-cargar el cache del catálogo por defecto
+            get_cordoba_capital_catalog_id()
+        
+        print(f"[DEBUG] get_products - Parámetros recibidos: {dict(request.args)}")
         # Parámetros de búsqueda
         search = request.args.get('search', '').strip()
         category_id = request.args.get('category_id')
@@ -40,7 +48,6 @@ def get_products():
         is_active = request.args.get('is_active')
         min_price = request.args.get('min_price', type=float)
         max_price = request.args.get('max_price', type=float)
-        locality_id = request.args.get('locality_id')
         in_stock = request.args.get('in_stock')
         sort = request.args.get('sort', 'created_at_desc')
         
@@ -53,8 +60,14 @@ def get_products():
         include_images = request.args.get('include_images', 'false').lower() == 'true'
         include_promos = request.args.get('include_promos', 'false').lower() == 'true'
         
-        # Construir query base
-        query = Product.query.options(joinedload(Product.images))
+        # Construir query base - cargar imágenes y subcategorías asociadas
+        from models.product import ProductSubcategory
+        from models.category import Category, CategoryOption
+        query = Product.query.options(
+            joinedload(Product.images),
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option)
+        )
         
         # Búsqueda por texto
         if search:
@@ -88,19 +101,72 @@ def get_products():
         
         # Filtro por precio
         if min_price is not None or max_price is not None or locality_id:
-            # Necesitamos hacer join con variantes y precios
-            query = query.join(ProductVariant).join(ProductPrice)
-            
-            if locality_id:
-                query = query.filter(ProductPrice.locality_id == locality_id)
-            
-            if min_price is not None:
-                query = query.filter(ProductPrice.price >= min_price)
-            
-            if max_price is not None:
-                query = query.filter(ProductPrice.price <= max_price)
-            
-            query = query.distinct()
+            print(f"[DEBUG] Aplicando filtro de precio - min_price: {min_price}, max_price: {max_price}, locality_id: {locality_id}")
+            # Necesitamos hacer join con variantes, options y precios
+            # ProductPrice.product_variant_id apunta a ProductVariantOption.id, no a ProductVariant.id
+            try:
+                # Join correcto: Product -> ProductVariant -> ProductVariantOption -> ProductPrice
+                # ProductVariant.product_id -> Product.id
+                # ProductVariantOption.product_variant_id -> ProductVariant.id
+                # ProductPrice.product_variant_id -> ProductVariantOption.id
+                query = query.join(
+                    ProductVariant, ProductVariant.product_id == Product.id
+                ).join(
+                    ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+                ).join(
+                    ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+                )
+                
+                # Si hay locality_id, filtrar por su catálogo; si no, usar "Cordoba capital" por defecto
+                try:
+                    import uuid as uuid_lib
+                    from models.catalog import LocalityCatalog, Catalog
+                    
+                    if locality_id:
+                        locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                        print(f"[DEBUG] Filtrando por locality_id (UUID): {locality_uuid}")
+                        # Buscar el catálogo de esta localidad
+                        locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                        if locality_catalog:
+                            # Filtrar por catalog_id (nuevo sistema)
+                            print(f"[DEBUG] Filtrando por catalog_id: {locality_catalog.catalog_id}")
+                            query = query.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                        else:
+                            # Compatibilidad hacia atrás: filtrar por locality_id
+                            print(f"[DEBUG] No se encontró catálogo para localidad, usando locality_id (compatibilidad)")
+                            query = query.filter(ProductPrice.locality_id == locality_uuid)
+                    else:
+                        # Si no hay localidad, usar el catálogo "Cordoba capital" por defecto
+                        from models.product import get_cordoba_capital_catalog_id
+                        cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                        if cordoba_capital_catalog_id:
+                            print(f"[DEBUG] No hay localidad, usando catálogo por defecto 'Cordoba capital': {cordoba_capital_catalog_id}")
+                            query = query.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
+                except (ValueError, TypeError) as e:
+                    print(f"[ERROR] Invalid locality_id format: {locality_id}, error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return jsonify({
+                        'success': False,
+                        'error': f'Formato de locality_id inválido: {locality_id}'
+                    }), 400
+                
+                if min_price is not None:
+                    query = query.filter(ProductPrice.price >= min_price)
+                
+                if max_price is not None:
+                    query = query.filter(ProductPrice.price <= max_price)
+                
+                query = query.distinct()
+                print(f"[DEBUG] Query después de filtros de precio aplicados")
+            except Exception as e:
+                print(f"[ERROR] Error en join de precios: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'success': False,
+                    'error': f'Error al filtrar por precio: {str(e)}'
+                }), 500
         
         # Ordenamiento
         if sort == 'name':
@@ -110,39 +176,109 @@ def get_products():
         elif sort == 'price_asc':
             if locality_id:
                 # Ordenar por precio mínimo en la localidad específica
-                subquery = db.session.query(
-                    ProductPrice.product_variant_id,
-                    func.min(ProductPrice.price).label('min_price')
-                ).filter_by(locality_id=locality_id).group_by(ProductPrice.product_variant_id).subquery()
-                
-                query = query.join(ProductVariant).join(
-                    subquery, ProductVariant.id == subquery.c.product_variant_id
-                ).order_by(subquery.c.min_price.asc()).distinct()
+                # ProductPrice.product_variant_id apunta a ProductVariantOption.id
+                try:
+                    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+                    import uuid as uuid_lib
+                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                    
+                    # Buscar el catálogo de esta localidad
+                    from models.catalog import LocalityCatalog
+                    locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                    
+                    subquery = db.session.query(
+                        ProductVariantOption.product_variant_id,
+                        func.min(ProductPrice.price).label('min_price')
+                    ).join(
+                        ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+                    )
+                    if locality_catalog:
+                        # Filtrar por catalog_id (nuevo sistema)
+                        subquery = subquery.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                    else:
+                        # Compatibilidad hacia atrás: filtrar por locality_id
+                        subquery = subquery.filter(ProductPrice.locality_id == locality_uuid)
+                    subquery = subquery.group_by(ProductVariantOption.product_variant_id).subquery()
+                    
+                    query = query.join(ProductVariant).join(
+                        subquery, ProductVariant.id == subquery.c.product_variant_id
+                    ).order_by(subquery.c.min_price.asc()).distinct()
+                except (ValueError, TypeError) as e:
+                    print(f"[ERROR] Invalid locality_id format for sorting: {locality_id}, error: {e}")
+                    # Continuar sin ordenar por precio si hay error
+                    query = query.order_by(Product.created_at.desc())
             else:
-                # Ordenar por precio mínimo general
-                subquery = db.session.query(
-                    ProductVariant.product_id,
-                    func.min(ProductPrice.price).label('min_price')
-                ).join(ProductPrice).group_by(ProductVariant.product_id).subquery()
+                # Ordenar por precio mínimo del catálogo "Cordoba capital" por defecto
+                from models.product import get_cordoba_capital_catalog_id
+                cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                if cordoba_capital_catalog_id:
+                    subquery = db.session.query(
+                        ProductVariant.product_id,
+                        func.min(ProductPrice.price).label('min_price')
+                    ).join(ProductPrice).filter(
+                        ProductPrice.catalog_id == cordoba_capital_catalog_id
+                    ).group_by(ProductVariant.product_id).subquery()
+                else:
+                    # Si no existe el catálogo, ordenar por precio mínimo general
+                    subquery = db.session.query(
+                        ProductVariant.product_id,
+                        func.min(ProductPrice.price).label('min_price')
+                    ).join(ProductPrice).group_by(ProductVariant.product_id).subquery()
                 
                 query = query.join(subquery, Product.id == subquery.c.product_id).order_by(
                     subquery.c.min_price.asc()
                 )
         elif sort == 'price_desc':
             if locality_id:
-                subquery = db.session.query(
-                    ProductPrice.product_variant_id,
-                    func.max(ProductPrice.price).label('max_price')
-                ).filter_by(locality_id=locality_id).group_by(ProductPrice.product_variant_id).subquery()
-                
-                query = query.join(ProductVariant).join(
-                    subquery, ProductVariant.id == subquery.c.product_variant_id
-                ).order_by(subquery.c.max_price.desc()).distinct()
+                # Ordenar por precio máximo en la localidad específica
+                # ProductPrice.product_variant_id apunta a ProductVariantOption.id
+                try:
+                    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+                    import uuid as uuid_lib
+                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                    
+                    # Buscar el catálogo de esta localidad
+                    from models.catalog import LocalityCatalog
+                    locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                    
+                    subquery = db.session.query(
+                        ProductVariantOption.product_variant_id,
+                        func.max(ProductPrice.price).label('max_price')
+                    ).join(
+                        ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+                    )
+                    if locality_catalog:
+                        # Filtrar por catalog_id (nuevo sistema)
+                        subquery = subquery.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                    else:
+                        # Compatibilidad hacia atrás: filtrar por locality_id
+                        subquery = subquery.filter(ProductPrice.locality_id == locality_uuid)
+                    subquery = subquery.group_by(ProductVariantOption.product_variant_id).subquery()
+                    
+                    query = query.join(ProductVariant).join(
+                        subquery, ProductVariant.id == subquery.c.product_variant_id
+                    ).order_by(subquery.c.max_price.desc()).distinct()
+                except (ValueError, TypeError) as e:
+                    print(f"[ERROR] Invalid locality_id format for sorting: {locality_id}, error: {e}")
+                    # Continuar sin ordenar por precio si hay error
+                    query = query.order_by(Product.created_at.desc())
             else:
-                subquery = db.session.query(
-                    ProductVariant.product_id,
-                    func.max(ProductPrice.price).label('max_price')
-                ).join(ProductPrice).group_by(ProductVariant.product_id).subquery()
+                # Ordenar por precio máximo del catálogo "Cordoba capital" por defecto
+                from models.product import get_cordoba_capital_catalog_id
+                cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                if cordoba_capital_catalog_id:
+                    subquery = db.session.query(
+                        ProductVariant.product_id,
+                        func.max(ProductPrice.price).label('max_price')
+                    ).join(ProductPrice).filter(
+                        ProductPrice.catalog_id == cordoba_capital_catalog_id
+                    ).group_by(ProductVariant.product_id).subquery()
+                else:
+                    # Si no existe el catálogo, ordenar por precio máximo general
+                    subquery = db.session.query(
+                        ProductVariant.product_id,
+                        func.max(ProductPrice.price).label('max_price')
+                    ).join(ProductPrice).group_by(ProductVariant.product_id).subquery()
                 
                 query = query.join(subquery, Product.id == subquery.c.product_id).order_by(
                     subquery.c.max_price.desc()
@@ -153,26 +289,194 @@ def get_products():
             query = query.order_by(Product.created_at.desc())
         
         # Paginación
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-        products = pagination.items
+        try:
+            print(f"[DEBUG] Ejecutando query de productos - page: {page}, per_page: {per_page}")
+            print(f"[DEBUG] Query SQL (aproximado): {str(query)}")
+            pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+            products = pagination.items
+            print(f"[DEBUG] Productos obtenidos: {len(products)}")
+        except Exception as e:
+            print(f"[ERROR] Error en paginación: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({
+                'success': False,
+                'error': f'Error al paginar productos: {str(e)}'
+            }), 500
+        
+        # Pre-calcular precios mínimos y máximos para todos los productos de una vez (optimización)
+        # Esto evita llamar get_min_price/get_max_price para cada producto individualmente
+        from models.product import get_cordoba_capital_catalog_id
+        from models.catalog import LocalityCatalog
+        import uuid as uuid_lib
+        
+        # Determinar el catalog_id a usar
+        target_catalog_id = None
+        if locality_id:
+            try:
+                locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                if locality_catalog:
+                    target_catalog_id = locality_catalog.catalog_id
+            except:
+                pass
+        else:
+            target_catalog_id = get_cordoba_capital_catalog_id()
+        
+        # Pre-calcular min/max prices y promociones para todos los productos de una vez (optimización)
+        product_ids = [p.id for p in products]
+        price_map = {}  # {product_id: {'min': float, 'max': float}}
+        promo_map = {}  # {product_id: [promo_dict, ...]}
+        category_map = {}  # {product_id: category_id}
+        
+        if product_ids and target_catalog_id:
+            # Query optimizado: obtener min/max price por producto en una sola consulta
+            price_results = db.session.query(
+                ProductVariant.product_id,
+                func.min(ProductPrice.price).label('min_price'),
+                func.max(ProductPrice.price).label('max_price')
+            ).join(
+                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+            ).join(
+                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+            ).filter(
+                ProductVariant.product_id.in_(product_ids),
+                ProductPrice.catalog_id == target_catalog_id
+            ).group_by(ProductVariant.product_id).all()
+            
+            for result in price_results:
+                price_map[result.product_id] = {
+                    'min': float(result.min_price) if result.min_price else 0.0,
+                    'max': float(result.max_price) if result.max_price else 0.0
+                }
+        elif product_ids:
+            # Si no hay catalog_id, buscar por locality_id o todos los precios
+            if locality_id:
+                try:
+                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                    price_results = db.session.query(
+                        ProductVariant.product_id,
+                        func.min(ProductPrice.price).label('min_price'),
+                        func.max(ProductPrice.price).label('max_price')
+                    ).join(
+                        ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+                    ).join(
+                        ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+                    ).filter(
+                        ProductVariant.product_id.in_(product_ids),
+                        ProductPrice.locality_id == locality_uuid
+                    ).group_by(ProductVariant.product_id).all()
+                    
+                    for result in price_results:
+                        price_map[result.product_id] = {
+                            'min': float(result.min_price) if result.min_price else 0.0,
+                            'max': float(result.max_price) if result.max_price else 0.0
+                        }
+                except:
+                    pass
+        
+        # Pre-calcular promociones para todos los productos de una vez (solo si include_promos=True)
+        if include_promos and product_ids:
+            from models.promo import Promo, PromoApplicability
+            from datetime import datetime
+            
+            # Obtener categorías de todos los productos
+            products_with_categories = db.session.query(
+                Product.id, Product.category_id
+            ).filter(Product.id.in_(product_ids)).all()
+            
+            for p in products_with_categories:
+                category_map[p.id] = p.category_id
+            
+            # Cargar todas las promociones válidas y sus aplicabilidades de una vez
+            now = datetime.utcnow()
+            all_promo_applicabilities = PromoApplicability.query.join(
+                Promo, PromoApplicability.promo_id == Promo.id
+            ).filter(
+                Promo.is_active == True,
+                Promo.start_at <= now,
+                Promo.end_at >= now
+            ).options(
+                joinedload(PromoApplicability.promo)
+            ).all()
+            
+            # Organizar promociones por producto
+            for app in all_promo_applicabilities:
+                promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
+                if not promo_dict:
+                    continue
+                
+                if app.applies_to == 'all':
+                    # Aplicar a todos los productos
+                    for pid in product_ids:
+                        if pid not in promo_map:
+                            promo_map[pid] = []
+                        if promo_dict not in promo_map[pid]:  # Evitar duplicados
+                            promo_map[pid].append(promo_dict)
+                elif app.applies_to == 'product' and app.product_id:
+                    # Aplicar a producto específico
+                    if app.product_id in product_ids:
+                        if app.product_id not in promo_map:
+                            promo_map[app.product_id] = []
+                        if promo_dict not in promo_map[app.product_id]:  # Evitar duplicados
+                            promo_map[app.product_id].append(promo_dict)
+                elif app.applies_to == 'category' and app.category_id:
+                    # Aplicar a todos los productos de esta categoría
+                    for pid, cat_id in category_map.items():
+                        if cat_id == app.category_id:
+                            if pid not in promo_map:
+                                promo_map[pid] = []
+                            if promo_dict not in promo_map[pid]:  # Evitar duplicados
+                                promo_map[pid].append(promo_dict)
         
         # Serializar productos
         products_data = []
         for product in products:
             try:
+                # Convertir locality_id a UUID si es string
+                locality_uuid = None
+                if locality_id:
+                    try:
+                        locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                    except (ValueError, TypeError) as e:
+                        print(f"[ERROR] Invalid locality_id format in to_dict: {locality_id}, error: {e}")
+                        locality_uuid = None
+                
+                # Usar precios y promociones pre-calculados si están disponibles
                 product_dict = product.to_dict(
                     include_variants=include_variants,
                     include_images=include_images,
-                    locality_id=locality_id,
-                    include_promos=include_promos
+                    locality_id=str(locality_uuid) if locality_uuid else None,
+                    include_promos=False  # Deshabilitado porque las pre-calculamos
                 )
+                
+                # Sobrescribir con precios pre-calculados si están disponibles (más rápido)
+                if product.id in price_map:
+                    product_dict['min_price'] = price_map[product.id]['min']
+                    product_dict['max_price'] = price_map[product.id]['max']
+                    if price_map[product.id]['min'] > 0 or price_map[product.id]['max'] > 0:
+                        product_dict['price_range'] = price_map[product.id]['min'] if price_map[product.id]['min'] == price_map[product.id]['max'] else f"{price_map[product.id]['min']} - {price_map[product.id]['max']}"
+                    else:
+                        product_dict['price_range'] = "0"
+                
+                # Agregar promociones pre-calculadas
+                if include_promos:
+                    if product.id in promo_map:
+                        product_dict['promos'] = promo_map[product.id]
+                    else:
+                        product_dict['promos'] = []
+                
                 products_data.append(product_dict)
             except Exception as e:
                 # Log error but continue with other products
-                print(f"Error serializing product {product.id}: {str(e)}")
+                print(f"[ERROR] Error serializing product {product.id}: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 continue
+        
+        print(f"[DEBUG] Productos serializados: {len(products_data)}")
+        if len(products_data) > 0:
+            print(f"[DEBUG] Primer producto serializado - ID: {products_data[0].get('id')}, min_price: {products_data[0].get('min_price')}, max_price: {products_data[0].get('max_price')}")
         
         return jsonify({
             'success': True,
@@ -185,6 +489,9 @@ def get_products():
             }
         }), 200
     except Exception as e:
+        print(f"[ERROR] Error general en get_products: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -201,32 +508,105 @@ def get_product(product_id):
     - include_promos: incluir promociones aplicables (default: true)
     - locality_id: filtrar precios por localidad
     """
+    # Limpiar cualquier transacción abortada antes de comenzar
     try:
+        db.session.rollback()
+    except:
+        pass
+    
+    try:
+        print(f"[DEBUG] get_product llamado con product_id: {product_id}")
         include_variants = request.args.get('include_variants', 'true').lower() == 'true'
         include_images = request.args.get('include_images', 'true').lower() == 'true'
         include_promos = request.args.get('include_promos', 'true').lower() == 'true'
         locality_id = request.args.get('locality_id')
         
-        product = Product.query.options(joinedload(Product.images)).get_or_404(product_id)
+        # Pre-cargar mapeo de localidades a catálogos para optimizar
+        from models.catalog import LocalityCatalog
+        locality_to_catalog = {}
+        if locality_id:
+            try:
+                import uuid as uuid_lib
+                locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                if locality_catalog:
+                    locality_to_catalog[str(locality_uuid)] = str(locality_catalog.catalog_id)
+            except:
+                pass
+        
+        # Cargar todas las relaciones necesarias
+        from models.product import ProductSubcategory
+        from models.category import Category, CategoryOption
+        # Cargar todas las relaciones necesarias con eager loading para optimizar
+        product = Product.query.options(
+            joinedload(Product.images),
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
+            joinedload(Product.variants).joinedload(ProductVariant.options).joinedload(
+                ProductVariantOption.prices
+            ).joinedload(ProductPrice.catalog),  # Cargar catálogo de los precios
+            joinedload(Product.variants).joinedload(ProductVariant.options).joinedload(
+                ProductVariantOption.prices
+            ).joinedload(ProductPrice.locality)  # Mantener localidad por compatibilidad
+        ).get(product_id)
+        
+        if not product:
+            print(f"[DEBUG] Producto {product_id} no encontrado")
+            return jsonify({
+                'success': False,
+                'error': f'Producto con ID {product_id} no encontrado'
+            }), 404
+        
+        # Debug: Log de subcategorías
+        print(f"[DEBUG] Product {product_id} - Subcategorías encontradas: {len(product.subcategory_associations)}")
+        for assoc in product.subcategory_associations:
+            print(f"[DEBUG]   - Subcategoría ID: {assoc.subcategory_id}, Nombre: {assoc.subcategory.name if assoc.subcategory else 'N/A'}")
+        
+        # Debug: Log de variantes y precios
+        print(f"[DEBUG] Product {product_id} - Variantes encontradas: {len(product.variants)}")
+        for variant in product.variants:
+            total_prices = sum(len(option.prices) for option in variant.options)
+            print(f"[DEBUG]   - Variant ID: {variant.id}, SKU: {variant.sku}, Options: {len(variant.options)}, Total Precios: {total_prices}")
+            for option in variant.options:
+                print(f"[DEBUG]     - Option: {option.name}, Precios: {len(option.prices)}")
+                for price in option.prices:
+                    print(f"[DEBUG]       - Precio: locality_id={price.locality_id}, price={price.price}")
         
         # Verificar que el producto esté activo (para ecommerce público)
         # Si es admin, puede ver productos inactivos también
         # Por ahora, permitimos ver todos
         
+        product_dict = product.to_dict(
+            include_variants=include_variants,
+            include_images=include_images,
+            locality_id=locality_id,
+            include_promos=include_promos,
+            locality_to_catalog_map=locality_to_catalog
+        )
+        
+        # Debug: Log del dict final
+        print(f"[DEBUG] Product {product_id} - Subcategorías en dict: {len(product_dict.get('subcategories', []))}")
+        print(f"[DEBUG] Product {product_id} - Variantes en dict: {len(product_dict.get('variants', []))}")
+        
         return jsonify({
             'success': True,
-            'data': product.to_dict(
-                include_variants=include_variants,
-                include_images=include_images,
-                locality_id=locality_id,
-                include_promos=include_promos
-            )
+            'data': product_dict
         }), 200
     except Exception as e:
+        import traceback
+        from flask import current_app
+        error_trace = traceback.format_exc()
+        print(f"[ERROR] Error al obtener producto {product_id}: {error_trace}")
+        # Hacer rollback para limpiar cualquier transacción abortada
+        try:
+            db.session.rollback()
+        except:
+            pass
         return jsonify({
             'success': False,
-            'error': str(e)
-        }), 404
+            'error': str(e),
+            'traceback': error_trace if current_app.config.get('DEBUG') else None
+        }), 500
 
 @products_bp.route('/<uuid:product_id>/combos', methods=['GET'])
 def get_product_combos(product_id):
@@ -489,33 +869,48 @@ def create_complete_product():
             all_prices_data = []
             for option_data in variant_info['options'].values():
                 for price_data in option_data['prices']:
-                    locality_id = price_data.get('locality_id')
+                    catalog_id = price_data.get('catalog_id')
+                    locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
                     price_value = price_data.get('price')
-                    if locality_id and price_value is not None:
-                        price_key = (locality_id, float(price_value))
+                    price_key_id = catalog_id or locality_id
+                    if price_key_id and price_value is not None:
+                        price_key = (price_key_id, float(price_value))
                         if price_key not in prices_added:
                             all_prices_data.append(price_data)
                             prices_added.add(price_key)
             
             # Crear los precios únicos
             for price_data in all_prices_data:
-                locality_id = price_data.get('locality_id')
+                catalog_id = price_data.get('catalog_id')
+                locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
                 price_value = price_data.get('price')
                 
-                if not locality_id or price_value is None:
+                if not price_value or price_value is None:
                     continue
                 
-                # Verificar que la localidad existe
-                locality = Locality.query.get(locality_id)
-                if not locality:
+                # Preferir catalog_id, pero mantener compatibilidad con locality_id
+                if catalog_id:
+                    from models.catalog import Catalog
+                    catalog = Catalog.query.get(catalog_id)
+                    if not catalog:
+                        continue
+                    price = ProductPrice(
+                        product_variant_id=variant.id,
+                        catalog_id=catalog_id,
+                        price=price_value
+                    )
+                elif locality_id:
+                    locality = Locality.query.get(locality_id)
+                    if not locality:
+                        continue
+                    price = ProductPrice(
+                        product_variant_id=variant.id,
+                        locality_id=locality_id,
+                        price=price_value
+                    )
+                else:
                     continue
                 
-                # Crear el precio (no verificamos existing_price porque estamos en una nueva creación)
-                price = ProductPrice(
-                    product_variant_id=variant.id,
-                    locality_id=locality_id,
-                    price=price_value
-                )
                 db.session.add(price)
             
             # Hacer flush para obtener los IDs de los precios creados

@@ -381,15 +381,20 @@ def get_delivery_status_template(
         HTML completo del email
     """
     # Formatear el nombre del estado para mostrarlo de forma amigable
-    estado_display = estado.replace('_', ' ').title()
+    estado_lower = estado.lower()
+    estado_display_map = {
+        'pendiente de entrega': 'Pendiente de entrega',
+        'en reparto': 'En reparto',
+        'finalizado': 'Finalizado'
+    }
+    estado_display = estado_display_map.get(estado_lower, estado.replace('_', ' ').title())
     
     # Mensaje según el estado
     mensaje_estado = {
         'pendiente de entrega': 'Tu pedido está siendo preparado y pronto será enviado.',
-        'en camino': '¡Tu pedido está en camino! Estaremos en contacto contigo.',
-        'entregado': '¡Tu pedido ha sido entregado! Esperamos que disfrutes tu compra.',
-        'cancelado': 'Tu pedido ha sido cancelado. Si tienes alguna pregunta, contáctanos.'
-    }.get(estado.lower(), 'El estado de tu pedido ha sido actualizado.')
+        'en reparto': '¡Tu pedido está en reparto! Estaremos en contacto contigo.',
+        'finalizado': '¡Tu pedido ha sido entregado! Esperamos que disfrutes tu compra.'
+    }.get(estado_lower, 'El estado de tu pedido ha sido actualizado.')
     
     order_info = ""
     if order_number:

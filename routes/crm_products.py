@@ -1,7 +1,9 @@
-from flask import Blueprint, request, jsonify, current_app as app
+from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.product import Product, ProductVariant, ProductVariantOption, ProductPrice
 from models.locality import Locality
+from models.catalog import Catalog
+from models.category import Category, CategoryOption
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from routes.admin import admin_required
@@ -270,25 +272,76 @@ def complete_crm_product(product_id):
         check_result = db.session.execute(text(check_query), {'crm_product_id': crm_product_id_int})
         existing_product_id = check_result.scalar()
         
-        if existing_product_id and not data.get('product_id'):
-            return jsonify({
-                'success': False,
-                'error': 'El producto CRM ya está vinculado a un producto'
-            }), 400
+        # Determinar qué producto usar
+        product = None
+        is_update = False
         
-        # Obtener o crear producto
-        if data.get('product_id'):
+        if existing_product_id:
+            # Hay un producto existente vinculado
+            request_product_id = data.get('product_id')
+            
+            if request_product_id:
+                # Si se proporciona product_id, debe coincidir con el existente
+                if str(existing_product_id) != str(request_product_id):
+                    return jsonify({
+                        'success': False,
+                        'error': 'El producto CRM ya está vinculado a otro producto diferente'
+                    }), 400
+                product = Product.query.get(request_product_id)
+            else:
+                # Si no se proporciona, usar el existente (actualización automática)
+                product = Product.query.get(existing_product_id)
+            
+            if not product:
+                return jsonify({
+                    'success': False,
+                    'error': 'Producto no encontrado'
+                }), 404
+            
+            is_update = True
+        elif data.get('product_id'):
+            # No hay producto vinculado pero se proporciona product_id (actualizar producto existente sin vincular)
             product = Product.query.get(data['product_id'])
             if not product:
                 return jsonify({
                     'success': False,
                     'error': 'Producto no encontrado'
                 }), 404
-            # Actualizar producto existente
+            is_update = True
+        
+        # Si hay producto, actualizarlo
+        if product:
+            # Excluir campos que son relaciones o que se manejan por separado
+            excluded_fields = {
+                'product_id', 'variants', 'images', 'category_option', 'subcategory_associations',
+                'created_at', 'id', 'subcategories'  # Campos que no deben actualizarse desde el request
+            }
+            
             for key, value in data.items():
-                if key != 'product_id' and hasattr(product, key):
+                # Solo asignar campos simples (no relaciones, no listas/dicts complejos)
+                if (key not in excluded_fields and 
+                    hasattr(product, key) and 
+                    not isinstance(value, (list, dict)) and
+                    not key.startswith('_')):
                     setattr(product, key, value)
-            product.crm_product_id = crm_product_id_int
+            
+            # Manejar category_id y category_option_id como UUIDs si están presentes
+            if 'category_id' in data and data['category_id']:
+                cat_id = data['category_id']
+                if isinstance(cat_id, uuid.UUID):
+                    product.category_id = cat_id
+                else:
+                    product.category_id = uuid.UUID(str(cat_id))
+            if 'category_option_id' in data and data['category_option_id']:
+                opt_id = data['category_option_id']
+                if isinstance(opt_id, uuid.UUID):
+                    product.category_option_id = opt_id
+                else:
+                    product.category_option_id = uuid.UUID(str(opt_id))
+            
+            # Vincular el CRM product_id si no está vinculado
+            if not product.crm_product_id:
+                product.crm_product_id = crm_product_id_int
         else:
             # Crear nuevo producto
             # Determinar si es combo basado en el crm_product usando SQL directo
@@ -314,8 +367,8 @@ def complete_crm_product(product_id):
                 size_label=data.get('size_label'),
                 sku=data.get('sku'),
                 crm_product_id=crm_product_id_int,
-                category_id=uuid.UUID(data['category_id']) if data.get('category_id') else None,
-                category_option_id=uuid.UUID(data['category_option_id']) if data.get('category_option_id') else None,
+                category_id=(uuid.UUID(str(data['category_id'])) if not isinstance(data['category_id'], uuid.UUID) else data['category_id']) if data.get('category_id') else None,
+                category_option_id=(uuid.UUID(str(data['category_option_id'])) if not isinstance(data['category_option_id'], uuid.UUID) else data['category_option_id']) if data.get('category_option_id') else None,
                 is_combo=is_combo,
                 is_active=data.get('is_active', True)
             )
@@ -323,25 +376,229 @@ def complete_crm_product(product_id):
         
         db.session.flush()  # Para obtener el ID del producto
         
-        # Crear variantes y precios si se proporcionaron
-        if data.get('variants'):
-            # Eliminar variantes existentes si es actualización
-            if data.get('product_id'):
-                # Eliminar options primero (por foreign key)
-                variants_to_delete = ProductVariant.query.filter_by(product_id=product.id).all()
-                for v in variants_to_delete:
-                    ProductVariantOption.query.filter_by(product_variant_id=v.id).delete()
-                ProductVariant.query.filter_by(product_id=product.id).delete()
+        # Eliminar variantes existentes si es actualización
+        if is_update:
+            # Eliminar variants, options y precios (los precios se eliminan automáticamente por cascade)
+            variants_to_delete = ProductVariant.query.filter_by(product_id=product.id).all()
+            for v in variants_to_delete:
+                # Eliminar opciones (los precios se eliminan automáticamente por cascade desde las opciones)
+                options_to_delete = ProductVariantOption.query.filter_by(product_variant_id=v.id).all()
+                for opt in options_to_delete:
+                    # Los precios se eliminan automáticamente por cascade desde ProductVariantOption
+                    db.session.delete(opt)
+                db.session.delete(v)
+            db.session.flush()
+            
+            # Manejar subcategorías si vienen en el request
+            if 'subcategory_ids' in data and isinstance(data['subcategory_ids'], list):
+                # Eliminar subcategorías existentes PRIMERO para evitar conflictos
+                from models.product import ProductSubcategory
+                existing_assocs = ProductSubcategory.query.filter_by(product_id=product.id).all()
+                print(f"[DEBUG] Eliminando {len(existing_assocs)} asociaciones existentes de subcategorías")
+                for assoc in existing_assocs:
+                    db.session.delete(assoc)
+                db.session.flush()
+                
+                # Crear nuevas subcategorías
+                # Para cada subcategoría, crear un registro por cada opción seleccionada
+                subcategories_to_create = []
+                for subcat_item in data['subcategory_ids']:
+                    # Puede ser un string (id) o un objeto con subcategory_id y category_option_id
+                    if isinstance(subcat_item, dict):
+                        subcat_id = subcat_item.get('subcategory_id') or subcat_item.get('id')
+                    else:
+                        subcat_id = subcat_item
+                    
+                    if subcat_id:
+                        # Convertir a string si es UUID y luego a UUID para asegurar el formato correcto
+                        subcat_id_str = str(subcat_id)
+                        subcat_id_uuid = uuid.UUID(subcat_id_str) if subcat_id_str else None
+                        
+                        # Obtener TODAS las opciones seleccionadas para esta subcategoría
+                        selected_opts = []
+                        if 'subcategory_options' in data and isinstance(data['subcategory_options'], dict):
+                            # Usar el string para buscar en el dict
+                            selected_opts = data['subcategory_options'].get(subcat_id_str, [])
+                            if not isinstance(selected_opts, list):
+                                selected_opts = [selected_opts] if selected_opts else []
+                        
+                        # Si hay opciones seleccionadas, crear un registro por cada opción
+                        if selected_opts and len(selected_opts) > 0:
+                            subcat = Category.query.get(subcat_id_uuid)
+                            if subcat:
+                                for opt_value in selected_opts:
+                                    # Buscar el ID de la opción por su valor
+                                    option_obj = CategoryOption.query.filter_by(
+                                        category_id=subcat_id_uuid,
+                                        value=str(opt_value)
+                                    ).first()
+                                    
+                                    if option_obj:
+                                        # Crear la asociación (ya eliminamos todas las anteriores con flush)
+                                        subcategory_assoc = ProductSubcategory(
+                                            product_id=product.id,
+                                            subcategory_id=subcat_id_uuid,
+                                            category_option_id=option_obj.id
+                                        )
+                                        db.session.add(subcategory_assoc)
+                                        print(f"[DEBUG] Creada asociación: producto={product.id}, subcategoría={subcat_id_uuid}, opción={option_obj.value} (id={option_obj.id})")
+                                    else:
+                                        print(f"[DEBUG] No se encontró opción con valor '{opt_value}' para subcategoría {subcat_id_uuid}")
+                        else:
+                            # Si no hay opciones, crear un registro sin opción (solo uno por subcategoría)
+                            if subcat_id_uuid:
+                                # Crear la asociación sin opción (ya eliminamos todas las anteriores con flush)
+                                subcategory_assoc = ProductSubcategory(
+                                    product_id=product.id,
+                                    subcategory_id=subcat_id_uuid,
+                                    category_option_id=None
+                                )
+                                db.session.add(subcategory_assoc)
+                                print(f"[DEBUG] Creada asociación sin opción: producto={product.id}, subcategoría={subcat_id_uuid}")
                 db.session.flush()
             
-            variants_data = data.get('variants', [])
+            # Si hay category_id que es una categoría padre, actualizarla
+            # (las subcategorías ya se manejaron arriba)
+            if 'category_id' in data and data['category_id']:
+                # Verificar que no sea una subcategoría
+                cat_id_val = data['category_id']
+                cat_id_uuid = cat_id_val if isinstance(cat_id_val, uuid.UUID) else uuid.UUID(str(cat_id_val))
+                category = Category.query.get(cat_id_uuid)
+                if category and not category.parent_id:
+                    product.category_id = cat_id_uuid
+        
+        variants_data = data.get('variants', [])
+        
+        # Si no hay variantes pero hay precios directos en el nivel del producto, crear variante default con opción
+        if not variants_data or len(variants_data) == 0:
+            # Verificar si hay precios directos en el nivel del producto
+            direct_prices = data.get('prices', [])
+            if direct_prices and len(direct_prices) > 0:
+                # Crear una variante "default" con una opción default
+                default_variant = ProductVariant(
+                    product_id=product.id,
+                    sku=None,  # Sin SKU para variante default
+                    price=None
+                )
+                db.session.add(default_variant)
+                db.session.flush()
+                
+                # Crear una opción default
+                default_option = ProductVariantOption(
+                    product_variant_id=default_variant.id,
+                    name='Default',
+                    stock=0
+                )
+                db.session.add(default_option)
+                db.session.flush()
+                
+                # Crear los precios para la opción default
+                # Aceptar tanto catalog_id como locality_id (compatibilidad hacia atrás)
+                price_list = direct_prices if isinstance(direct_prices, list) else [{'catalog_id': k, 'price': v} for k, v in direct_prices.items() if v]
+                for price_data in price_list:
+                    catalog_id = price_data.get('catalog_id')
+                    locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
+                    price_value = price_data.get('price')
+                    
+                    if not price_value or price_value is None:
+                        continue
+                    
+                    # Preferir catalog_id, pero mantener compatibilidad con locality_id
+                    if catalog_id:
+                        catalog = Catalog.query.get(catalog_id)
+                        if not catalog:
+                            continue
+                        price = ProductPrice(
+                            product_variant_id=default_option.id,
+                            catalog_id=catalog_id,
+                            price=price_value
+                        )
+                    elif locality_id:
+                        # Compatibilidad hacia atrás: usar locality_id
+                        locality = Locality.query.get(locality_id)
+                        if not locality:
+                            continue
+                        price = ProductPrice(
+                            product_variant_id=default_option.id,
+                            locality_id=locality_id,
+                            price=price_value
+                        )
+                    else:
+                        continue
+                    
+                    db.session.add(price)
+                
+                db.session.flush()
+        elif len(variants_data) > 0:
+            # Procesar variantes con atributos y opciones
             # Primero, agrupar todas las options por atributo
             variants_dict = {}  # {attr_name: {variant_obj, options: {attr_value: {stock, prices}}}}
             
             for idx, variant_data in enumerate(variants_data):
                 attributes = variant_data.get('attributes', {})
-                prices_data = variant_data.get('prices', [])
-                stock = variant_data.get('stock', 0)
+                prices_data = variant_data.get('prices', {})  # Ahora viene como objeto {catalog_id: price} o {locality_id: price}
+                # Convertir prices_data de objeto a array si es necesario
+                if isinstance(prices_data, dict):
+                    # Intentar detectar si son catalog_id o locality_id
+                    prices_data = [{'catalog_id': k, 'price': v} if k else None for k, v in prices_data.items() if v and k]
+                    prices_data = [p for p in prices_data if p]  # Filtrar None
+                elif not isinstance(prices_data, list):
+                    prices_data = []
+                
+                # Si no hay atributos pero hay precios, crear una variante default para esta variant_data
+                if not attributes and prices_data:
+                    default_variant = ProductVariant(
+                        product_id=product.id,
+                        sku=None,
+                        price=None
+                    )
+                    db.session.add(default_variant)
+                    db.session.flush()
+                    
+                    # Crear una opción default para esta variante
+                    default_option = ProductVariantOption(
+                        product_variant_id=default_variant.id,
+                        name='Default',
+                        stock=0
+                    )
+                    db.session.add(default_option)
+                    db.session.flush()
+                    
+                    # Crear los precios para esta opción default
+                    for price_data in prices_data:
+                        catalog_id = price_data.get('catalog_id')
+                        locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
+                        price_value = price_data.get('price')
+                        
+                        if not price_value or price_value is None:
+                            continue
+                        
+                        # Preferir catalog_id, pero mantener compatibilidad con locality_id
+                        if catalog_id:
+                            catalog = Catalog.query.get(catalog_id)
+                            if not catalog:
+                                continue
+                            price = ProductPrice(
+                                product_variant_id=default_option.id,
+                                catalog_id=catalog_id,
+                                price=price_value
+                            )
+                        elif locality_id:
+                            locality = Locality.query.get(locality_id)
+                            if not locality:
+                                continue
+                            price = ProductPrice(
+                                product_variant_id=default_option.id,
+                                locality_id=locality_id,
+                                price=price_value
+                            )
+                        else:
+                            continue
+                        
+                        db.session.add(price)
+                    
+                    db.session.flush()
+                    continue
                 
                 # Para cada atributo en esta variant_data
                 for attr_name, attr_value in attributes.items():
@@ -359,75 +616,91 @@ def complete_crm_product(product_id):
                             'options': {}
                         }
                     
-                    # Si no existe la option para este valor, crearla o actualizar stock
+                    # Si no existe la option para este valor, crearla sin stock
                     if attr_value not in variants_dict[attr_name]['options']:
                         option = ProductVariantOption(
                             product_variant_id=variants_dict[attr_name]['variant'].id,
                             name=attr_value,  # Valor de la opción (ej: "M")
-                            stock=stock
+                            stock=0  # No guardamos stock en las opciones
                         )
                         db.session.add(option)
                         db.session.flush()
                         variants_dict[attr_name]['options'][attr_value] = {
                             'option': option,
-                            'prices': prices_data.copy()
+                            'prices': prices_data.copy() if isinstance(prices_data, list) else []
                         }
-                    else:
-                        # Si ya existe, sumar el stock (o manejar como prefieras)
-                        existing_option = variants_dict[attr_name]['options'][attr_value]['option']
-                        existing_option.stock += stock
+                        
+                        # Crear los precios para esta opción específica
+                        if isinstance(prices_data, list):
+                            for price_item in prices_data:
+                                catalog_id = price_item.get('catalog_id')
+                                locality_id = price_item.get('locality_id')  # Compatibilidad hacia atrás
+                                price_value = price_item.get('price')
+                                
+                                if not price_value or price_value is None:
+                                    continue
+                                
+                                # Preferir catalog_id, pero mantener compatibilidad con locality_id
+                                if catalog_id:
+                                    catalog = Catalog.query.get(catalog_id)
+                                    if catalog:
+                                        price = ProductPrice(
+                                            product_variant_id=option.id,
+                                            catalog_id=catalog_id,
+                                            price=price_value
+                                        )
+                                        db.session.add(price)
+                                elif locality_id:
+                                    locality = Locality.query.get(locality_id)
+                                    if locality:
+                                        price = ProductPrice(
+                                            product_variant_id=option.id,
+                                            locality_id=locality_id,
+                                            price=price_value
+                                        )
+                                        db.session.add(price)
+                        elif isinstance(prices_data, dict):
+                            # Si viene como objeto {catalog_id: price} o {locality_id: price}
+                            for key, price_value in prices_data.items():
+                                if not key or price_value is None:
+                                    continue
+                                
+                                # Intentar como catalog_id primero
+                                catalog = Catalog.query.get(key)
+                                if catalog:
+                                    price = ProductPrice(
+                                        product_variant_id=option.id,
+                                        catalog_id=key,
+                                        price=price_value
+                                    )
+                                    db.session.add(price)
+                                else:
+                                    # Intentar como locality_id (compatibilidad)
+                                    locality = Locality.query.get(key)
+                                    if locality:
+                                        price = ProductPrice(
+                                            product_variant_id=option.id,
+                                            locality_id=key,
+                                            price=price_value
+                                        )
+                                        db.session.add(price)
             
-            # Ahora crear los precios para cada variant (compartidos entre todas las options)
+            # Los precios ya se crearon al crear cada opción, ahora solo necesitamos preparar la respuesta
             created_variants = []
             for attr_name, variant_info in variants_dict.items():
                 variant = variant_info['variant']
-                created_prices = []
-                prices_added = set()  # Para evitar duplicados en la misma transacción
                 
-                # Agrupar precios únicos de todas las options de esta variant
-                # Recopilar todos los precios únicos de todas las options
-                all_prices_data = []
+                # Recopilar todos los precios de todas las opciones de esta variante
+                all_prices = []
                 for option_data in variant_info['options'].values():
-                    for price_data in option_data['prices']:
-                        locality_id = price_data.get('locality_id')
-                        price_value = price_data.get('price')
-                        if locality_id and price_value is not None:
-                            price_key = (locality_id, float(price_value))
-                            if price_key not in prices_added:
-                                all_prices_data.append(price_data)
-                                prices_added.add(price_key)
-                
-                # Crear los precios únicos
-                for price_data in all_prices_data:
-                    locality_id = price_data.get('locality_id')
-                    price_value = price_data.get('price')
-                    
-                    if not locality_id or price_value is None:
-                        continue
-                    
-                    # Verificar que la localidad existe
-                    locality = Locality.query.get(locality_id)
-                    if not locality:
-                        continue
-                    
-                    # Crear el precio (no verificamos existing_price porque estamos en una nueva creación)
-                    price = ProductPrice(
-                        product_variant_id=variant.id,
-                        locality_id=locality_id,
-                        price=price_value
-                    )
-                    db.session.add(price)
-                
-                # Hacer flush para obtener los IDs de los precios creados
-                db.session.flush()
-                
-                # Ahora obtener los precios creados para el response
-                prices_query = ProductPrice.query.filter_by(product_variant_id=variant.id).all()
-                created_prices = [p.to_dict() for p in prices_query]
+                    option = option_data['option']
+                    # Los precios están asociados a la opción (product_variant_id apunta a la opción)
+                    option_prices = ProductPrice.query.filter_by(product_variant_id=option.id).all()
+                    all_prices.extend([p.to_dict() for p in option_prices])
                 
                 created_variants.append({
-                    **variant.to_dict(),
-                    'prices': created_prices
+                    **variant.to_dict(include_options=True),
+                    'prices': all_prices  # Mantener compatibilidad con la estructura anterior
                 })
         
         db.session.commit()
@@ -455,9 +728,25 @@ def complete_crm_product(product_id):
         
     except IntegrityError as e:
         db.session.rollback()
+        error_str = str(e)
+        error_msg = 'Error de integridad'
+        
+        # Detectar el tipo específico de error de integridad
+        if 'crm_product_id' in error_str.lower() or 'unique' in error_str.lower():
+            if 'crm_product_id' in error_str.lower():
+                error_msg = 'El producto CRM ya está vinculado a otro producto'
+            elif 'unique_product_subcategory_option' in error_str.lower():
+                error_msg = 'Ya existe una combinación de subcategoría y opción para este producto'
+            else:
+                error_msg = f'Error de integridad: {error_str}'
+        
+        print(f"[ERROR] IntegrityError en complete_crm_product: {error_str}")
+        print(f"[ERROR] Traceback completo: {traceback.format_exc()}")
+        
         return jsonify({
             'success': False,
-            'error': 'Error de integridad: El producto CRM ya está vinculado'
+            'error': error_msg,
+            'debug': error_str if current_app.config.get('DEBUG', False) else None
         }), 400
     except Exception as e:
         db.session.rollback()
@@ -466,7 +755,7 @@ def complete_crm_product(product_id):
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': error_trace if app.config.get('DEBUG') else None
+            'traceback': error_trace if current_app.config.get('DEBUG', False) else None
         }), 500
 
 @crm_products_bp.route('/admin/crm-combos', methods=['GET'])

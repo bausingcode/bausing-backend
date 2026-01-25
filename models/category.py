@@ -10,6 +10,7 @@ class Category(db.Model):
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
     parent_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=True)
+    order = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -24,6 +25,7 @@ class Category(db.Model):
             'description': self.description,
             'parent_id': str(self.parent_id) if self.parent_id else None,
             'parent_name': self.parent.name if self.parent else None,
+            'order': self.order,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
         if include_options:

@@ -114,6 +114,8 @@ def order_to_dict(order):
     """
     Convierte una orden del modelo a el formato esperado por el frontend
     """
+    from sqlalchemy import text
+    
     # Obtener la dirección de envío (si existe)
     shipping_address = None
     # Por ahora, obtenemos la primera dirección del usuario como dirección de envío
@@ -137,8 +139,27 @@ def order_to_dict(order):
     # Determinar pay_on_delivery
     pay_on_delivery = order.payment_method == "cash" and payment_status == "pending"
     
-    # Generar order_number si no existe
-    order_number = f"ORD-{order.created_at.strftime('%Y')}-{str(order.id)[:8].upper()}"
+    # Obtener receipt_number desde crm_orders usando crm_order_id
+    order_number = None
+    if hasattr(order, 'crm_order_id') and order.crm_order_id:
+        try:
+            receipt_query = text("""
+                SELECT receipt_number 
+                FROM crm_orders 
+                WHERE crm_order_id = :crm_order_id
+            """)
+            receipt_result = db.session.execute(receipt_query, {
+                'crm_order_id': order.crm_order_id
+            })
+            receipt_row = receipt_result.fetchone()
+            if receipt_row and receipt_row[0]:
+                order_number = receipt_row[0]
+        except Exception:
+            pass
+    
+    # Si no se encontró receipt_number, usar valor por defecto
+    if not order_number:
+        order_number = f"ORD-{order.created_at.strftime('%Y')}-{str(order.id)[:8].upper()}"
     
     return {
         'id': str(order.id),

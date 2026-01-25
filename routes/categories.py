@@ -20,7 +20,8 @@ def get_categories():
         elif parent_id == '':
             query = query.filter_by(parent_id=None)
         
-        categories = query.all()
+        # Ordenar por el campo 'order' y luego por nombre como fallback
+        categories = query.order_by(Category.order, Category.name).all()
         
         # Si se solicita incluir hijos, construir el árbol
         if include_children:

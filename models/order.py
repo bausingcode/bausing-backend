@@ -9,6 +9,7 @@ class Order(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey('users.id'), nullable=False)
+    crm_order_id = db.Column(db.Integer, nullable=True)
     total = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(db.String(50), nullable=False)
     payment_method = db.Column(db.String(50), nullable=True)

@@ -1,6 +1,7 @@
 from .category import Category, CategoryOption
-from .product import Product, ProductVariant, ProductVariantOption, ProductPrice
+from .product import Product, ProductVariant, ProductVariantOption, ProductPrice, ProductSubcategory
 from .locality import Locality
+from .catalog import Catalog, LocalityCatalog
 from .admin_user import AdminUser, AdminRole
 from .image import ProductImage, HeroImage
 from .promo import Promo, PromoApplicability
@@ -11,6 +12,8 @@ from .blog import BlogPost, BlogPostKeyword, BlogPostImage
 from .wallet import Wallet, WalletMovement, AuditLog
 from .order import Order
 from .test_table import TestTable
+from .homepage_distribution import HomepageProductDistribution
+from .crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 
 __all__ = [
     'Category',
@@ -19,7 +22,10 @@ __all__ = [
     'ProductVariant',
     'ProductVariantOption',
     'ProductPrice',
+    'ProductSubcategory',
     'Locality',
+    'Catalog',
+    'LocalityCatalog',
     'AdminUser',
     'AdminRole',
     'ProductImage',
@@ -39,6 +45,9 @@ __all__ = [
     'WalletMovement',
     'AuditLog',
     'Order',
-    'TestTable'
+    'TestTable',
+    'HomepageProductDistribution',
+    'CrmDeliveryZone',
+    'CrmZoneLocality'
 ]
 
