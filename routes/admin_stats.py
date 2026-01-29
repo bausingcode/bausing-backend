@@ -442,3 +442,426 @@ def get_wallet_usage():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@admin_stats_bp.route('/users/<uuid:user_id>/metrics', methods=['GET'])
+@admin_required
+def get_user_metrics(user_id):
+    """
+    Obtiene métricas detalladas de un usuario específico
+    """
+    try:
+        from models.user import User
+        from models.order import Order
+        from models.wallet import Wallet
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'Usuario no encontrado'
+            }), 404
+        
+        # Calcular métricas de órdenes
+        # Consideramos órdenes completadas aquellas con status que contenga "entregado", "finalizado", "completado" o "pagado"
+        query_orders = text("""
+            SELECT 
+                COUNT(*) as total_orders,
+                COUNT(CASE WHEN LOWER(status) LIKE '%entregado%' 
+                          OR LOWER(status) LIKE '%finalizado%' 
+                          OR LOWER(status) LIKE '%completado%' 
+                          OR LOWER(status) LIKE '%pagado%' THEN 1 END) as completed_orders,
+                COUNT(CASE WHEN LOWER(status) LIKE '%pendiente%' THEN 1 END) as pending_orders,
+                COUNT(CASE WHEN LOWER(status) LIKE '%cancelado%' THEN 1 END) as cancelled_orders,
+                COALESCE(SUM(CASE WHEN LOWER(status) LIKE '%entregado%' 
+                                  OR LOWER(status) LIKE '%finalizado%' 
+                                  OR LOWER(status) LIKE '%completado%' 
+                                  OR LOWER(status) LIKE '%pagado%' THEN total ELSE 0 END), 0) as total_spent,
+                COALESCE(AVG(CASE WHEN LOWER(status) LIKE '%entregado%' 
+                                  OR LOWER(status) LIKE '%finalizado%' 
+                                  OR LOWER(status) LIKE '%completado%' 
+                                  OR LOWER(status) LIKE '%pagado%' THEN total END), 0) as avg_order_value,
+                MAX(CASE WHEN LOWER(status) LIKE '%entregado%' 
+                            OR LOWER(status) LIKE '%finalizado%' 
+                            OR LOWER(status) LIKE '%completado%' 
+                            OR LOWER(status) LIKE '%pagado%' THEN created_at END) as last_purchase_date,
+                MIN(CASE WHEN LOWER(status) LIKE '%entregado%' 
+                            OR LOWER(status) LIKE '%finalizado%' 
+                            OR LOWER(status) LIKE '%completado%' 
+                            OR LOWER(status) LIKE '%pagado%' THEN created_at END) as first_purchase_date
+            FROM orders
+            WHERE user_id = :user_id
+        """)
+        
+        result_orders = db.session.execute(query_orders, {'user_id': user_id})
+        row_orders = result_orders.fetchone()
+        
+        # Calcular días desde última compra
+        days_since_last_purchase = None
+        if row_orders and row_orders.last_purchase_date:
+            days_since_last_purchase = (datetime.utcnow().date() - row_orders.last_purchase_date.date()).days
+        
+        # Obtener información de billetera
+        wallet = Wallet.query.filter_by(user_id=user_id).first()
+        wallet_balance = float(wallet.balance) if wallet else 0.0
+        
+        # Calcular "carritos abandonados" - esto es una aproximación
+        # Un carrito abandonado sería una orden pendiente que no se completó en X días
+        # Por ahora, consideramos órdenes pendientes como potenciales carritos abandonados
+        abandoned_carts_count = row_orders.pending_orders if row_orders else 0
+        
+        # Calcular valor de órdenes pendientes (potenciales carritos abandonados)
+        query_abandoned_value = text("""
+            SELECT COALESCE(SUM(total), 0) as total_value
+            FROM orders
+            WHERE user_id = :user_id
+                AND LOWER(status) LIKE '%pendiente%'
+        """)
+        
+        result_abandoned = db.session.execute(query_abandoned_value, {'user_id': user_id})
+        abandoned_carts_value = float(result_abandoned.scalar() or 0)
+        
+        metrics = {
+            'user_id': str(user_id),
+            'user_name': f"{user.first_name} {user.last_name}",
+            'user_email': user.email,
+            'orders': {
+                'total': int(row_orders.total_orders or 0) if row_orders else 0,
+                'completed': int(row_orders.completed_orders or 0) if row_orders else 0,
+                'pending': int(row_orders.pending_orders or 0) if row_orders else 0,
+                'cancelled': int(row_orders.cancelled_orders or 0) if row_orders else 0
+            },
+            'purchases': {
+                'total_spent': float(row_orders.total_spent or 0) if row_orders else 0.0,
+                'avg_order_value': float(row_orders.avg_order_value or 0) if row_orders else 0.0,
+                'last_purchase_date': row_orders.last_purchase_date.isoformat() if row_orders and row_orders.last_purchase_date else None,
+                'first_purchase_date': row_orders.first_purchase_date.isoformat() if row_orders and row_orders.first_purchase_date else None,
+                'days_since_last_purchase': days_since_last_purchase
+            },
+            'abandoned_carts': {
+                'count': abandoned_carts_count,
+                'total_value': abandoned_carts_value
+            },
+            'wallet': {
+                'balance': wallet_balance
+            },
+            'conversion_rate': (
+                (int(row_orders.completed_orders or 0) / int(row_orders.total_orders or 1) * 100) 
+                if row_orders and row_orders.total_orders > 0 else 0.0
+            )
+        }
+        
+        return jsonify({
+            'success': True,
+            'data': metrics
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(f"Error en get_user_metrics: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@admin_stats_bp.route('/users/metrics', methods=['GET'])
+@admin_required
+def get_users_metrics():
+    """
+    Obtiene métricas agregadas de todos los usuarios con paginación
+    """
+    try:
+        from models.user import User
+        
+        # Parámetros de paginación
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        search = request.args.get('search', '').strip()
+        
+        # Validar parámetros
+        page = max(1, page)
+        per_page = min(max(1, per_page), 100)  # Máximo 100 por página
+        
+        # Query base para métricas de usuarios
+        query_base = text("""
+            SELECT 
+                u.id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.created_at as user_created_at,
+                COUNT(DISTINCT o.id) as total_orders,
+                COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                                      OR LOWER(o.status) LIKE '%finalizado%' 
+                                      OR LOWER(o.status) LIKE '%completado%' 
+                                      OR LOWER(o.status) LIKE '%pagado%' THEN o.id END) as completed_orders,
+                COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%pendiente%' THEN o.id END) as pending_orders,
+                COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                                    OR LOWER(o.status) LIKE '%finalizado%' 
+                                    OR LOWER(o.status) LIKE '%completado%' 
+                                    OR LOWER(o.status) LIKE '%pagado%' THEN o.total ELSE 0 END), 0) as total_spent,
+                COALESCE(AVG(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                                    OR LOWER(o.status) LIKE '%finalizado%' 
+                                    OR LOWER(o.status) LIKE '%completado%' 
+                                    OR LOWER(o.status) LIKE '%pagado%' THEN o.total END), 0) as avg_order_value,
+                MAX(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                            OR LOWER(o.status) LIKE '%finalizado%' 
+                            OR LOWER(o.status) LIKE '%completado%' 
+                            OR LOWER(o.status) LIKE '%pagado%' THEN o.created_at END) as last_purchase_date,
+                COALESCE(w.balance, 0) as wallet_balance
+            FROM users u
+            LEFT JOIN orders o ON u.id = o.user_id
+            LEFT JOIN wallets w ON u.id = w.user_id
+            WHERE 1=1
+        """)
+        
+        params = {}
+        conditions = []
+        
+        # Filtro de búsqueda
+        if search:
+            conditions.append("""
+                (u.first_name ILIKE :search OR 
+                 u.last_name ILIKE :search OR 
+                 u.email ILIKE :search)
+            """)
+            params['search'] = f'%{search}%'
+        
+        where_clause = " AND " + " AND ".join(conditions) if conditions else ""
+        
+        # Query completo con GROUP BY y paginación
+        query = text(f"""
+            {query_base}
+            {where_clause}
+            GROUP BY u.id, u.first_name, u.last_name, u.email, u.created_at, w.balance
+            ORDER BY total_spent DESC, u.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        
+        params['limit'] = per_page
+        params['offset'] = (page - 1) * per_page
+        
+        result = db.session.execute(query, params)
+        rows = result.fetchall()
+        
+        # Contar total de usuarios (para paginación)
+        count_query = text("""
+            SELECT COUNT(DISTINCT u.id)
+            FROM users u
+            WHERE 1=1
+        """ + where_clause)
+        
+        count_result = db.session.execute(count_query, {k: v for k, v in params.items() if k != 'limit' and k != 'offset'})
+        total_users = count_result.scalar() or 0
+        
+        # Formatear resultados
+        users_metrics = []
+        for row in rows:
+            days_since_last_purchase = None
+            if row.last_purchase_date:
+                days_since_last_purchase = (datetime.utcnow().date() - row.last_purchase_date.date()).days
+            
+            users_metrics.append({
+                'user_id': str(row.id),
+                'user_name': f"{row.first_name} {row.last_name}",
+                'user_email': row.email,
+                'user_created_at': row.user_created_at.isoformat() if row.user_created_at else None,
+                'orders': {
+                    'total': int(row.total_orders or 0),
+                    'completed': int(row.completed_orders or 0),
+                    'pending': int(row.pending_orders or 0)
+                },
+                'purchases': {
+                    'total_spent': float(row.total_spent or 0),
+                    'avg_order_value': float(row.avg_order_value or 0),
+                    'last_purchase_date': row.last_purchase_date.isoformat() if row.last_purchase_date else None,
+                    'days_since_last_purchase': days_since_last_purchase
+                },
+                'abandoned_carts': {
+                    'count': int(row.pending_orders or 0),
+                    'total_value': 0.0  # Se calcularía con una subquery si fuera necesario
+                },
+                'wallet': {
+                    'balance': float(row.wallet_balance or 0)
+                },
+                'conversion_rate': (
+                    (int(row.completed_orders or 0) / int(row.total_orders or 1) * 100) 
+                    if row.total_orders > 0 else 0.0
+                )
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'users': users_metrics,
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': total_users,
+                    'total_pages': (total_users + per_page - 1) // per_page
+                }
+            }
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(f"Error en get_users_metrics: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@admin_stats_bp.route('/metrics/general', methods=['GET'])
+@admin_required
+def get_general_metrics():
+    """
+    Obtiene métricas generales/promedio de todos los usuarios
+    Parámetros opcionales: start_date, end_date (formato YYYY-MM-DD)
+    """
+    try:
+        from models.user import User
+        
+        # Obtener parámetros de fecha
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # Construir filtro de fecha
+        date_filter = ""
+        params = {}
+        if start_date or end_date:
+            date_conditions = []
+            if start_date:
+                date_conditions.append("o.created_at >= :start_date")
+                params['start_date'] = start_date
+            if end_date:
+                # Agregar un día completo al end_date para incluir todo el día
+                from datetime import datetime, timedelta
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+                end_date_next = (end_date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
+                date_conditions.append("o.created_at < :end_date_next")
+                params['end_date_next'] = end_date_next
+            
+            if date_conditions:
+                date_filter = "AND " + " AND ".join(date_conditions)
+        
+        # Query para métricas generales
+        query = text(f"""
+            WITH user_metrics AS (
+                SELECT 
+                    u.id as user_id,
+                    COUNT(DISTINCT o.id) as total_orders,
+                    COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                                          OR LOWER(o.status) LIKE '%finalizado%' 
+                                          OR LOWER(o.status) LIKE '%completado%' 
+                                          OR LOWER(o.status) LIKE '%pagado%' THEN o.id END) as completed_orders,
+                    COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%pendiente%' THEN o.id END) as pending_orders,
+                    COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                                        OR LOWER(o.status) LIKE '%finalizado%' 
+                                        OR LOWER(o.status) LIKE '%completado%' 
+                                        OR LOWER(o.status) LIKE '%pagado%' THEN o.total ELSE 0 END), 0) as total_spent,
+                    COALESCE(AVG(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
+                                        OR LOWER(o.status) LIKE '%finalizado%' 
+                                        OR LOWER(o.status) LIKE '%completado%' 
+                                        OR LOWER(o.status) LIKE '%pagado%' THEN o.total END), 0) as avg_order_value,
+                    COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%pendiente%' THEN o.total ELSE 0 END), 0) as abandoned_value
+                FROM users u
+                LEFT JOIN orders o ON u.id = o.user_id {date_filter}
+                GROUP BY u.id
+            )
+            SELECT 
+                COUNT(*) as total_users,
+                COUNT(CASE WHEN total_orders > 0 THEN 1 END) as users_with_orders,
+                COUNT(CASE WHEN completed_orders > 0 THEN 1 END) as users_with_purchases,
+                COUNT(CASE WHEN pending_orders > 0 THEN 1 END) as users_with_abandoned_carts,
+                
+                -- Promedios
+                COALESCE(AVG(total_orders), 0) as avg_orders_per_user,
+                COALESCE(AVG(completed_orders), 0) as avg_completed_orders_per_user,
+                COALESCE(AVG(pending_orders), 0) as avg_pending_orders_per_user,
+                COALESCE(AVG(total_spent), 0) as avg_spent_per_user,
+                COALESCE(AVG(avg_order_value), 0) as avg_order_value_general,
+                
+                -- Totales
+                COALESCE(SUM(total_orders), 0) as total_orders_all,
+                COALESCE(SUM(completed_orders), 0) as total_completed_orders,
+                COALESCE(SUM(pending_orders), 0) as total_pending_orders,
+                COALESCE(SUM(total_spent), 0) as total_spent_all,
+                COALESCE(SUM(abandoned_value), 0) as total_abandoned_value,
+                
+                -- Tasa de conversión promedio
+                CASE 
+                    WHEN SUM(total_orders) > 0 
+                    THEN (SUM(completed_orders)::numeric / SUM(total_orders)::numeric * 100)
+                    ELSE 0 
+                END as avg_conversion_rate
+            FROM user_metrics
+        """)
+        
+        result = db.session.execute(query, params if params else {})
+        row = result.fetchone()
+        
+        if not row:
+            metrics = {
+                'total_users': 0,
+                'users_with_orders': 0,
+                'users_with_purchases': 0,
+                'users_with_abandoned_carts': 0,
+                'averages': {
+                    'orders_per_user': 0.0,
+                    'completed_orders_per_user': 0.0,
+                    'pending_orders_per_user': 0.0,
+                    'spent_per_user': 0.0,
+                    'order_value': 0.0
+                },
+                'totals': {
+                    'orders': 0,
+                    'completed_orders': 0,
+                    'pending_orders': 0,
+                    'total_spent': 0.0,
+                    'abandoned_carts_value': 0.0
+                },
+                'conversion_rate': 0.0
+            }
+        else:
+            metrics = {
+                'total_users': int(row.total_users or 0),
+                'users_with_orders': int(row.users_with_orders or 0),
+                'users_with_purchases': int(row.users_with_purchases or 0),
+                'users_with_abandoned_carts': int(row.users_with_abandoned_carts or 0),
+                'averages': {
+                    'orders_per_user': float(row.avg_orders_per_user or 0),
+                    'completed_orders_per_user': float(row.avg_completed_orders_per_user or 0),
+                    'pending_orders_per_user': float(row.avg_pending_orders_per_user or 0),
+                    'spent_per_user': float(row.avg_spent_per_user or 0),
+                    'order_value': float(row.avg_order_value_general or 0)
+                },
+                'totals': {
+                    'orders': int(row.total_orders_all or 0),
+                    'completed_orders': int(row.total_completed_orders or 0),
+                    'pending_orders': int(row.total_pending_orders or 0),
+                    'total_spent': float(row.total_spent_all or 0),
+                    'abandoned_carts_value': float(row.total_abandoned_value or 0)
+                },
+                'conversion_rate': float(row.avg_conversion_rate or 0)
+            }
+        
+        return jsonify({
+            'success': True,
+            'data': metrics
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(f"Error en get_general_metrics: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
