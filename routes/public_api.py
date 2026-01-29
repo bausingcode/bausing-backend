@@ -371,10 +371,11 @@ def sync_data_new():
     - Si tipo es "tipos_venta": usa la función sync_crm_tipos_venta
     - Si tipo es "ventas": usa la función sync_crm_ventas (detecta cambios de estado)
     - Si tipo es "medios_pago": omite la sincronización (simulado)
+    - Si tipo es "stock": acepta notificaciones de cambios de stock (solo update)
     
     Request Body:
     {
-        "tipo": "productos" | "zonas" | "provincias" | "tipos_documento" | "tipos_venta" | "ventas" | "medios_pago",
+        "tipo": "productos" | "zonas" | "provincias" | "tipos_documento" | "tipos_venta" | "ventas" | "medios_pago" | "stock",
         "datos": [...],
         "status": true,
         "filtros": {...},
@@ -458,8 +459,88 @@ def sync_data_new():
             function_name = 'sync_crm_tipos_venta'
         elif tipo == 'ventas':
             function_name = 'sync_crm_ventas'
+        elif tipo == 'stock':
+            # Stock se procesa directamente sin función SQL
+            # Procesar los datos de stock recibidos
+            try:
+                from sqlalchemy import text
+                datos_stock = body_data.get('datos', [])
+                
+                if not datos_stock:
+                    return success_response(
+                        data={},
+                        message="Sincronización de stock recibida correctamente (sin datos para actualizar)"
+                    )
+                
+                # Actualizar el estado de stock de cada producto
+                # IMPORTANTE: Solo se actualiza el campo 'stock' (boolean), NO se actualiza descripción ni otros campos
+                productos_actualizados = 0
+                for producto_stock in datos_stock:
+                    producto_id = producto_stock.get('id')
+                    estado = producto_stock.get('estado')  # "habilitado" o "inhabilitado"
+                    
+                    if not producto_id or not estado:
+                        continue
+                    
+                    # Verificar si el producto existe y obtener solo el stock actual
+                    # No necesitamos otros campos como descripción o min_limit
+                    check_query = text("""
+                        SELECT crm_product_id, stock
+                        FROM crm_products
+                        WHERE crm_product_id = :producto_id
+                    """)
+                    check_result = db.session.execute(check_query, {'producto_id': producto_id})
+                    producto_existente = check_result.fetchone()
+                    
+                    if producto_existente:
+                        # El campo stock es boolean, no integer
+                        stock_actual_boolean = bool(producto_existente.stock) if producto_existente.stock is not None else False
+                        
+                        # Convertir el estado recibido a booleano
+                        # "habilitado" = true, "inhabilitado" = false
+                        nuevo_stock_boolean = (estado == "habilitado")
+                        
+                        # Si el estado recibido es diferente al estado actual, actualizar SOLO el stock
+                        if nuevo_stock_boolean != stock_actual_boolean:
+                            # Actualizar SOLO el campo stock (booleano) en crm_products
+                            # NO se actualiza descripción ni ningún otro campo
+                            update_query = text("""
+                                UPDATE crm_products
+                                SET stock = :nuevo_stock,
+                                    crm_updated_at = NOW()
+                                WHERE crm_product_id = :producto_id
+                            """)
+                            db.session.execute(update_query, {
+                                'nuevo_stock': nuevo_stock_boolean,
+                                'producto_id': producto_id
+                            })
+                            print(f"📦 Stock actualizado - Producto ID: {producto_id}, Estado: {estado}, Stock: {stock_actual_boolean} -> {nuevo_stock_boolean}")
+                        else:
+                            # El estado ya coincide, solo actualizamos la fecha de actualización
+                            update_query = text("""
+                                UPDATE crm_products
+                                SET crm_updated_at = NOW()
+                                WHERE crm_product_id = :producto_id
+                            """)
+                            db.session.execute(update_query, {'producto_id': producto_id})
+                            print(f"📦 Notificación de stock - Producto ID: {producto_id}, Estado: {estado} (ya estaba actualizado)")
+                        
+                        productos_actualizados += 1
+                    else:
+                        print(f"⚠️ Producto ID {producto_id} no encontrado en crm_products")
+                
+                db.session.commit()
+                
+                return success_response(
+                    data={'productos_actualizados': productos_actualizados},
+                    message=f"Sincronización de stock recibida correctamente ({productos_actualizados} productos procesados)"
+                )
+                
+            except Exception as e:
+                db.session.rollback()
+                return processing_error(f"Error al procesar sincronización de stock: {str(e)}")
         else:
-            return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, provincias, tipos_documento, tipos_venta, ventas, medios_pago")
+            return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, provincias, tipos_documento, tipos_venta, ventas, medios_pago, stock")
         
         # Llamar a la función correspondiente
         try:
@@ -661,6 +742,161 @@ def obtener_estados_anteriores_ventas(datos_ventas):
 # -- SELECT * FROM sync_crm_ventas('{ EJEMPLO }'::jsonb);
 # -- La función retorna 3 columnas:
 # -- p_crm_order_id (int), delivery_status (text) ← viene de datos[].estado, affected (text) ← viene de sincronizar.accion
+
+
+@public_api_bp.route('/api/ventas/sincronizar', methods=['POST'])
+@api_key_required
+def sincronizar_datos():
+    """
+    Endpoint para sincronizar datos del CRM.
+    
+    Puede funcionar de dos formas:
+    1. CONSULTA: Devuelve datos del CRM cuando se envía solo 'tipo' (y opcionalmente 'id' o 'fecha')
+    2. NOTIFICACIÓN: Recibe notificaciones de cambios cuando se envía 'datos' y 'sincronizar'
+    
+    Request Body (Consulta):
+    {
+        "tipo": "stock" | "productos" | "zonas" | "provincias" | "tipos_documento" | "tipos_venta" | "ventas",
+        "id": 123 (opcional),
+        "fecha": "2024-01-15 10:30:00" (opcional, ignorado para stock)
+    }
+    
+    Request Body (Notificación):
+    {
+        "tipo": "stock" | "productos" | "zonas" | ...,
+        "datos": [...],
+        "status": true,
+        "filtros": {...},
+        "sincronizar": {
+            "accion": "update" | "create" | "delete",
+            "timestamp": "2026-01-02 15:20:50"
+        }
+    }
+    
+    Response - Éxito (Consulta):
+    HTTP Status: 200 OK
+    {
+        "status": true,
+        "tipo": "stock",
+        "filtros": {"id": 0},
+        "datos": [
+            {
+                "id": 26,
+                "descripcion": "Base ecocuero 070 x 190",
+                "estado": "habilitado",
+                "combo": false
+            }
+        ],
+        "sincronizar": {
+            "accion": "sincronizar",
+            "timestamp": "2024-01-15 10:30:00"
+        }
+    }
+    
+    Response - Error 404:
+    HTTP Status: 404 Not Found
+    {
+        "status": false,
+        "message": "El ID 999 no existe para el tipo stock",
+        "tipo": "stock",
+        "filtros": {"id": 999},
+        "datos": []
+    }
+    """
+    try:
+        # Obtener datos del body
+        data = request.get_json() or {}
+        
+        tipo = data.get('tipo')
+        if not tipo:
+            return jsonify({
+                "status": False,
+                "message": "El campo 'tipo' es requerido"
+            }), 422
+        
+        # Verificar si es una consulta o una notificación
+        tiene_datos = 'datos' in data and data.get('datos') is not None
+        tiene_sincronizar = 'sincronizar' in data and data.get('sincronizar') is not None
+        
+        # Si tiene datos y sincronizar, es una notificación -> redirigir a /public/sincronizar
+        if tiene_datos and tiene_sincronizar:
+            # Es una notificación, procesar en el endpoint de sincronización
+            # Por ahora, para stock solo aceptamos notificaciones sin procesar
+            if tipo == 'stock':
+                return success_response(
+                    data={},
+                    message="Notificación de stock recibida correctamente"
+                )
+            else:
+                # Para otros tipos, redirigir al endpoint de sincronización
+                # (esto se puede hacer llamando a la función directamente)
+                return sync_data_new()
+        
+        # Es una consulta - devolver datos según el tipo
+        registro_id = data.get('id')
+        fecha = data.get('fecha')
+        
+        # Construir filtros para la respuesta
+        filtros = {}
+        if registro_id:
+            filtros['id'] = registro_id
+        elif fecha:
+            filtros['fecha'] = fecha
+        
+        # Procesar según el tipo
+        if tipo == 'stock':
+            # Obtener stock del CRM
+            try:
+                productos_stock = obtener_stock_crm(registro_id=registro_id)
+            except Exception as e:
+                import traceback
+                return jsonify({
+                    "status": False,
+                    "message": "Error al procesar la sincronización",
+                    "error": str(e) if Config.DEBUG_MODE else None,
+                    "traceback": traceback.format_exc() if Config.DEBUG_MODE else None
+                }), 500
+            
+            # Si se solicitó un ID específico y no se encontró
+            if registro_id and len(productos_stock) == 0:
+                return jsonify({
+                    "status": False,
+                    "message": f"El ID {registro_id} no existe para el tipo stock",
+                    "tipo": "stock",
+                    "filtros": filtros,
+                    "datos": []
+                }), 404
+            
+            # Generar timestamp
+            from datetime import datetime
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+            
+            return jsonify({
+                "status": True,
+                "tipo": "stock",
+                "filtros": filtros if filtros else {"id": 0},
+                "datos": productos_stock,
+                "sincronizar": {
+                    "accion": "sincronizar",
+                    "timestamp": timestamp
+                }
+            }), 200
+        
+        else:
+            # Para otros tipos, devolver error (aún no implementado)
+            return jsonify({
+                "status": False,
+                "message": f"Consulta de tipo '{tipo}' no implementada en este endpoint. Use /api/ventas/lista para ventas."
+            }), 501
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "status": False,
+            "message": "Error al procesar la sincronización",
+            "error": str(e) if Config.DEBUG_MODE else None,
+            "traceback": traceback.format_exc() if Config.DEBUG_MODE else None
+        }), 500
 
 
 @public_api_bp.route('/api/ventas/lista', methods=['POST'])
@@ -1102,6 +1338,117 @@ def obtener_pagos_procesados_venta(crm_order_id):
         pagos.append(pago)
     
     return pagos
+
+
+def obtener_stock_crm(registro_id=None):
+    """
+    Obtiene el estado de stock de productos del CRM.
+    
+    El estado se calcula comparando stock > limite_minimo:
+    - Si stock > limite_minimo: estado = "habilitado"
+    - Si stock <= limite_minimo: estado = "inhabilitado"
+    
+    Para combos, el estado depende de que todos sus componentes tengan suficiente stock.
+    
+    Args:
+        registro_id: ID específico del producto (opcional). Si se proporciona, devuelve solo ese producto.
+    
+    Returns:
+        Lista de productos con su estado de stock:
+        [
+            {
+                "id": 26,
+                "descripcion": "Base ecocuero 070 x 190",
+                "estado": "habilitado",
+                "combo": false
+            },
+            ...
+        ]
+    """
+    from sqlalchemy import text
+    
+    # Query base para obtener productos con su stock
+    # Nota: El campo stock es boolean, no integer
+    query = """
+        SELECT 
+            cp.crm_product_id as id,
+            cp.description as descripcion,
+            cp.combo,
+            COALESCE(cp.stock, false) as stock,
+            COALESCE(cp.min_limit, 0) as limite_minimo
+        FROM crm_products cp
+        WHERE 1=1
+    """
+    
+    params = {}
+    
+    # Si se proporciona un ID específico, filtrar por ese ID
+    if registro_id:
+        query += " AND cp.crm_product_id = :id"
+        params['id'] = registro_id
+    
+    # Ordenar por ID
+    query += " ORDER BY cp.crm_product_id"
+    
+    try:
+        result = db.session.execute(text(query), params)
+        rows = result.fetchall()
+    except Exception as e:
+        import traceback
+        raise Exception(f"Error al consultar stock del CRM: {str(e)}")
+    
+    productos_stock = []
+    
+    for row in rows:
+        producto_id = row.id
+        descripcion = row.descripcion or ""
+        combo = bool(row.combo) if row.combo is not None else False
+        # El campo stock es boolean
+        stock_boolean = bool(row.stock) if row.stock is not None else False
+        
+        # Calcular estado: habilitado si stock = true
+        estado = "habilitado" if stock_boolean else "inhabilitado"
+        
+        # Si es combo, verificar que todos los componentes tengan suficiente stock
+        if combo:
+            # Consultar componentes del combo
+            query_combo = """
+                SELECT 
+                    cpci.crm_item_product_id,
+                    COALESCE(cp2.stock, false) as item_stock
+                FROM crm_combo_items cpci
+                INNER JOIN crm_products cp2 ON cp2.crm_product_id = cpci.crm_item_product_id
+                WHERE cpci.crm_combo_product_id = :combo_id
+            """
+            
+            try:
+                combo_result = db.session.execute(
+                    text(query_combo),
+                    {'combo_id': producto_id}
+                )
+                combo_rows = combo_result.fetchall()
+                
+                # Verificar que todos los componentes tengan stock (stock = true)
+                todos_habilitados = True
+                for combo_row in combo_rows:
+                    item_stock = bool(combo_row.item_stock) if combo_row.item_stock is not None else False
+                    if not item_stock:
+                        todos_habilitados = False
+                        break
+                
+                estado = "habilitado" if todos_habilitados else "inhabilitado"
+            except Exception as e:
+                # Si hay error al consultar componentes, usar el estado del combo principal
+                pass
+        
+        productos_stock.append({
+            'id': producto_id,
+            'descripcion': descripcion,
+            'estado': estado,
+            'combo': combo
+        })
+    
+    return productos_stock
 
 
 def obtener_vendedor_id_desde_api_secret(api_secret):

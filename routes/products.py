@@ -94,7 +94,29 @@ def get_products():
             # Por defecto, solo productos activos para ecommerce
             query = query.filter_by(is_active=True)
         
-        # Filtro por stock
+        # Filtrar productos sin stock en crm_products (solo para ecommerce público)
+        # Excluir productos donde crm_products.stock = false
+        from sqlalchemy import text
+        # Filtrar productos que tienen stock = false en crm_products
+        # Primero obtener IDs de productos sin stock
+        try:
+            no_stock_query = text("""
+                SELECT DISTINCT p.id 
+                FROM products p
+                INNER JOIN crm_products cp ON p.crm_product_id = cp.crm_product_id
+                WHERE cp.stock = false
+            """)
+            no_stock_result = db.session.execute(no_stock_query)
+            no_stock_ids = [row[0] for row in no_stock_result.fetchall()]
+            
+            # Excluir productos sin stock
+            if no_stock_ids:
+                query = query.filter(~Product.id.in_(no_stock_ids))
+        except Exception as e:
+            print(f"[WARNING] Error filtrando productos sin stock de crm_products: {e}")
+            # Si hay error, continuar sin filtrar
+        
+        # Filtro por stock (stock en ProductVariantOption)
         if in_stock is not None and in_stock.lower() == 'true':
             # Solo productos que tienen al menos una option con stock > 0
             query = query.join(ProductVariant).join(ProductVariantOption).filter(ProductVariantOption.stock > 0).distinct()
@@ -442,22 +464,22 @@ def get_products():
                         print(f"[ERROR] Invalid locality_id format in to_dict: {locality_id}, error: {e}")
                         locality_uuid = None
                 
-                # Usar precios y promociones pre-calculados si están disponibles
+                # Obtener precios pre-calculados si están disponibles
+                precalc_min_price = None
+                precalc_max_price = None
+                if product.id in price_map:
+                    precalc_min_price = price_map[product.id]['min']
+                    precalc_max_price = price_map[product.id]['max']
+                
+                # Usar precios y promociones pre-calculados directamente en to_dict para evitar queries innecesarias
                 product_dict = product.to_dict(
                     include_variants=include_variants,
                     include_images=include_images,
                     locality_id=str(locality_uuid) if locality_uuid else None,
-                    include_promos=False  # Deshabilitado porque las pre-calculamos
+                    include_promos=False,  # Deshabilitado porque las pre-calculamos
+                    precalculated_min_price=precalc_min_price,
+                    precalculated_max_price=precalc_max_price
                 )
-                
-                # Sobrescribir con precios pre-calculados si están disponibles (más rápido)
-                if product.id in price_map:
-                    product_dict['min_price'] = price_map[product.id]['min']
-                    product_dict['max_price'] = price_map[product.id]['max']
-                    if price_map[product.id]['min'] > 0 or price_map[product.id]['max'] > 0:
-                        product_dict['price_range'] = price_map[product.id]['min'] if price_map[product.id]['min'] == price_map[product.id]['max'] else f"{price_map[product.id]['min']} - {price_map[product.id]['max']}"
-                    else:
-                        product_dict['price_range'] = "0"
                 
                 # Agregar promociones pre-calculadas
                 if include_promos:
@@ -584,9 +606,15 @@ def get_product(product_id):
             locality_to_catalog_map=locality_to_catalog
         )
         
+        # Verificar stock en crm_products
+        from models.product import check_crm_stock
+        has_crm_stock = check_crm_stock(product.crm_product_id)
+        product_dict['has_crm_stock'] = has_crm_stock
+        
         # Debug: Log del dict final
         print(f"[DEBUG] Product {product_id} - Subcategorías en dict: {len(product_dict.get('subcategories', []))}")
         print(f"[DEBUG] Product {product_id} - Variantes en dict: {len(product_dict.get('variants', []))}")
+        print(f"[DEBUG] Product {product_id} - CRM Stock: {has_crm_stock}")
         
         return jsonify({
             'success': True,

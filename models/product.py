@@ -21,6 +21,26 @@ def clear_catalog_cache():
     global _cordoba_capital_catalog_id
     _cordoba_capital_catalog_id = None
 
+def check_crm_stock(crm_product_id):
+    """Verifica si un producto tiene stock en crm_products (stock = true)"""
+    if not crm_product_id:
+        return True  # Si no tiene crm_product_id, asumir que tiene stock
+    
+    try:
+        from sqlalchemy import text
+        from database import db
+        query = text("SELECT stock FROM crm_products WHERE crm_product_id = :crm_product_id")
+        result = db.session.execute(query, {'crm_product_id': crm_product_id})
+        row = result.fetchone()
+        
+        if row:
+            # stock es boolean en crm_products
+            return bool(row.stock) if row.stock is not None else True
+        return True  # Si no existe en crm_products, asumir que tiene stock
+    except Exception as e:
+        print(f"[ERROR] Error verificando stock de crm_product_id {crm_product_id}: {e}")
+        return True  # En caso de error, asumir que tiene stock
+
 class Product(db.Model):
     __tablename__ = 'products'
 
@@ -164,7 +184,7 @@ class Product(db.Model):
                     return img.image_url
         return None
     
-    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None):
+    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None):
         data = {
             'id': str(self.id),
             'name': self.name,
@@ -192,13 +212,18 @@ class Product(db.Model):
             'total_stock': self.get_total_stock()
         }
         
-        # Precios
-        if locality_id:
-            min_price = self.get_min_price(locality_id)
-            max_price = self.get_max_price(locality_id)
+        # Precios - usar pre-calculados si están disponibles para evitar queries innecesarias
+        if precalculated_min_price is not None and precalculated_max_price is not None:
+            min_price = precalculated_min_price
+            max_price = precalculated_max_price
         else:
-            min_price = self.get_min_price()
-            max_price = self.get_max_price()
+            # Calcular precios solo si no están pre-calculados
+            if locality_id:
+                min_price = self.get_min_price(locality_id)
+                max_price = self.get_max_price(locality_id)
+            else:
+                min_price = self.get_min_price()
+                max_price = self.get_max_price()
         
         # Si no hay precio para la localidad, usar 0
         if min_price is None:
