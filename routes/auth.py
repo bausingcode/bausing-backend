@@ -2,6 +2,8 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.user import User
 from models.address import Address
+from models.doc_type import DocType
+from models.province import Province
 from sqlalchemy.exc import IntegrityError, ProgrammingError, OperationalError
 from sqlalchemy import text
 from functools import wraps
@@ -773,8 +775,15 @@ def update_address(address_id):
             address.postal_code = data['postal_code']
         if 'city' in data:
             address.city = data['city']
-        if 'province' in data:
-            address.province = data['province']
+        if 'province_id' in data:
+            province_id = uuid.UUID(data['province_id'])
+            province = Province.query.get(province_id)
+            if not province:
+                return jsonify({
+                    'success': False,
+                    'error': 'Provincia no encontrada'
+                }), 400
+            address.province_id = province_id
         if 'is_default' in data:
             # Si se marca como default, quitar default de otras direcciones
             if data['is_default']:
@@ -835,3 +844,40 @@ def delete_address(address_id):
             'error': f'Error al eliminar dirección: {str(e)}'
         }), 500
 
+@auth_bp.route('/doc-types', methods=['GET'])
+def get_doc_types():
+    """
+    Obtener todos los tipos de documento (público, no requiere autenticación)
+    """
+    try:
+        doc_types = DocType.query.order_by(DocType.name).all()
+        
+        return jsonify({
+            'success': True,
+            'data': [dt.to_dict() for dt in doc_types]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener tipos de documento: {str(e)}'
+        }), 500
+
+@auth_bp.route('/provinces', methods=['GET'])
+def get_provinces():
+    """
+    Obtener todas las provincias (público, no requiere autenticación)
+    """
+    try:
+        provinces = Province.query.order_by(Province.name).all()
+        
+        return jsonify({
+            'success': True,
+            'data': [p.to_dict() for p in provinces]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener provincias: {str(e)}'
+        }), 500

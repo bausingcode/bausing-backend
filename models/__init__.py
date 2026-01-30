@@ -8,9 +8,12 @@ from .promo import Promo, PromoApplicability
 from .settings import SystemSettings, MessageTemplate, NotificationSetting, SecuritySetting
 from .user import User
 from .address import Address
+from .doc_type import DocType
+from .province import Province
 from .blog import BlogPost, BlogPostKeyword, BlogPostImage
 from .wallet import Wallet, WalletMovement, AuditLog
 from .order import Order
+from .cart import Cart
 from .test_table import TestTable
 from .homepage_distribution import HomepageProductDistribution
 from .crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
@@ -38,6 +41,8 @@ __all__ = [
     'SecuritySetting',
     'User',
     'Address',
+    'DocType',
+    'Province',
     'BlogPost',
     'BlogPostKeyword',
     'BlogPostImage',
@@ -45,6 +50,7 @@ __all__ = [
     'WalletMovement',
     'AuditLog',
     'Order',
+    'Cart',
     'TestTable',
     'HomepageProductDistribution',
     'CrmDeliveryZone',

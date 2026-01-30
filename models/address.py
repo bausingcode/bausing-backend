@@ -15,12 +15,14 @@ class Address(db.Model):
     additional_info = db.Column(db.Text, nullable=True)
     postal_code = db.Column(db.String(20), nullable=False)
     city = db.Column(db.String(255), nullable=False)
-    province = db.Column(db.String(255), nullable=False)
+    province_id = db.Column(UUID(as_uuid=True), db.ForeignKey('provinces.id'), nullable=False)
     is_default = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relación con User
     user = db.relationship('User', backref='addresses')
+    # Relación con Province
+    province = db.relationship('Province', backref='addresses')
 
     def to_dict(self):
         """Convierte la dirección a diccionario"""
@@ -34,7 +36,8 @@ class Address(db.Model):
             'additional_info': self.additional_info,
             'postal_code': self.postal_code,
             'city': self.city,
-            'province': self.province,
+            'province_id': str(self.province_id) if self.province_id else None,
+            'province': self.province.name if self.province else None,
             'is_default': self.is_default,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

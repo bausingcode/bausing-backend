@@ -750,9 +750,30 @@ def get_general_metrics():
             if date_conditions:
                 date_filter = "AND " + " AND ".join(date_conditions)
         
+        # Construir filtro de fecha para carritos
+        cart_date_filter = ""
+        cart_params = {}
+        if start_date or end_date:
+            cart_date_conditions = []
+            if start_date:
+                cart_date_conditions.append("c.created_at >= :cart_start_date")
+                cart_params['cart_start_date'] = start_date
+            if end_date:
+                from datetime import datetime, timedelta
+                end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+                end_date_next = (end_date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
+                cart_date_conditions.append("c.created_at < :cart_end_date_next")
+                cart_params['cart_end_date_next'] = end_date_next
+            
+            if cart_date_conditions:
+                cart_date_filter = "AND " + " AND ".join(cart_date_conditions)
+        
+        # Combinar parámetros
+        all_params = {**(params if params else {}), **cart_params}
+        
         # Query para métricas generales
         query = text(f"""
-            WITH user_metrics AS (
+            WITH user_orders AS (
                 SELECT 
                     u.id as user_id,
                     COUNT(DISTINCT o.id) as total_orders,
@@ -760,7 +781,6 @@ def get_general_metrics():
                                           OR LOWER(o.status) LIKE '%finalizado%' 
                                           OR LOWER(o.status) LIKE '%completado%' 
                                           OR LOWER(o.status) LIKE '%pagado%' THEN o.id END) as completed_orders,
-                    COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%pendiente%' THEN o.id END) as pending_orders,
                     COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
                                         OR LOWER(o.status) LIKE '%finalizado%' 
                                         OR LOWER(o.status) LIKE '%completado%' 
@@ -768,42 +788,56 @@ def get_general_metrics():
                     COALESCE(AVG(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
                                         OR LOWER(o.status) LIKE '%finalizado%' 
                                         OR LOWER(o.status) LIKE '%completado%' 
-                                        OR LOWER(o.status) LIKE '%pagado%' THEN o.total END), 0) as avg_order_value,
-                    COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%pendiente%' THEN o.total ELSE 0 END), 0) as abandoned_value
+                                        OR LOWER(o.status) LIKE '%pagado%' THEN o.total END), 0) as avg_order_value
                 FROM users u
                 LEFT JOIN orders o ON u.id = o.user_id {date_filter}
                 GROUP BY u.id
+            ),
+            user_abandoned_carts AS (
+                SELECT 
+                    c.user_id,
+                    COUNT(*) as abandoned_carts
+                FROM carts c
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM orders o 
+                    WHERE o.user_id = c.user_id 
+                    AND o.created_at >= c.created_at
+                )
+                {cart_date_filter}
+                GROUP BY c.user_id
             )
             SELECT 
                 COUNT(*) as total_users,
-                COUNT(CASE WHEN total_orders > 0 THEN 1 END) as users_with_orders,
-                COUNT(CASE WHEN completed_orders > 0 THEN 1 END) as users_with_purchases,
-                COUNT(CASE WHEN pending_orders > 0 THEN 1 END) as users_with_abandoned_carts,
+                COUNT(CASE WHEN uo.total_orders > 0 THEN 1 END) as users_with_orders,
+                COUNT(CASE WHEN uo.completed_orders > 0 THEN 1 END) as users_with_purchases,
+                COUNT(CASE WHEN uac.abandoned_carts > 0 THEN 1 END) as users_with_abandoned_carts,
                 
                 -- Promedios
-                COALESCE(AVG(total_orders), 0) as avg_orders_per_user,
-                COALESCE(AVG(completed_orders), 0) as avg_completed_orders_per_user,
-                COALESCE(AVG(pending_orders), 0) as avg_pending_orders_per_user,
-                COALESCE(AVG(total_spent), 0) as avg_spent_per_user,
-                COALESCE(AVG(avg_order_value), 0) as avg_order_value_general,
+                COALESCE(AVG(uo.total_orders), 0) as avg_orders_per_user,
+                COALESCE(AVG(uo.completed_orders), 0) as avg_completed_orders_per_user,
+                COALESCE(AVG(COALESCE(uac.abandoned_carts, 0)), 0) as avg_abandoned_carts_per_user,
+                COALESCE(AVG(uo.total_spent), 0) as avg_spent_per_user,
+                COALESCE(AVG(uo.avg_order_value), 0) as avg_order_value_general,
                 
                 -- Totales
-                COALESCE(SUM(total_orders), 0) as total_orders_all,
-                COALESCE(SUM(completed_orders), 0) as total_completed_orders,
-                COALESCE(SUM(pending_orders), 0) as total_pending_orders,
-                COALESCE(SUM(total_spent), 0) as total_spent_all,
-                COALESCE(SUM(abandoned_value), 0) as total_abandoned_value,
+                COALESCE(SUM(uo.total_orders), 0) as total_orders_all,
+                COALESCE(SUM(uo.completed_orders), 0) as total_completed_orders,
+                COALESCE(SUM(COALESCE(uac.abandoned_carts, 0)), 0) as total_abandoned_carts,
+                COALESCE(SUM(uo.total_spent), 0) as total_spent_all,
+                0.0 as total_abandoned_value,
                 
                 -- Tasa de conversión promedio
                 CASE 
-                    WHEN SUM(total_orders) > 0 
-                    THEN (SUM(completed_orders)::numeric / SUM(total_orders)::numeric * 100)
+                    WHEN SUM(uo.total_orders) > 0 
+                    THEN (SUM(uo.completed_orders)::numeric / SUM(uo.total_orders)::numeric * 100)
                     ELSE 0 
                 END as avg_conversion_rate
-            FROM user_metrics
+            FROM users u
+            LEFT JOIN user_orders uo ON u.id = uo.user_id
+            LEFT JOIN user_abandoned_carts uac ON u.id = uac.user_id
         """)
         
-        result = db.session.execute(query, params if params else {})
+        result = db.session.execute(query, all_params if all_params else {})
         row = result.fetchone()
         
         if not row:
@@ -837,14 +871,14 @@ def get_general_metrics():
                 'averages': {
                     'orders_per_user': float(row.avg_orders_per_user or 0),
                     'completed_orders_per_user': float(row.avg_completed_orders_per_user or 0),
-                    'pending_orders_per_user': float(row.avg_pending_orders_per_user or 0),
+                    'pending_orders_per_user': float(row.avg_abandoned_carts_per_user or 0),
                     'spent_per_user': float(row.avg_spent_per_user or 0),
                     'order_value': float(row.avg_order_value_general or 0)
                 },
                 'totals': {
                     'orders': int(row.total_orders_all or 0),
                     'completed_orders': int(row.total_completed_orders or 0),
-                    'pending_orders': int(row.total_pending_orders or 0),
+                    'pending_orders': int(row.total_abandoned_carts or 0),
                     'total_spent': float(row.total_spent_all or 0),
                     'abandoned_carts_value': float(row.total_abandoned_value or 0)
                 },
