@@ -17,6 +17,8 @@ from .cart import Cart
 from .test_table import TestTable
 from .homepage_distribution import HomepageProductDistribution
 from .crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
+from .crm_sale_type import CrmSaleType
+from .crm_province import CrmProvince, CrmProvinceMap
 
 __all__ = [
     'Category',
@@ -54,6 +56,9 @@ __all__ = [
     'TestTable',
     'HomepageProductDistribution',
     'CrmDeliveryZone',
-    'CrmZoneLocality'
+    'CrmZoneLocality',
+    'CrmSaleType',
+    'CrmProvince',
+    'CrmProvinceMap'
 ]
 

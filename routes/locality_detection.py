@@ -338,14 +338,42 @@ def detect_locality():
                     fallback_locality = Locality.query.get(fallback_locality_uuid)
                     if fallback_locality:
                         print(f"✅ Usando localidad de fallback: {fallback_locality.name}")
+                        # Obtener la zona de entrega para la localidad de fallback
+                        crm_zone_id = None
+                        zone_locality = CrmZoneLocality.query.filter_by(locality_id=fallback_locality.id).first()
+                        if zone_locality:
+                            crm_zone_id = zone_locality.crm_zone_id
+                            print(f"[DEBUG] Zona de entrega encontrada para fallback: crm_zone_id={crm_zone_id}")
+                        else:
+                            print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad de fallback: {fallback_locality.name} (id: {fallback_locality.id})")
+                            # Intentar buscar por nombre de localidad en crm_delivery_zones
+                            try:
+                                crm_zone = CrmDeliveryZone.query.filter(
+                                    CrmDeliveryZone.name.ilike(f'%{fallback_locality.name}%'),
+                                    CrmDeliveryZone.crm_deleted_at.is_(None)
+                                ).first()
+                                if crm_zone:
+                                    crm_zone_id = crm_zone.crm_zone_id
+                                    print(f"[DEBUG] Zona encontrada por nombre para fallback: {crm_zone.name} (crm_zone_id: {crm_zone_id})")
+                            except Exception as e:
+                                print(f"[DEBUG] Error al buscar zona por nombre para fallback: {str(e)}")
+                        
+                        response_data = {
+                            'locality': fallback_locality.to_dict(),
+                            'coordinates': None,
+                            'fallback': 'cordoba_capital',
+                            'reason': 'No se pudo obtener la IP del request. Usando localidad de fallback (Cordoba capital).'
+                        }
+                        
+                        if crm_zone_id:
+                            response_data['crm_zone_id'] = crm_zone_id
+                            print(f"[DEBUG] crm_zone_id agregado a respuesta de fallback: {crm_zone_id}")
+                        else:
+                            print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad de fallback: {fallback_locality.name} (id: {fallback_locality.id})")
+                        
                         return jsonify({
                             'success': True,
-                            'data': {
-                                'locality': fallback_locality.to_dict(),
-                                'coordinates': None,
-                                'fallback': 'cordoba_capital',
-                                'reason': 'No se pudo obtener la IP del request. Usando localidad de fallback (Cordoba capital).'
-                            }
+                            'data': response_data
                         }), 200
                 except (ValueError, TypeError) as e:
                     print(f"⚠️  ID de localidad de fallback no es un UUID válido: {e}")
@@ -414,14 +442,42 @@ def detect_locality():
                     fallback_locality = Locality.query.get(fallback_locality_uuid)
                     if fallback_locality:
                         print(f"✅ Usando localidad de fallback: {fallback_locality.name}")
+                        # Obtener la zona de entrega para la localidad de fallback
+                        crm_zone_id = None
+                        zone_locality = CrmZoneLocality.query.filter_by(locality_id=fallback_locality.id).first()
+                        if zone_locality:
+                            crm_zone_id = zone_locality.crm_zone_id
+                            print(f"[DEBUG] Zona de entrega encontrada para fallback: crm_zone_id={crm_zone_id}")
+                        else:
+                            print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad de fallback: {fallback_locality.name} (id: {fallback_locality.id})")
+                            # Intentar buscar por nombre de localidad en crm_delivery_zones
+                            try:
+                                crm_zone = CrmDeliveryZone.query.filter(
+                                    CrmDeliveryZone.name.ilike(f'%{fallback_locality.name}%'),
+                                    CrmDeliveryZone.crm_deleted_at.is_(None)
+                                ).first()
+                                if crm_zone:
+                                    crm_zone_id = crm_zone.crm_zone_id
+                                    print(f"[DEBUG] Zona encontrada por nombre para fallback: {crm_zone.name} (crm_zone_id: {crm_zone_id})")
+                            except Exception as e:
+                                print(f"[DEBUG] Error al buscar zona por nombre para fallback: {str(e)}")
+                        
+                        response_data = {
+                            'locality': fallback_locality.to_dict(),
+                            'coordinates': None,
+                            'fallback': 'cordoba_capital',
+                            'reason': 'IP local o no se pudieron obtener coordenadas desde IP. Usando localidad de fallback (Cordoba capital).'
+                        }
+                        
+                        if crm_zone_id:
+                            response_data['crm_zone_id'] = crm_zone_id
+                            print(f"[DEBUG] crm_zone_id agregado a respuesta de fallback: {crm_zone_id}")
+                        else:
+                            print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad de fallback: {fallback_locality.name} (id: {fallback_locality.id})")
+                        
                         return jsonify({
                             'success': True,
-                            'data': {
-                                'locality': fallback_locality.to_dict(),
-                                'coordinates': None,
-                                'fallback': 'cordoba_capital',
-                                'reason': 'IP local o no se pudieron obtener coordenadas desde IP. Usando localidad de fallback (Cordoba capital).'
-                            }
+                            'data': response_data
                         }), 200
                     else:
                         print(f"⚠️  Localidad de fallback no encontrada: {fallback_locality_id}")
@@ -497,14 +553,44 @@ def detect_locality():
                 fallback_locality = Locality.query.get(fallback_locality_uuid)
                 if fallback_locality:
                     print(f"✅ Usando localidad de fallback: {fallback_locality.name}")
+                    # Obtener la zona de entrega para la localidad de fallback
+                    crm_zone_id = None
+                    zone_locality = CrmZoneLocality.query.filter_by(locality_id=fallback_locality.id).first()
+                    if zone_locality:
+                        crm_zone_id = zone_locality.crm_zone_id
+                        print(f"[DEBUG] Zona de entrega encontrada para fallback: crm_zone_id={crm_zone_id}")
+                    else:
+                        print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad de fallback: {fallback_locality.name} (id: {fallback_locality.id})")
+                        # Intentar buscar por nombre de localidad en crm_delivery_zones
+                        try:
+                            crm_zone = CrmDeliveryZone.query.filter(
+                                CrmDeliveryZone.name.ilike(f'%{fallback_locality.name}%'),
+                                CrmDeliveryZone.crm_deleted_at.is_(None)
+                            ).first()
+                            if crm_zone:
+                                crm_zone_id = crm_zone.crm_zone_id
+                                print(f"[DEBUG] Zona encontrada por nombre para fallback: {crm_zone.name} (crm_zone_id: {crm_zone_id})")
+                        except Exception as e:
+                            print(f"[DEBUG] Error al buscar zona por nombre para fallback: {str(e)}")
+                    
+                    response_data = {
+                        'locality': fallback_locality.to_dict(),
+                        'coordinates': {'lon': lon, 'lat': lat},
+                        'fallback': 'cordoba_capital',
+                        'reason': 'No se encontró localidad para las coordenadas proporcionadas. Usando localidad de fallback (Cordoba capital).'
+                    }
+                    
+                    if crm_zone_id:
+                        response_data['crm_zone_id'] = crm_zone_id
+                        print(f"[DEBUG] crm_zone_id agregado a respuesta de fallback: {crm_zone_id}")
+                    else:
+                        print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad de fallback: {fallback_locality.name} (id: {fallback_locality.id})")
+                    
+                    print(f"[DEBUG] Respuesta de fallback: {json.dumps(response_data, indent=2, default=str)}")
+                    
                     return jsonify({
                         'success': True,
-                        'data': {
-                            'locality': fallback_locality.to_dict(),
-                            'coordinates': {'lon': lon, 'lat': lat},
-                            'fallback': 'cordoba_capital',
-                            'reason': 'No se encontró localidad para las coordenadas proporcionadas. Usando localidad de fallback (Cordoba capital).'
-                        }
+                        'data': response_data
                     }), 200
                 else:
                     print(f"⚠️  Localidad de fallback no encontrada: {fallback_locality_id}")
@@ -519,12 +605,43 @@ def detect_locality():
             }), 404
         
         print(f"✅ Localidad encontrada: {locality.name} (ID: {locality.id})")
+        
+        # Obtener la zona de entrega asociada a esta localidad
+        crm_zone_id = None
+        zone_locality = CrmZoneLocality.query.filter_by(locality_id=locality.id).first()
+        if zone_locality:
+            crm_zone_id = zone_locality.crm_zone_id
+            print(f"[DEBUG] Zona de entrega encontrada: crm_zone_id={crm_zone_id}")
+        else:
+            print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad: {locality.name} (id: {locality.id})")
+            # Intentar buscar por nombre de localidad en crm_delivery_zones
+            try:
+                crm_zone = CrmDeliveryZone.query.filter(
+                    CrmDeliveryZone.name.ilike(f'%{locality.name}%'),
+                    CrmDeliveryZone.crm_deleted_at.is_(None)
+                ).first()
+                if crm_zone:
+                    crm_zone_id = crm_zone.crm_zone_id
+                    print(f"[DEBUG] Zona encontrada por nombre: {crm_zone.name} (crm_zone_id: {crm_zone_id})")
+            except Exception as e:
+                print(f"[DEBUG] Error al buscar zona por nombre: {str(e)}")
+        
+        response_data = {
+            'locality': locality.to_dict(),
+            'coordinates': {'lon': lon, 'lat': lat}
+        }
+        
+        if crm_zone_id:
+            response_data['crm_zone_id'] = crm_zone_id
+            print(f"[DEBUG] crm_zone_id agregado a respuesta: {crm_zone_id}")
+        else:
+            print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad: {locality.name} (id: {locality.id})")
+        
+        print(f"[DEBUG] Respuesta final de detect_locality: {json.dumps(response_data, indent=2, default=str)}")
+        
         return jsonify({
             'success': True,
-            'data': {
-                'locality': locality.to_dict(),
-                'coordinates': {'lon': lon, 'lat': lat}
-            }
+            'data': response_data
         }), 200
         
     except Exception as e:

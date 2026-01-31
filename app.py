@@ -15,9 +15,10 @@ app.config.from_object(Config)
 @app.after_request
 def after_request(response):
     """Agregar headers CORS a todas las respuestas"""
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # Usar set() en lugar de add() para evitar duplicados
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.set('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
 @app.before_request
@@ -25,9 +26,7 @@ def handle_preflight():
     """Manejar requests OPTIONS (preflight de CORS)"""
     if request.method == "OPTIONS":
         response = jsonify({})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
-        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        # Los headers se agregarán en after_request, no es necesario agregarlos aquí
         return response
 
 # Forzar la lectura de DATABASE_URL desde .env (asegurar que se use el puerto correcto)

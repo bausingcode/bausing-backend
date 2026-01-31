@@ -585,10 +585,36 @@ def sync_data_new():
                 
                 # Procesar resultados y detectar cambios de estado
                 rows = result.fetchall()
+                orders_to_update = []  # Lista para guardar las órdenes que necesitan actualización
+                
                 for row in rows:
                     crm_order_id = row[0]  # p_crm_order_id
                     nuevo_estado = row[1]   # delivery_status
                     accion = row[2]         # affected
+                    
+                    print(f"[DEBUG sync] Procesando venta: crm_order_id={crm_order_id}, nuevo_estado='{nuevo_estado}'")
+                    
+                    # Si el estado es "finalizado", marcar payment_processed como true en la tabla orders
+                    # Normalizar el estado para comparación (lowercase y sin espacios)
+                    estado_normalizado = nuevo_estado.lower().strip() if nuevo_estado else ""
+                    if estado_normalizado == "finalizado":
+                        try:
+                            from models.order import Order
+                            order = Order.query.filter_by(crm_order_id=crm_order_id).first()
+                            if order:
+                                if not order.payment_processed:
+                                    order.payment_processed = True
+                                    orders_to_update.append(order)
+                                    print(f"✅ Marcado payment_processed=True para orden con crm_order_id={crm_order_id} (estado: {nuevo_estado})")
+                                else:
+                                    print(f"ℹ️  Orden con crm_order_id={crm_order_id} ya tenía payment_processed=True")
+                            else:
+                                print(f"⚠️  No se encontró orden con crm_order_id={crm_order_id} para marcar como pagado")
+                        except Exception as payment_error:
+                            # No fallar la sincronización si falla la actualización de payment_processed
+                            import traceback
+                            print(f"❌ Error al actualizar payment_processed: {str(payment_error)}")
+                            print(traceback.format_exc())
                     
                     # Obtener estado anterior
                     estado_anterior = estados_anteriores.get(crm_order_id)
@@ -641,7 +667,31 @@ def sync_data_new():
                     {"json_data": body_data}
                 )
             
+            # Hacer flush antes del commit para asegurar que los cambios de payment_processed se persistan
+            if orders_to_update:
+                try:
+                    db.session.flush()
+                    print(f"[DEBUG sync] Haciendo flush de {len(orders_to_update)} órdenes actualizadas")
+                except Exception as flush_error:
+                    print(f"⚠️  Error en flush: {str(flush_error)}")
+            
             db.session.commit()
+            
+            # Verificar que los cambios se persistieron correctamente
+            if orders_to_update:
+                try:
+                    from models.order import Order
+                    for order in orders_to_update:
+                        # Refrescar la orden desde la base de datos
+                        db.session.refresh(order)
+                        if order.payment_processed:
+                            print(f"✅ Verificado: payment_processed=True para orden crm_order_id={order.crm_order_id}")
+                        else:
+                            print(f"❌ ERROR: payment_processed sigue siendo False para orden crm_order_id={order.crm_order_id}")
+                except Exception as verify_error:
+                    import traceback
+                    print(f"⚠️  Error al verificar payment_processed: {str(verify_error)}")
+                    print(traceback.format_exc())
             
             return success_response(
                 data={},
@@ -1626,10 +1676,14 @@ def crear_venta():
         tipo_documento = data['tipo_documento_cliente']
         documento_cliente = data.get('documento_cliente', '').strip()
         
+        print(f"[DEBUG crear_venta] Validando documento: tipo_documento={tipo_documento}, documento_cliente='{documento_cliente}'")
+        
         if tipo_documento == 1:  # DNI
             # Validar formato DNI (solo números)
             if documento_cliente:
-                if not documento_cliente.isdigit():
+                # Remover guiones y espacios para validar
+                documento_limpio = documento_cliente.replace('-', '').replace(' ', '')
+                if not documento_limpio.isdigit():
                     return validation_error("El DNI debe contener solo números")
             
             # Validar compatibilidad con tipo_venta
@@ -1919,31 +1973,37 @@ def crear_venta():
             """
             
             try:
+                insert_params = {
+                    'id': str(nuevo_uuid),
+                    'crm_order_id': nuevo_crm_order_id,
+                    'receipt_number': numero_comprobante,
+                    'detail_date': fecha_detalle,
+                    'crm_seller_id': vendedor_id,
+                    'crm_sale_type_id': data['tipo_venta'],
+                    'client_name': data['cliente_nombre'],
+                    'client_address': cliente_direccion_completa,
+                    'client_phone': data['cliente_telefono'],
+                    'client_email': data.get('email_cliente'),
+                    'client_document': documento_cliente if documento_cliente else None,
+                    'crm_doc_type_id': tipo_documento,
+                    'crm_province_id': data['provincia_id'],
+                    'city': data['localidad'],
+                    'crm_zone_id': zona_id,
+                    'total_sale': total_venta,
+                    'total_with_payment': total_pagos,
+                    'raw': json.dumps(raw_data)
+                }
+                
+                print(f"[DEBUG crear_venta] Insertando en crm_orders con parámetros: {json.dumps({k: v for k, v in insert_params.items() if k != 'raw'}, indent=2, default=str)}")
+                
                 result_order = db.session.execute(
                     text(insert_order),
-                    {
-                        'id': str(nuevo_uuid),
-                        'crm_order_id': nuevo_crm_order_id,
-                        'receipt_number': numero_comprobante,
-                        'detail_date': fecha_detalle,
-                        'crm_seller_id': vendedor_id,
-                        'crm_sale_type_id': data['tipo_venta'],
-                        'client_name': data['cliente_nombre'],
-                        'client_address': cliente_direccion_completa,
-                        'client_phone': data['cliente_telefono'],
-                        'client_email': data.get('email_cliente'),
-                        'client_document': documento_cliente if documento_cliente else None,
-                        'crm_doc_type_id': tipo_documento,
-                        'crm_province_id': data['provincia_id'],
-                        'city': data['localidad'],
-                        'crm_zone_id': zona_id,
-                        'total_sale': total_venta,
-                        'total_with_payment': total_pagos,
-                        'raw': json.dumps(raw_data)
-                    }
+                    insert_params
                 )
                 
                 crm_order_id = result_order.fetchone()[0]
+                print(f"[DEBUG crear_venta] ✅ Registro insertado en crm_orders con crm_order_id={crm_order_id}")
+                print(f"[DEBUG crear_venta] Parámetros insertados: client_name={insert_params.get('client_name')}, client_email={insert_params.get('client_email')}, client_address={insert_params.get('client_address')}, client_phone={insert_params.get('client_phone')}, crm_zone_id={insert_params.get('crm_zone_id')}, crm_province_id={insert_params.get('crm_province_id')}, city={insert_params.get('city')}, total_sale={insert_params.get('total_sale')}, crm_sale_type_id={insert_params.get('crm_sale_type_id')}, client_document={insert_params.get('client_document')}, crm_doc_type_id={insert_params.get('crm_doc_type_id')}, receipt_number={insert_params.get('receipt_number')}")
             except Exception as e:
                 # Si falla el INSERT de crm_orders, hacer rollback y retornar error
                 db.session.rollback()
@@ -2252,7 +2312,27 @@ def crear_venta():
                         }), 400
             
             # Commit de la transacción
+            print(f"[DEBUG crear_venta] Haciendo commit de la transacción...")
             db.session.commit()
+            print(f"[DEBUG crear_venta] ✅ Commit exitoso. crm_order_id={crm_order_id}")
+            
+            # Verificar que los datos se guardaron correctamente
+            try:
+                verify_query = text("""
+                    SELECT client_name, client_email, client_address, client_phone, 
+                           crm_zone_id, crm_province_id, city, total_sale, crm_sale_type_id,
+                           client_document, crm_doc_type_id, receipt_number
+                    FROM crm_orders 
+                    WHERE crm_order_id = :crm_order_id
+                """)
+                verify_result = db.session.execute(verify_query, {'crm_order_id': crm_order_id})
+                verify_row = verify_result.fetchone()
+                if verify_row:
+                    print(f"[DEBUG crear_venta] ✅ Verificación post-commit: client_name={verify_row[0]}, client_email={verify_row[1]}, client_address={verify_row[2]}, client_phone={verify_row[3]}, crm_zone_id={verify_row[4]}, crm_province_id={verify_row[5]}, city={verify_row[6]}, total_sale={verify_row[7]}, crm_sale_type_id={verify_row[8]}")
+                else:
+                    print(f"[DEBUG crear_venta] ⚠️ No se encontró registro después del commit con crm_order_id={crm_order_id}")
+            except Exception as verify_error:
+                print(f"[DEBUG crear_venta] Error al verificar después del commit: {str(verify_error)}")
             
             # ====================================================================
             # LLAMAR A SYNC_CRM_VENTAS

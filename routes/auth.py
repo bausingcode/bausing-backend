@@ -4,6 +4,7 @@ from models.user import User
 from models.address import Address
 from models.doc_type import DocType
 from models.province import Province
+from models.crm_sale_type import CrmSaleType
 from sqlalchemy.exc import IntegrityError, ProgrammingError, OperationalError
 from sqlalchemy import text
 from functools import wraps
@@ -880,4 +881,23 @@ def get_provinces():
         return jsonify({
             'success': False,
             'error': f'Error al obtener provincias: {str(e)}'
+        }), 500
+
+@auth_bp.route('/sale-types', methods=['GET'])
+def get_sale_types():
+    """
+    Obtener todos los tipos de venta del CRM (público, no requiere autenticación)
+    """
+    try:
+        sale_types = CrmSaleType.query.filter_by(is_active=True).order_by(CrmSaleType.crm_sale_type_id).all()
+        
+        return jsonify({
+            'success': True,
+            'data': [st.to_dict() for st in sale_types]
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener tipos de venta: {str(e)}'
         }), 500
