@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.order import Order
 from models.address import Address
@@ -16,6 +16,8 @@ import uuid
 from datetime import datetime
 import re
 import json
+import os
+import requests
 
 orders_bp = Blueprint('orders', __name__)
 
@@ -419,6 +421,18 @@ def create_order():
         address_data = data['address']
         items = data['items']
         total = float(data['total'])
+        formData = data.get('customer', {})  # Datos del cliente para el pago
+        payment_method = data.get('payment_method', 'card')
+        
+        # Si es pago con tarjeta, verificar que MP_ACCESS_TOKEN esté configurado ANTES de crear la orden
+        if payment_method == 'card' and not pay_on_delivery:
+            mp_access_token = Config.MP_ACCESS_TOKEN or os.getenv('MP_ACCESS_TOKEN')
+            if not mp_access_token:
+                print("[DEBUG] ⚠️ MP_ACCESS_TOKEN no configurado - abortando creación de orden")
+                return jsonify({
+                    'success': False,
+                    'error': 'Configuración de pago no disponible. Por favor, contacta al soporte.'
+                }), 500
         
         print(f"[DEBUG] pay_on_delivery: {pay_on_delivery}")
         print(f"[DEBUG] crm_sale_type_id: {crm_sale_type_id}")
@@ -443,19 +457,47 @@ def create_order():
                 
                 print(f"[DEBUG] Datos del cliente: first_name={first_name}, last_name={last_name}, email={email}, phone={phone}")
                 
-                # Limpiar teléfono: eliminar espacios y si empieza con 0, quitarlo
-                if phone:
-                    phone = str(phone).strip()
-                    if phone.startswith('0'):
-                        phone = phone[1:]
-                        print(f"[DEBUG] Teléfono - Eliminado 0 inicial, nuevo valor: '{phone}'")
+                # Función para normalizar y validar teléfono
+                def normalize_phone(phone_str):
+                    if not phone_str:
+                        return "3510000000"  # Teléfono por defecto
+                    
+                    # Convertir a string y limpiar espacios
+                    phone_str = str(phone_str).strip()
+                    
+                    # Remover caracteres no numéricos (excepto + al inicio)
+                    phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
+                    
+                    # Quitar prefijos comunes
+                    if phone_cleaned.startswith('0'):
+                        phone_cleaned = phone_cleaned[1:]
+                    elif phone_cleaned.startswith('150'):
+                        phone_cleaned = phone_cleaned[3:]
+                    elif phone_cleaned.startswith('15'):
+                        phone_cleaned = phone_cleaned[2:]
+                    
+                    # Validar formato: debe tener entre 8 y 11 dígitos (código de área + número)
+                    # En Argentina: código de área (2-4 dígitos) + número (6-8 dígitos) = 8-12 dígitos total
+                    # Pero típicamente son 10 dígitos (2-3 código + 7-8 número)
+                    if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
+                        print(f"[DEBUG] Teléfono no tiene formato válido (longitud: {len(phone_cleaned)}), usando default: 3510000000")
+                        return "3510000000"
+                    
+                    # Verificar que sean solo dígitos
+                    if not phone_cleaned.isdigit():
+                        print(f"[DEBUG] Teléfono contiene caracteres no numéricos, usando default: 3510000000")
+                        return "3510000000"
+                    
+                    return phone_cleaned
                 
-                # Limpiar teléfono alternativo también
+                # Normalizar teléfono principal
+                phone = normalize_phone(phone)
+                print(f"[DEBUG] Teléfono normalizado: '{phone}'")
+                
+                # Normalizar teléfono alternativo
                 if alternate_phone:
-                    alternate_phone = str(alternate_phone).strip()
-                    if alternate_phone.startswith('0'):
-                        alternate_phone = alternate_phone[1:]
-                        print(f"[DEBUG] Teléfono alternativo - Eliminado 0 inicial, nuevo valor: '{alternate_phone}'")
+                    alternate_phone = normalize_phone(alternate_phone)
+                    print(f"[DEBUG] Teléfono alternativo normalizado: '{alternate_phone}'")
                 
                 # Debug del teléfono
                 print(f"[DEBUG] Teléfono - customer_data.phone: {customer_data.get('phone')}")
@@ -858,6 +900,64 @@ def create_order():
             # Refrescar el objeto para asegurar que los cambios se persistan
             db.session.refresh(order)
             print(f"[DEBUG] Orden creada exitosamente - user_id={order.user_id}, total={order.total}, payment_method={order.payment_method}, payment_processed={order.payment_processed}, crm_sale_type_id={order.crm_sale_type_id}, used_wallet_amount={order.used_wallet_amount}")
+            
+            # Enviar email de confirmación de compra
+            try:
+                from utils.email_service import email_service
+                
+                # Obtener receipt_number desde crm_orders si existe
+                order_number = None
+                if order.crm_order_id:
+                    try:
+                        receipt_query = text("""
+                            SELECT receipt_number 
+                            FROM crm_orders 
+                            WHERE crm_order_id = :crm_order_id
+                        """)
+                        receipt_result = db.session.execute(receipt_query, {
+                            'crm_order_id': order.crm_order_id
+                        })
+                        receipt_row = receipt_result.fetchone()
+                        if receipt_row and receipt_row[0]:
+                            order_number = receipt_row[0]
+                    except Exception as receipt_error:
+                        print(f"[DEBUG] Error al obtener receipt_number: {str(receipt_error)}")
+                
+                # Si no se encontró receipt_number, usar valor por defecto
+                if not order_number:
+                    order_number = f"ORD-{order.created_at.strftime('%Y')}-{str(order.id)[:8].upper()}"
+                
+                # Obtener información del usuario
+                user_email = user.email
+                user_first_name = user.first_name or 'Cliente'
+                
+                # Formatear el total
+                order_total = f"${float(order.total):,.0f}".replace(',', '.')
+                
+                # Construir URL del pedido (opcional)
+                frontend_url = Config.FRONTEND_URL if hasattr(Config, 'FRONTEND_URL') else os.getenv('FRONTEND_URL', 'https://bausing.com.ar')
+                order_url = f"{frontend_url.rstrip('/')}/usuario?order={order.id}"
+                
+                # Enviar email
+                email_sent = email_service.send_order_confirmation_email(
+                    user_email=user_email,
+                    user_first_name=user_first_name,
+                    order_number=order_number,
+                    order_total=order_total,
+                    order_url=order_url
+                )
+                
+                if email_sent:
+                    print(f"[DEBUG] ✅ Email de confirmación enviado a {user_email} para orden {order_number}")
+                else:
+                    print(f"[DEBUG] ⚠️ No se pudo enviar email de confirmación a {user_email}")
+                    
+            except Exception as email_error:
+                # No fallar la creación de la orden si falla el envío del email
+                import traceback
+                print(f"[DEBUG] ❌ Error al enviar email de confirmación: {str(email_error)}")
+                print(traceback.format_exc())
+                
         except IntegrityError as e:
             db.session.rollback()
             # Si hay un error de integridad (duplicado), buscar la orden existente
@@ -875,6 +975,64 @@ def create_order():
                         db.session.commit()
                         db.session.refresh(existing_order)
                         print(f"[DEBUG] Orden duplicada actualizada - user_id={existing_order.user_id}, total={existing_order.total}, payment_method={existing_order.payment_method}")
+                        
+                        # Enviar email de confirmación de compra (solo si no se había enviado antes)
+                        try:
+                            from utils.email_service import email_service
+                            
+                            # Obtener receipt_number desde crm_orders si existe
+                            order_number = None
+                            if existing_order.crm_order_id:
+                                try:
+                                    receipt_query = text("""
+                                        SELECT receipt_number 
+                                        FROM crm_orders 
+                                        WHERE crm_order_id = :crm_order_id
+                                    """)
+                                    receipt_result = db.session.execute(receipt_query, {
+                                        'crm_order_id': existing_order.crm_order_id
+                                    })
+                                    receipt_row = receipt_result.fetchone()
+                                    if receipt_row and receipt_row[0]:
+                                        order_number = receipt_row[0]
+                                except Exception as receipt_error:
+                                    print(f"[DEBUG] Error al obtener receipt_number: {str(receipt_error)}")
+                            
+                            # Si no se encontró receipt_number, usar valor por defecto
+                            if not order_number:
+                                order_number = f"ORD-{existing_order.created_at.strftime('%Y')}-{str(existing_order.id)[:8].upper()}"
+                            
+                            # Obtener información del usuario
+                            user_email = user.email
+                            user_first_name = user.first_name or 'Cliente'
+                            
+                            # Formatear el total
+                            order_total = f"${float(existing_order.total):,.0f}".replace(',', '.')
+                            
+                            # Construir URL del pedido (opcional)
+                            frontend_url = Config.FRONTEND_URL if hasattr(Config, 'FRONTEND_URL') else os.getenv('FRONTEND_URL', 'https://bausing.com.ar')
+                            order_url = f"{frontend_url.rstrip('/')}/usuario?order={existing_order.id}"
+                            
+                            # Enviar email
+                            email_sent = email_service.send_order_confirmation_email(
+                                user_email=user_email,
+                                user_first_name=user_first_name,
+                                order_number=order_number,
+                                order_total=order_total,
+                                order_url=order_url
+                            )
+                            
+                            if email_sent:
+                                print(f"[DEBUG] ✅ Email de confirmación enviado a {user_email} para orden {order_number}")
+                            else:
+                                print(f"[DEBUG] ⚠️ No se pudo enviar email de confirmación a {user_email}")
+                                
+                        except Exception as email_error:
+                            # No fallar la actualización de la orden si falla el envío del email
+                            import traceback
+                            print(f"[DEBUG] ❌ Error al enviar email de confirmación: {str(email_error)}")
+                            print(traceback.format_exc())
+                        
                         return jsonify({
                             'success': True,
                             'data': existing_order.to_dict(),
@@ -890,11 +1048,228 @@ def create_order():
         order_dict = order.to_dict()
         print(f"[DEBUG] Orden creada exitosamente: {json.dumps(order_dict, indent=2, default=str)}")
         
-        return jsonify({
+        # Si es pago con tarjeta sin "abonar al recibir", procesar pago con MercadoPago Checkout API (vía Payments)
+        response_data = {
             'success': True,
             'data': order_dict,
             'message': 'Orden creada exitosamente'
-        }), 201
+        }
+        
+        # Obtener payment_method de los datos
+        payment_method = data.get('payment_method', 'card')
+        
+        if payment_method == 'card' and not pay_on_delivery:
+            mp_token = data.get('mercadopago_token')
+            mp_installments = data.get('mercadopago_installments', 1)
+            mp_payment_method_id = data.get('mercadopago_payment_method_id')
+            mp_issuer_id = data.get('mercadopago_issuer_id')
+            
+            print(f"[DEBUG] Token recibido: {mp_token[:20] if mp_token and len(mp_token) > 20 else mp_token}... (longitud: {len(mp_token) if mp_token else 0})")
+            print(f"[DEBUG] Installments: {mp_installments}")
+            print(f"[DEBUG] Payment Method ID: {mp_payment_method_id}")
+            print(f"[DEBUG] Issuer ID: {mp_issuer_id}")
+            
+            if not mp_token:
+                return jsonify({
+                    'success': False,
+                    'error': 'Token de tarjeta de MercadoPago requerido'
+                }), 400
+            
+            # Validar que el token tenga un formato válido (debe ser un string no vacío)
+            if not isinstance(mp_token, str) or len(mp_token.strip()) == 0:
+                return jsonify({
+                    'success': False,
+                    'error': 'Token de tarjeta inválido'
+                }), 400
+            
+            if not mp_payment_method_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'Método de pago no identificado'
+                }), 400
+            
+            try:
+                # El token ya fue verificado antes de crear la orden, pero lo verificamos de nuevo por seguridad
+                mp_access_token = Config.MP_ACCESS_TOKEN or os.getenv('MP_ACCESS_TOKEN')
+                if not mp_access_token:
+                    print("[DEBUG] ⚠️ MP_ACCESS_TOKEN no configurado - esto no debería pasar")
+                    # Esto no debería pasar porque ya lo verificamos antes, pero por seguridad:
+                    order.payment_processed = False
+                    order.status = 'pending'
+                    db.session.commit()
+                    
+                    return jsonify({
+                        'success': False,
+                        'error': 'Configuración de pago no disponible. La orden se creó pero el pago no pudo ser procesado. Por favor, contacta al soporte.',
+                        'order_id': str(order.id)
+                    }), 500
+                
+                # Calcular el total a pagar (descontando wallet si aplica)
+                total_to_pay = float(total)
+                if used_wallet_amount:
+                    total_to_pay = max(0, total_to_pay - float(used_wallet_amount))
+                
+                # Obtener DNI del cliente
+                customer_dni = formData.get('dni', '') if formData else ''
+                if not customer_dni:
+                    customer_dni = address_data.get('dni', '')
+                
+                # Procesar pago con MercadoPago Checkout API (vía Payments) - Core Methods
+                # Limpiar el token (eliminar espacios en blanco)
+                mp_token_clean = mp_token.strip()
+                
+                print(f"[DEBUG] Token limpio a usar: {mp_token_clean[:20]}... (longitud: {len(mp_token_clean)})")
+                print(f"[DEBUG] Total a pagar: {total_to_pay}")
+                
+                # Construir el objeto payer con toda la información disponible
+                payer_data = {
+                    "email": user.email or formData.get('email', '')
+                }
+                
+                # Agregar identificación solo si tenemos DNI
+                if customer_dni:
+                    payer_data["identification"] = {
+                        "type": "DNI",
+                        "number": str(customer_dni)
+                    }
+                
+                # Agregar nombre completo si está disponible
+                first_name = formData.get('first_name', '') if formData else ''
+                last_name = formData.get('last_name', '') if formData else ''
+                if first_name or last_name:
+                    payer_data["first_name"] = first_name
+                    payer_data["last_name"] = last_name
+                
+                payment_payload = {
+                    "token": mp_token_clean,
+                    "installments": int(mp_installments),
+                    "transaction_amount": float(total_to_pay),
+                    "description": f"Orden {str(order.id)[:8]}",
+                    "payment_method_id": mp_payment_method_id,
+                    "payer": payer_data,
+                    "external_reference": str(order.id),
+                    "statement_descriptor": "BAUSING"
+                }
+                
+                # Agregar notification_url solo si BACKEND_URL está configurado y es válido
+                backend_url = Config.BACKEND_URL or os.getenv('BACKEND_URL', 'http://localhost:5000')
+                
+                # Construir la URL del webhook
+                notification_url = f"{backend_url.rstrip('/')}/api/orders/webhooks/mercadopago"
+                
+                # Validar que la URL sea válida (debe empezar con http:// o https://)
+                if notification_url.startswith(('http://', 'https://')):
+                    # En desarrollo, localhost puede funcionar, pero MercadoPago puede rechazarlo
+                    # En producción, debe ser una URL pública accesible
+                    if 'localhost' in notification_url:
+                        print(f"[DEBUG] ⚠️ notification_url es localhost: {notification_url}")
+                        print("[DEBUG] ⚠️ MercadoPago puede rechazar localhost. Omitiendo notification_url.")
+                        # No agregar notification_url si es localhost
+                    else:
+                        payment_payload["notification_url"] = notification_url
+                        print(f"[DEBUG] ✅ notification_url configurada: {notification_url}")
+                else:
+                    print(f"[DEBUG] ⚠️ notification_url no es válida: {notification_url}")
+                
+                # Agregar issuer_id si está disponible
+                if mp_issuer_id:
+                    payment_payload["issuer_id"] = int(mp_issuer_id)
+                
+                # Generar idempotency key único para este pago (usar el ID de la orden)
+                idempotency_key = str(order.id)
+                
+                # Log del payload completo (sin mostrar el token completo por seguridad)
+                payload_log = payment_payload.copy()
+                if 'token' in payload_log:
+                    payload_log['token'] = f"{payload_log['token'][:20]}... (oculto)"
+                print(f"[DEBUG] Payload completo a enviar a MercadoPago: {json.dumps(payload_log, indent=2, default=str)}")
+                
+                mp_response = requests.post(
+                    "https://api.mercadopago.com/v1/payments",
+                    headers={
+                        "Authorization": f"Bearer {mp_access_token}",
+                        "Content-Type": "application/json",
+                        "X-Idempotency-Key": idempotency_key
+                    },
+                    json=payment_payload,
+                    timeout=30
+                )
+                
+                print(f"[DEBUG] Respuesta de MercadoPago: Status {mp_response.status_code}")
+                if mp_response.status_code != 201:
+                    print(f"[DEBUG] Respuesta completa: {mp_response.text}")
+                
+                if mp_response.status_code == 201:
+                    mp_payment = mp_response.json()
+                    payment_status = mp_payment.get('status')
+                    payment_id = mp_payment.get('id')
+                    
+                    print(f"[DEBUG] ✅ Pago de MercadoPago procesado: {payment_id}, status: {payment_status}")
+                    
+                    # Obtener detalles adicionales del pago
+                    status_detail = mp_payment.get('status_detail', '')
+                    error_message_mp = mp_payment.get('error', {}).get('message', '') if mp_payment.get('error') else ''
+                    
+                    # Si el pago está aprobado, marcar la orden como pagada
+                    if payment_status == 'approved':
+                        order.payment_processed = True
+                        order.status = 'pending'
+                        db.session.commit()
+                        print(f"[DEBUG] ✅ Orden {order.id} marcada como pagada")
+                    elif payment_status == 'pending':
+                        # El pago está pendiente, se procesará vía webhook
+                        print(f"[DEBUG] ⚠️ Pago pendiente, esperando webhook")
+                    else:
+                        # Pago rechazado o en otro estado
+                        # Construir mensaje de error más descriptivo
+                        error_msg = f'El pago fue {payment_status}'
+                        if status_detail:
+                            error_msg += f' ({status_detail})'
+                        if error_message_mp:
+                            error_msg += f': {error_message_mp}'
+                        else:
+                            error_msg += '. Por favor, intenta con otra tarjeta o verifica los datos de la tarjeta.'
+                        
+                        print(f"[DEBUG] ❌ Pago rechazado: {error_msg}")
+                        print(f"[DEBUG] Detalles completos del pago: {json.dumps(mp_payment, indent=2, default=str)}")
+                        
+                        # Marcar la orden como no pagada
+                        order.payment_processed = False
+                        order.status = 'pending'
+                        db.session.commit()
+                        
+                        return jsonify({
+                            'success': False,
+                            'error': error_msg,
+                            'payment_status': payment_status,
+                            'payment_id': payment_id,
+                            'status_detail': status_detail
+                        }), 400
+                    
+                    response_data['payment'] = {
+                        'id': payment_id,
+                        'status': payment_status
+                    }
+                else:
+                    error_data = mp_response.json() if mp_response.text else {}
+                    error_message = error_data.get('message', 'Error al procesar el pago')
+                    print(f"[DEBUG] ❌ Error al procesar pago: {mp_response.status_code} - {error_message}")
+                    return jsonify({
+                        'success': False,
+                        'error': error_message,
+                        'details': error_data
+                    }), 400
+                    
+            except Exception as mp_error:
+                import traceback
+                print(f"[DEBUG] ❌ Error al procesar pago de MercadoPago: {str(mp_error)}")
+                print(traceback.format_exc())
+                return jsonify({
+                    'success': False,
+                    'error': f'Error al procesar el pago: {str(mp_error)}'
+                }), 500
+        
+        return jsonify(response_data), 201
         
     except Exception as e:
         db.session.rollback()
@@ -905,3 +1280,106 @@ def create_order():
             'success': False,
             'error': f'Error al crear orden: {str(e)}'
         }), 500
+
+
+@orders_bp.route('/api/orders/webhooks/mercadopago', methods=['POST', 'GET'])
+def mercadopago_webhook():
+    """
+    Webhook de MercadoPago para procesar notificaciones de pago.
+    Compatible con query params (v1) y body JSON (v2).
+    """
+    try:
+        # Obtener datos del webhook (compatible con v1 y v2)
+        topic = request.args.get('topic') or request.args.get('type')
+        payment_id = request.args.get('id')
+        
+        # Intentar obtener del body JSON (v2)
+        try:
+            body = request.get_json() or {}
+        except Exception:
+            body = {}
+        
+        topic = topic or body.get('type')
+        payment_id = payment_id or (body.get('data') or {}).get('id')
+        
+        if not topic or not payment_id:
+            print("[MP-WH] Webhook sin topic o payment_id, ignorando")
+            return '', 200
+        
+        # Solo procesar notificaciones de payment
+        if topic not in ('payment', 'mp_payment'):
+            print(f"[MP-WH] Topic '{topic}' no es payment, ignorando")
+            return '', 200
+        
+        # Obtener el pago de MercadoPago
+        mp_access_token = Config.MP_ACCESS_TOKEN or os.getenv('MP_ACCESS_TOKEN')
+        if not mp_access_token:
+            print("[MP-WH] ⚠️ MP_ACCESS_TOKEN no configurado")
+            return '', 500
+        
+        mp_response = requests.get(
+            f"https://api.mercadopago.com/v1/payments/{payment_id}",
+            headers={"Authorization": f"Bearer {mp_access_token}"},
+            timeout=30
+        )
+        
+        if mp_response.status_code != 200:
+            print(f"[MP-WH] ❌ Error al obtener pago {payment_id}: {mp_response.status_code}")
+            return '', 400
+        
+        payment = mp_response.json()
+        
+        # Solo procesar pagos aprobados
+        if payment.get('status') != 'approved':
+            print(f"[MP-WH] Pago {payment_id} no está approved (status: {payment.get('status')}), ignorando")
+            return '', 200
+        
+        # Obtener order_id desde external_reference
+        external_reference = payment.get('external_reference') or (payment.get('metadata') or {}).get('order_id')
+        if not external_reference:
+            print(f"[MP-WH] ⚠️ Pago {payment_id} sin external_reference")
+            return '', 200
+        
+        try:
+            order_id = uuid.UUID(external_reference)
+        except ValueError:
+            print(f"[MP-WH] ⚠️ external_reference '{external_reference}' no es un UUID válido")
+            return '', 200
+        
+        # Buscar la orden
+        order = Order.query.get(order_id)
+        if not order:
+            print(f"[MP-WH] ⚠️ Orden {order_id} no encontrada")
+            return '', 200
+        
+        # Si la orden ya está pagada, no hacer nada
+        if order.payment_processed:
+            print(f"[MP-WH] Orden {order_id} ya está pagada, ignorando")
+            return '', 200
+        
+        # Marcar la orden como pagada
+        try:
+            order.payment_processed = True
+            order.status = 'pending'  # Cambiar a 'pending' para que se procese
+            db.session.commit()
+            print(f"[MP-WH] ✅ Orden {order_id} marcada como pagada")
+            
+            # Aquí podrías agregar lógica adicional como:
+            # - Descontar el wallet_amount si se usó
+            # - Enviar email de confirmación
+            # - Crear la venta en el CRM si es necesario
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"[MP-WH] ❌ Error al actualizar orden {order_id}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return '', 500
+        
+        return '', 200
+        
+    except Exception as e:
+        import traceback
+        print(f"[MP-WH] ❌ Error en webhook: {str(e)}")
+        print(traceback.format_exc())
+        return '', 500

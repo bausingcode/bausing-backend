@@ -9,9 +9,9 @@ class Promo(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text)
-    type = db.Column(db.String(50), nullable=False)  # percentage, fixed, 2x1, bundle, wallet_multiplier
-    value = db.Column(db.Numeric(10, 2), nullable=False)
-    extra_config = db.Column(JSONB, nullable=True)  # ej: {"buy":2,"pay":1}
+    type = db.Column(db.String(50), nullable=False)  # percentage, fixed, 2x1, bundle, wallet_multiplier, promotional_message
+    value = db.Column(db.Numeric(10, 2), nullable=True)  # Nullable para promotional_message
+    extra_config = db.Column(JSONB, nullable=True)  # ej: {"buy":2,"pay":1,"custom_message":"OFERTA"}
     start_at = db.Column(db.DateTime, nullable=False)
     end_at = db.Column(db.DateTime, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
@@ -28,7 +28,7 @@ class Promo(db.Model):
             'title': self.title,
             'description': self.description,
             'type': self.type,
-            'value': float(self.value),
+            'value': float(self.value) if self.value is not None else 0,
             'extra_config': self.extra_config or {},
             'start_at': self.start_at.isoformat() if self.start_at else None,
             'end_at': self.end_at.isoformat() if self.end_at else None,

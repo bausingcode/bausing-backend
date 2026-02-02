@@ -1569,33 +1569,31 @@ def calcular_numero_comprobante():
 
 def validar_cuit(cuit):
     """
-    Valida solo el formato del CUIT.
-    Formato esperado: XX-XXXXXXXX-X (13 caracteres)
-    Retorna: (es_valido, mensaje_error)
+    Valida el formato del CUIT.
+    Acepta formato con guiones (XX-XXXXXXXX-X) o sin guiones (11 dígitos).
+    Si viene sin guiones, lo formatea automáticamente.
+    Retorna: (es_valido, mensaje_error, cuit_formateado)
     """
     if not cuit:
-        return False, "El CUIT no puede estar vacío"
+        return False, "El CUIT no puede estar vacío", None
     
-    # Validar formato básico
-    if len(cuit) != 13:
-        return False, "El formato del CUIT es inválido. Debe tener formato: XX-XXXXXXXX-X"
+    # Convertir a string y limpiar espacios
+    cuit = str(cuit).strip()
     
-    if cuit[2] != '-' or cuit[11] != '-':
-        return False, "El formato del CUIT es inválido. Debe tener formato: XX-XXXXXXXX-X"
+    # Remover guiones y espacios para normalizar
+    cuit_limpio = cuit.replace('-', '').replace(' ', '')
     
-    # Validar que las partes sean numéricas
-    try:
-        tipo = cuit[0:2]
-        numero = cuit[3:11]
-        verificador = cuit[12]
-        
-        # Verificar que todas las partes sean numéricas
-        if not tipo.isdigit() or not numero.isdigit() or not verificador.isdigit():
-            return False, "El CUIT contiene caracteres no numéricos"
-        
-        return True, None
-    except (ValueError, IndexError):
-        return False, "El formato del CUIT es inválido. Debe tener formato: XX-XXXXXXXX-X"
+    # Validar que tenga exactamente 11 dígitos
+    if not cuit_limpio.isdigit():
+        return False, "El CUIT debe contener solo números", None
+    
+    if len(cuit_limpio) != 11:
+        return False, f"El CUIT debe tener 11 dígitos (tiene {len(cuit_limpio)})", None
+    
+    # Formatear con guiones: XX-XXXXXXXX-X
+    cuit_formateado = f"{cuit_limpio[:2]}-{cuit_limpio[2:10]}-{cuit_limpio[10]}"
+    
+    return True, None, cuit_formateado
 
 
 @public_api_bp.route('/api/ventas/crear', methods=['POST'])
@@ -1733,12 +1731,65 @@ def crear_venta():
             if not documento_cliente:
                 return validation_error("El documento del cliente es requerido para tipo CUIT")
             
-            es_valido, mensaje_error = validar_cuit(documento_cliente)
+            es_valido, mensaje_error, documento_formateado = validar_cuit(documento_cliente)
             if not es_valido:
                 return jsonify({
                     "status": False,
                     "message": mensaje_error
                 }), 422
+            
+            # Usar el documento formateado (con guiones) si se normalizó
+            if documento_formateado:
+                documento_cliente = documento_formateado
+                data['documento_cliente'] = documento_formateado
+                print(f"[DEBUG crear_venta] CUIT formateado: '{documento_cliente}' -> '{documento_formateado}'")
+        
+        # ========================================================================
+        # NORMALIZACIÓN DE TELÉFONO
+        # ========================================================================
+        def normalize_phone(phone_str):
+            """Normaliza el teléfono: quita 0, 15, 150 al inicio y valida formato"""
+            if not phone_str:
+                return "3510000000"  # Teléfono por defecto
+            
+            # Convertir a string y limpiar espacios
+            phone_str = str(phone_str).strip()
+            
+            # Remover caracteres no numéricos (excepto + al inicio)
+            phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
+            
+            # Quitar prefijos comunes
+            if phone_cleaned.startswith('0'):
+                phone_cleaned = phone_cleaned[1:]
+            elif phone_cleaned.startswith('150'):
+                phone_cleaned = phone_cleaned[3:]
+            elif phone_cleaned.startswith('15'):
+                phone_cleaned = phone_cleaned[2:]
+            
+            # Validar formato: debe tener entre 8 y 11 dígitos (código de área + número)
+            if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
+                print(f"[DEBUG crear_venta] Teléfono no tiene formato válido (longitud: {len(phone_cleaned)}), usando default: 3510000000")
+                return "3510000000"
+            
+            # Verificar que sean solo dígitos
+            if not phone_cleaned.isdigit():
+                print(f"[DEBUG crear_venta] Teléfono contiene caracteres no numéricos, usando default: 3510000000")
+                return "3510000000"
+            
+            return phone_cleaned
+        
+        # Normalizar teléfono del cliente
+        cliente_telefono_original = data.get('cliente_telefono', '')
+        data['cliente_telefono'] = normalize_phone(cliente_telefono_original)
+        if cliente_telefono_original != data['cliente_telefono']:
+            print(f"[DEBUG crear_venta] Teléfono normalizado: '{cliente_telefono_original}' -> '{data['cliente_telefono']}'")
+        
+        # Normalizar teléfono alternativo si existe
+        if 'cel_alternativo' in data and data.get('cel_alternativo'):
+            cel_alternativo_original = data.get('cel_alternativo', '')
+            data['cel_alternativo'] = normalize_phone(cel_alternativo_original)
+            if cel_alternativo_original != data['cel_alternativo']:
+                print(f"[DEBUG crear_venta] Teléfono alternativo normalizado: '{cel_alternativo_original}' -> '{data['cel_alternativo']}'")
         
         # ========================================================================
         # VALIDACIONES DE PRODUCTOS (RENGLONES)
@@ -2428,10 +2479,14 @@ def crear_venta():
                                 print(f"DEBUG: CUIT normalizado de '{documento}' a '{documento_formateado}'")
                         
                         # Validar el formato después de normalizar
-                        es_valido, mensaje_error = validar_cuit(payload_externo['documento_cliente'])
+                        es_valido, mensaje_error, documento_formateado = validar_cuit(payload_externo['documento_cliente'])
                         if not es_valido:
                             print(f"ADVERTENCIA: CUIT aún inválido después de normalizar: {payload_externo['documento_cliente']}")
                             print(f"Error: {mensaje_error}")
+                        elif documento_formateado:
+                            # Actualizar el payload con el CUIT formateado
+                            payload_externo['documento_cliente'] = documento_formateado
+                            print(f"[DEBUG sincronizar_datos] CUIT formateado en payload externo: '{documento_formateado}'")
                     
                     # Construir el array js con la estructura exacta esperada
                     js_array = []

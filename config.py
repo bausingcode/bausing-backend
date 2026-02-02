@@ -17,6 +17,10 @@ class Config:
     RESEND_API_KEY = os.getenv('RESEND_API_KEY')
     RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'noreply@bausing.com')
     
+    # Configuración de MercadoPago
+    MP_ACCESS_TOKEN = os.getenv('MP_ACCESS_TOKEN')
+    MP_PUBLIC_KEY = os.getenv('MP_PUBLIC_KEY')  # Opcional, para uso futuro en frontend
+    
     # Configuración de geolocalización por IP (ip-api.com)
     # Actualmente usando ip-api.com (plan gratuito: 45 requests/minuto, sin API key requerida)
     # Nota: IPAPI_API_KEY se mantiene por compatibilidad pero no se usa actualmente
@@ -33,6 +37,9 @@ class Config:
         FRONTEND_URL = 'http://localhost:3000'
     else:
         FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    
+    # Configuración de Backend URL (para webhooks)
+    BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:5000')
     
     # Configuración del pool de conexiones para Supabase
     # Transaction mode (puerto 6543) permite más conexiones que Session mode

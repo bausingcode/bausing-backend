@@ -60,6 +60,14 @@ pip install -r requirements.txt
    SECRET_KEY=tu-secret-key-segura
    SUPABASE_URL=https://tu-project-id.supabase.co
    SUPABASE_KEY=tu-service-role-key
+   
+   # MercadoPago (credenciales de prueba)
+   MP_ACCESS_TOKEN=TEST-6103708889552760-020119-e487e24989b22c39d6d5f34743854b80-526482732
+   MP_PUBLIC_KEY=TEST-851528f1-2389-49c8-8d2c-0d809b869bc0
+   
+   # URLs (ajustar según entorno)
+   FRONTEND_URL=http://localhost:3000
+   BACKEND_URL=http://localhost:5000
    ```
 
 5. Configurar la base de datos:
@@ -198,6 +206,15 @@ SQLALCHEMY_ECHO=False
 # Supabase (para almacenamiento de imágenes)
 SUPABASE_URL=https://tu-project-id.supabase.co
 SUPABASE_KEY=tu-service-role-key-de-supabase
+
+# MercadoPago (para pagos con tarjeta)
+# Credenciales de prueba:
+MP_ACCESS_TOKEN=TEST-6103708889552760-020119-e487e24989b22c39d6d5f34743854b80-526482732
+MP_PUBLIC_KEY=TEST-851528f1-2389-49c8-8d2c-0d809b869bc0
+
+# URLs (ajustar según entorno)
+FRONTEND_URL=http://localhost:3000
+BACKEND_URL=http://localhost:5000
 ```
 
 **Importante**: 

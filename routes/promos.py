@@ -89,10 +89,11 @@ def create_promo():
                 'error': 'El tipo de promoción es requerido'
             }), 400
         
-        if data.get('value') is None:
+        # El valor solo es requerido si no es promotional_message
+        if data.get('type') != 'promotional_message' and data.get('value') is None:
             return jsonify({
                 'success': False,
-                'error': 'El valor es requerido'
+                'error': 'El valor es requerido para este tipo de promoción'
             }), 400
         
         # Validar fechas
@@ -115,7 +116,7 @@ def create_promo():
             title=data['title'],
             description=data.get('description'),
             type=data['type'],
-            value=data['value'],
+            value=data.get('value') if data.get('type') != 'promotional_message' else None,
             extra_config=data.get('extra_config'),
             start_at=start_at,
             end_at=end_at,
@@ -218,9 +219,28 @@ def update_promo(promo_id):
         if 'type' in data:
             promo.type = data['type']
         if 'value' in data:
-            promo.value = data['value']
+            # Si el tipo es promotional_message, el valor debe ser None
+            if data.get('type') == 'promotional_message':
+                promo.value = None
+            else:
+                promo.value = data['value']
+        elif 'type' in data and data['type'] == 'promotional_message':
+            # Si solo se cambia el tipo a promotional_message, establecer value a None
+            promo.value = None
+        
+        # Manejar extra_config: limpiar custom_message si no se proporciona o si el tipo cambia
         if 'extra_config' in data:
-            promo.extra_config = data.get('extra_config')
+            new_extra_config = data.get('extra_config') or {}
+            # Si el tipo no es promotional_message, percentage o fixed, eliminar custom_message
+            promo_type = data.get('type', promo.type)
+            if promo_type not in ['promotional_message', 'percentage', 'fixed']:
+                if isinstance(new_extra_config, dict):
+                    new_extra_config.pop('custom_message', None)
+            # Si extra_config está vacío, establecer como None para limpiar
+            if not new_extra_config or (isinstance(new_extra_config, dict) and len(new_extra_config) == 0):
+                promo.extra_config = None
+            else:
+                promo.extra_config = new_extra_config
         if 'start_at' in data:
             promo.start_at = datetime.fromisoformat(data['start_at'].replace('Z', '+00:00'))
         if 'end_at' in data:
