@@ -196,6 +196,226 @@ def get_crm_doc_type_id_from_doc_type(doc_type_id):
         print(f"Error al obtener crm_doc_type_id desde doc_type_id: {str(e)}")
         return None
 
+def create_crm_order_from_order(order):
+    """
+    Crea una orden en el CRM a partir de una orden existente.
+    Retorna el crm_order_id si se crea exitosamente, None si hay error.
+    """
+    try:
+        if order.crm_order_id:
+            print(f"[DEBUG] Orden {order.id} ya tiene crm_order_id={order.crm_order_id}, saltando creación")
+            return order.crm_order_id
+        
+        print(f"[DEBUG] Creando orden en CRM para orden {order.id}...")
+        
+        from models.order_item import OrderItem
+        from models.product import Product, ProductVariant, ProductVariantOption
+        from models.address import Address
+        from models.user import User
+        from models.doc_type import DocType
+        from datetime import datetime
+        from flask import current_app
+        from routes.public_api import crear_venta
+        
+        # Obtener usuario y dirección
+        user = User.query.get(order.user_id)
+        if not user:
+            print(f"[DEBUG] ⚠️ Usuario {order.user_id} no encontrado")
+            return None
+        
+        # Obtener dirección de entrega
+        address = Address.query.filter_by(user_id=user.id, is_default=True).first()
+        if not address:
+            address = Address.query.filter_by(user_id=user.id).first()
+        
+        if not address:
+            print(f"[DEBUG] ⚠️ No se encontró dirección para usuario {user.id}")
+            return None
+        
+        # Obtener items de la orden
+        order_items = OrderItem.query.filter_by(order_id=order.id).all()
+        if not order_items:
+            print(f"[DEBUG] ⚠️ Orden {order.id} no tiene items")
+            return None
+        
+        # Obtener datos del cliente
+        first_name = user.first_name or ''
+        last_name = user.last_name or ''
+        email = user.email or ''
+        phone = user.phone or address.phone or ''
+        
+        # Obtener tipo de documento del usuario (usar DNI por defecto si no está configurado)
+        doc_type = DocType.query.filter_by(code='DNI').first()
+        if not doc_type:
+            # Si no existe DNI, usar el primero disponible
+            doc_type = DocType.query.first()
+        
+        if not doc_type:
+            print(f"[DEBUG] ⚠️ No se encontró ningún tipo de documento en la base de datos")
+            return None
+        
+        # Obtener crm_doc_type_id
+        crm_doc_type_id_int = get_crm_doc_type_id_from_doc_type(str(doc_type.id))
+        if not crm_doc_type_id_int:
+            doc_type_name_lower = doc_type.name.lower() if doc_type.name else ""
+            if 'cuit' in doc_type_name_lower or 'cuil' in doc_type_name_lower:
+                crm_doc_type_id_int = 2
+            else:
+                crm_doc_type_id_int = 1  # DNI por defecto
+        
+        # Obtener provincia y zona
+        crm_province_id = get_crm_province_id_from_province(address.province_id)
+        if not crm_province_id:
+            print(f"[DEBUG] ⚠️ No se pudo obtener crm_province_id")
+            return None
+        
+        crm_zone_id = get_crm_zone_id_from_locality(address.city)
+        if not crm_zone_id:
+            print(f"[DEBUG] ⚠️ No se pudo obtener crm_zone_id")
+            return None
+        
+        # Preparar items para el CRM
+        js_items = []
+        for order_item in order_items:
+            product = Product.query.get(order_item.product_id)
+            if not product:
+                continue
+            
+            variant = ProductVariant.query.filter_by(product_id=product.id).first()
+            if not variant:
+                continue
+            
+            option = ProductVariantOption.query.filter_by(product_variant_id=variant.id).first()
+            if not option:
+                continue
+            
+            item_id = getattr(option, 'crm_item_id', None) or getattr(variant, 'crm_item_id', None)
+            if not item_id and product.crm_product_id:
+                item_id = product.crm_product_id
+            
+            if not item_id:
+                continue
+            
+            # Calcular precio total (precio unitario * cantidad)
+            # order_item.unit_price es el precio unitario
+            cantidad = order_item.quantity
+            precio_unitario = float(order_item.unit_price)
+            
+            precio_total = precio_unitario * cantidad
+            
+            js_items.append({
+                "id": None,
+                "accion": "N",
+                "item_id": item_id,
+                "cantidad_recibida": cantidad,
+                "precio": precio_total,  # Precio TOTAL según documentación del endpoint externo
+                "unitario_sin_fpago": precio_unitario,  # Precio unitario
+                "descripcion": product.name
+            })
+        
+        if not js_items:
+            print(f"[DEBUG] ⚠️ No se pudieron mapear items al CRM")
+            return None
+        
+        # Preparar payload para crear_venta
+        fecha_detalle = datetime.now().strftime('%Y-%m-%d')
+        crm_sale_type_id = order.crm_sale_type_id or 1
+        
+        # Formatear documento
+        formatted_document = format_document_number(str(doc_type.id), user.dni or '', crm_sale_type_id)
+        
+        # Construir dirección
+        cliente_direccion = f"{address.street} {address.number}".strip()
+        cliente_direccion_barrio = address.city or ""
+        cliente_direccion_mas_datos = address.additional_info or None
+        
+        # Normalizar teléfono
+        def normalize_phone(phone_str):
+            if not phone_str:
+                return "3510000000"
+            phone_str = str(phone_str).strip()
+            phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
+            if phone_cleaned.startswith('0'):
+                phone_cleaned = phone_cleaned[1:]
+            if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
+                return "3510000000"
+            return phone_cleaned
+        
+        phone_final = normalize_phone(phone)
+        
+        # Determinar medio de pago según payment_method
+        medios_pago_id = 2 if order.payment_method == 'card' else 1  # 2 = Tarjeta, 1 = Abonar al recibir
+        
+        venta_payload = {
+            "fecha_detalle": fecha_detalle,
+            "tipo_venta": crm_sale_type_id,
+            "cliente_nombre": f"{first_name} {last_name}".strip() or "Cliente",
+            "cliente_direccion": cliente_direccion or "",
+            "cliente_direccion_barrio": cliente_direccion_barrio or "",
+            "cliente_direccion_mas_datos": cliente_direccion_mas_datos,
+            "tipo_documento_cliente": crm_doc_type_id_int,
+            "documento_cliente": formatted_document or "",
+            "cliente_telefono": phone_final or "",
+            "cel_alternativo": None,
+            "email_cliente": email or "",
+            "provincia_id": crm_province_id,
+            "localidad": address.city or "",
+            "zona_id": crm_zone_id,
+            "observaciones": "",
+            "lat_long": {"latitud": 0.0, "longitud": 0.0},
+            "js": js_items,
+            "formaPagos": [
+                {
+                    "medios_pago_id": medios_pago_id,
+                    "monto_total": float(order.total),
+                    "procesado": order.payment_processed  # True si ya se pagó, False si es "abonar al recibir"
+                }
+            ]
+        }
+        
+        # Llamar a crear_venta usando /api/ventas/crear
+        with current_app.test_request_context(
+            '/api/ventas/crear',
+            method='POST',
+            json=venta_payload,
+            headers={'Authorization': f'Bearer {Config.API_KEY}'}
+        ):
+            response = crear_venta()
+            
+            if isinstance(response, tuple):
+                response_obj, status_code = response
+            else:
+                response_obj = response
+                status_code = response_obj.status_code if hasattr(response_obj, 'status_code') else 200
+            
+            if hasattr(response_obj, 'get_json'):
+                response_data = response_obj.get_json()
+            elif hasattr(response_obj, 'data'):
+                response_data = json.loads(response_obj.data.decode('utf-8'))
+            else:
+                response_data = response_obj if isinstance(response_obj, dict) else {}
+            
+            if status_code == 200 and response_data.get('status', False):
+                crm_order_id = response_data.get('data', {}).get('crm_order_id') or response_data.get('venta_id')
+                if crm_order_id:
+                    order.crm_order_id = crm_order_id
+                    db.session.commit()
+                    print(f"[DEBUG] ✅ Orden {order.id} creada en CRM con crm_order_id={crm_order_id}")
+                    return crm_order_id
+                else:
+                    print(f"[DEBUG] ⚠️ No se pudo obtener crm_order_id de la respuesta")
+                    return None
+            else:
+                print(f"[DEBUG] ⚠️ Error al crear venta en CRM: {response_data.get('message', 'Error desconocido')}")
+                return None
+                
+    except Exception as crm_error:
+        import traceback
+        print(f"[DEBUG] ⚠️ Error al crear venta en CRM: {str(crm_error)}")
+        print(traceback.format_exc())
+        return None
+
+
 def format_document_number(doc_type_id, document_number, crm_sale_type_id):
     """
     Formatea el número de documento según el tipo de venta
@@ -274,21 +494,26 @@ def get_user_orders():
 def get_user_order(order_id):
     """
     Obtener una orden específica del usuario autenticado
+    Acepta UUID de orders o crm_order_id (número)
     """
     try:
         user = request.user
         
-        # Validar que el order_id sea un UUID válido
+        # Intentar primero como UUID
+        order = None
         try:
             order_uuid = uuid.UUID(order_id)
+            order = Order.query.filter_by(id=order_uuid, user_id=user.id).first()
         except ValueError:
-            return jsonify({
-                'success': False,
-                'error': 'ID de orden inválido'
-            }), 400
-        
-        # Buscar la orden
-        order = Order.query.filter_by(id=order_uuid, user_id=user.id).first()
+            # Si no es UUID, intentar como crm_order_id (número)
+            try:
+                crm_order_id = int(order_id)
+                order = Order.query.filter_by(crm_order_id=crm_order_id, user_id=user.id).first()
+            except ValueError:
+                return jsonify({
+                    'success': False,
+                    'error': 'ID de orden inválido. Debe ser un UUID o un número (crm_order_id)'
+                }), 400
         
         if not order:
             return jsonify({
@@ -442,435 +667,6 @@ def create_order():
         print(f"[DEBUG] wallet_amount recibido: {data.get('wallet_amount')}")
         print(f"[DEBUG] used_wallet_amount recibido: {data.get('used_wallet_amount')}")
         
-        crm_order_id = None
-        
-        # Si es "abonar al recibir", crear venta en CRM primero
-        if pay_on_delivery:
-            try:
-                # Obtener datos del usuario
-                customer_data = data.get('customer', {})
-                first_name = customer_data.get('first_name') or user.first_name or ''
-                last_name = customer_data.get('last_name') or user.last_name or ''
-                email = customer_data.get('email') or user.email or ''
-                phone = customer_data.get('phone') or user.phone or address_data.get('phone') or ''
-                alternate_phone = customer_data.get('alternate_phone') or None
-                
-                print(f"[DEBUG] Datos del cliente: first_name={first_name}, last_name={last_name}, email={email}, phone={phone}")
-                
-                # Función para normalizar y validar teléfono
-                def normalize_phone(phone_str):
-                    if not phone_str:
-                        return "3510000000"  # Teléfono por defecto
-                    
-                    # Convertir a string y limpiar espacios
-                    phone_str = str(phone_str).strip()
-                    
-                    # Remover caracteres no numéricos (excepto + al inicio)
-                    phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
-                    
-                    # Quitar prefijos comunes
-                    if phone_cleaned.startswith('0'):
-                        phone_cleaned = phone_cleaned[1:]
-                    elif phone_cleaned.startswith('150'):
-                        phone_cleaned = phone_cleaned[3:]
-                    elif phone_cleaned.startswith('15'):
-                        phone_cleaned = phone_cleaned[2:]
-                    
-                    # Validar formato: debe tener entre 8 y 11 dígitos (código de área + número)
-                    # En Argentina: código de área (2-4 dígitos) + número (6-8 dígitos) = 8-12 dígitos total
-                    # Pero típicamente son 10 dígitos (2-3 código + 7-8 número)
-                    if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
-                        print(f"[DEBUG] Teléfono no tiene formato válido (longitud: {len(phone_cleaned)}), usando default: 3510000000")
-                        return "3510000000"
-                    
-                    # Verificar que sean solo dígitos
-                    if not phone_cleaned.isdigit():
-                        print(f"[DEBUG] Teléfono contiene caracteres no numéricos, usando default: 3510000000")
-                        return "3510000000"
-                    
-                    return phone_cleaned
-                
-                # Normalizar teléfono principal
-                phone = normalize_phone(phone)
-                print(f"[DEBUG] Teléfono normalizado: '{phone}'")
-                
-                # Normalizar teléfono alternativo
-                if alternate_phone:
-                    alternate_phone = normalize_phone(alternate_phone)
-                    print(f"[DEBUG] Teléfono alternativo normalizado: '{alternate_phone}'")
-                
-                # Debug del teléfono
-                print(f"[DEBUG] Teléfono - customer_data.phone: {customer_data.get('phone')}")
-                print(f"[DEBUG] Teléfono - user.phone: {user.phone}")
-                print(f"[DEBUG] Teléfono - address_data.phone: {address_data.get('phone')}")
-                print(f"[DEBUG] Teléfono - Final phone value (después de limpiar): '{phone}'")
-                print(f"[DEBUG] Teléfono - Type: {type(phone)}")
-                print(f"[DEBUG] Teléfono - Length: {len(phone) if phone else 0}")
-                if phone:
-                    print(f"[DEBUG] Teléfono - Characters: {[c for c in phone]}")
-                    print(f"[DEBUG] Teléfono - Is digit: {phone.isdigit() if isinstance(phone, str) else 'N/A'}")
-                
-                # Obtener tipo de documento
-                doc_type_id = customer_data.get('document_type') or customer_data.get('doc_type_id')
-                document_number = customer_data.get('dni') or customer_data.get('document_number')
-                
-                if not doc_type_id or not document_number:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Tipo de documento y número de documento son requeridos'
-                    }), 400
-                
-                # Obtener doc_type para el crm_doc_type_id
-                doc_type = DocType.query.get(uuid.UUID(doc_type_id) if isinstance(doc_type_id, str) else doc_type_id)
-                if not doc_type:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Tipo de documento no encontrado'
-                    }), 400
-                
-                # Obtener el crm_doc_type_id (integer) desde la tabla crm_doc_types
-                # Por ahora usamos un valor por defecto si no hay mapeo
-                # TODO: Crear tabla de mapeo similar a crm_province_map
-                crm_doc_type_id_int = None
-                if doc_type.crm_doc_type_id:
-                    # Buscar en crm_doc_types el integer correspondiente al UUID
-                    query_doc_type = text("""
-                        SELECT crm_doc_type_id 
-                        FROM crm_doc_types 
-                        WHERE id = :doc_type_uuid
-                        LIMIT 1
-                    """)
-                    try:
-                        result = db.session.execute(query_doc_type, {
-                            'doc_type_uuid': str(doc_type.crm_doc_type_id)
-                        })
-                        row = result.fetchone()
-                        if row:
-                            crm_doc_type_id_int = row[0]
-                            print(f"[DEBUG] ✅ crm_doc_type_id encontrado: {crm_doc_type_id_int} para doc_type: {doc_type.name} (UUID: {doc_type.crm_doc_type_id})")
-                    except Exception as e:
-                        print(f"[DEBUG] ⚠️ Error al buscar crm_doc_type_id: {str(e)}")
-                        pass
-                
-                # Si no se encontró, intentar determinar por el nombre del tipo de documento
-                if not crm_doc_type_id_int:
-                    doc_type_name_lower = doc_type.name.lower() if doc_type.name else ""
-                    if 'cuit' in doc_type_name_lower or 'cuil' in doc_type_name_lower:
-                        crm_doc_type_id_int = 2  # CUIT/CUIL
-                        print(f"[DEBUG] ℹ️  Usando crm_doc_type_id=2 (CUIT/CUIL) basado en nombre: {doc_type.name}")
-                    else:
-                        crm_doc_type_id_int = 1  # DNI por defecto
-                        print(f"[DEBUG] ⚠️  No se encontró crm_doc_type_id, usando valor por defecto 1 (DNI) para doc_type: {doc_type.name}")
-                
-                print(f"[DEBUG] crm_doc_type_id_int final: {crm_doc_type_id_int}")
-                
-                # Formatear documento según tipo de venta
-                formatted_document = format_document_number(doc_type_id, document_number, crm_sale_type_id)
-                print(f"[DEBUG] Documento formateado: '{formatted_document}' (tipo: {crm_doc_type_id_int}, original: '{document_number}')")
-                
-                # Obtener provincia y zona
-                province_id = address_data.get('province_id')
-                if not province_id:
-                    return jsonify({
-                        'success': False,
-                        'error': 'province_id es requerido en la dirección'
-                    }), 400
-                
-                crm_province_id = get_crm_province_id_from_province(province_id)
-                if not crm_province_id:
-                    return jsonify({
-                        'success': False,
-                        'error': 'No se pudo obtener crm_province_id para la provincia seleccionada'
-                    }), 400
-                
-                city = address_data.get('city')
-                # Usar crm_zone_id del request si está disponible, sino buscarlo por localidad
-                crm_zone_id = data.get('crm_zone_id')
-                if not crm_zone_id:
-                    crm_zone_id = get_crm_zone_id_from_locality(city)
-                    if not crm_zone_id:
-                        return jsonify({
-                            'success': False,
-                            'error': f'No se pudo obtener crm_zone_id para la localidad: {city}'
-                        }), 400
-                
-                # Construir dirección completa
-                street = address_data.get('street', '')
-                number = address_data.get('number', '')
-                additional_info = address_data.get('additional_info', '')
-                postal_code = address_data.get('postal_code', '')
-                
-                cliente_direccion = f"{street} {number}".strip()
-                cliente_direccion_barrio = city
-                cliente_direccion_mas_datos = additional_info if additional_info else None
-                
-                # Preparar items para el CRM
-                js_items = []
-                items_without_crm_id = []
-                
-                for item in items:
-                    product_id = uuid.UUID(item['product_id']) if isinstance(item['product_id'], str) else item['product_id']
-                    print(f"[DEBUG] Procesando item: product_id={product_id}, quantity={item.get('quantity')}")
-                    
-                    product = Product.query.get(product_id)
-                    if not product:
-                        print(f"[DEBUG] ❌ Producto no encontrado: {product_id}")
-                        items_without_crm_id.append(f"Producto {product_id} no encontrado")
-                        continue
-                    
-                    print(f"[DEBUG] ✅ Producto encontrado: {product.name}, crm_product_id={product.crm_product_id}")
-                    
-                    # Obtener el primer variant y option del producto
-                    variant = ProductVariant.query.filter_by(product_id=product_id).first()
-                    if not variant:
-                        print(f"[DEBUG] ❌ No se encontró variant para producto {product_id}")
-                        items_without_crm_id.append(f"Producto {product.name}: sin variantes")
-                        continue
-                    
-                    print(f"[DEBUG] ✅ Variant encontrado: id={variant.id}, sku={variant.sku}")
-                    
-                    option = ProductVariantOption.query.filter_by(product_variant_id=variant.id).first()
-                    if not option:
-                        print(f"[DEBUG] ❌ No se encontró option para variant {variant.id}")
-                        items_without_crm_id.append(f"Producto {product.name}: sin opciones")
-                        continue
-                    
-                    print(f"[DEBUG] ✅ Option encontrado: id={option.id}, name={option.name}")
-                    
-                    # Intentar obtener el item_id del CRM
-                    # Primero verificar si option o variant tienen crm_item_id
-                    item_id = getattr(option, 'crm_item_id', None) or getattr(variant, 'crm_item_id', None)
-                    
-                    # Si no hay crm_item_id, usar crm_product_id del producto
-                    if not item_id:
-                        if product.crm_product_id:
-                            item_id = product.crm_product_id
-                            print(f"[DEBUG] ⚠️  No se encontró crm_item_id, usando crm_product_id={item_id} del producto")
-                        else:
-                            print(f"[DEBUG] ❌ No se encontró crm_item_id ni crm_product_id para producto {product.name}")
-                            items_without_crm_id.append(f"Producto {product.name}: sin crm_product_id ni crm_item_id")
-                            continue
-                    
-                    quantity = item.get('quantity', 1)
-                    price = float(item.get('price', 0))
-                    
-                    print(f"[DEBUG] ✅ Item mapeado: item_id={item_id}, quantity={quantity}, price={price}")
-                    
-                    js_items.append({
-                        "id": None,
-                        "accion": "N",
-                        "item_id": item_id,
-                        "cantidad_recibida": quantity,
-                        "precio": price,
-                        "unitario_sin_fpago": price,
-                        "descripcion": product.name
-                    })
-                
-                if not js_items:
-                    error_msg = 'No se pudieron mapear los productos al CRM. '
-                    if items_without_crm_id:
-                        error_msg += 'Productos sin mapeo: ' + ', '.join(items_without_crm_id)
-                    else:
-                        error_msg += 'Verifique que los productos tengan crm_product_id o crm_item_id'
-                    return jsonify({
-                        'success': False,
-                        'error': error_msg
-                    }), 400
-                
-                print(f"[DEBUG] ✅ Total de items mapeados: {len(js_items)}/{len(items)}")
-                
-                # Preparar payload para crear_venta
-                fecha_detalle = datetime.now().strftime('%Y-%m-%d')
-                
-                # Debug del teléfono antes de crear el payload
-                phone_final = phone or ""
-                print(f"[DEBUG] Teléfono final antes de payload: '{phone_final}'")
-                print(f"[DEBUG] Teléfono final - Type: {type(phone_final)}")
-                print(f"[DEBUG] Teléfono final - Length: {len(phone_final)}")
-                print(f"[DEBUG] Teléfono final - Is empty: {not phone_final}")
-                if phone_final:
-                    print(f"[DEBUG] Teléfono final - Contains spaces: {' ' in phone_final}")
-                    print(f"[DEBUG] Teléfono final - Contains dashes: {'-' in phone_final}")
-                    print(f"[DEBUG] Teléfono final - Contains parentheses: {'(' in phone_final or ')' in phone_final}")
-                    print(f"[DEBUG] Teléfono final - Stripped: '{phone_final.strip()}'")
-                
-                venta_payload = {
-                    "fecha_detalle": fecha_detalle,
-                    "tipo_venta": crm_sale_type_id,
-                    "cliente_nombre": f"{first_name} {last_name}".strip() or "Cliente",
-                    "cliente_direccion": cliente_direccion or "",
-                    "cliente_direccion_barrio": cliente_direccion_barrio or "",
-                    "cliente_direccion_mas_datos": cliente_direccion_mas_datos,
-                    "tipo_documento_cliente": crm_doc_type_id_int,
-                    "documento_cliente": formatted_document or "",
-                    "cliente_telefono": phone_final or "",
-                    "cel_alternativo": alternate_phone if alternate_phone else None,
-                    "email_cliente": email or "",
-                    "provincia_id": crm_province_id,
-                    "localidad": city or "",
-                    "zona_id": crm_zone_id,
-                    "observaciones": data.get('observations', ''),
-                    "lat_long": {"latitud": 0.0, "longitud": 0.0},  # Por ahora 0,0
-                    "js": js_items,
-                    "formaPagos": [
-                        {
-                            "medios_pago_id": 1,  # Abonar al recibir
-                            "monto_total": total,
-                            "procesado": False
-                        }
-                    ]
-                }
-                
-                # Debug del payload completo
-                print(f"[DEBUG] Payload completo para crear_venta: {json.dumps(venta_payload, indent=2, default=str)}")
-                
-                # Llamar directamente a la función crear_venta usando el contexto de request de Flask
-                from flask import current_app
-                from routes.public_api import crear_venta
-                
-                # Crear un contexto de request temporal para simular la llamada
-                with current_app.test_request_context(
-                    '/api/ventas/crear',
-                    method='POST',
-                    json=venta_payload,
-                    headers={'Authorization': f'Bearer {Config.API_KEY}'}
-                ):
-                    # Llamar directamente a la función
-                    response = crear_venta()
-                    
-                    # Manejar si la respuesta es una tupla (response, status_code)
-                    if isinstance(response, tuple):
-                        response_obj, status_code = response
-                    else:
-                        response_obj = response
-                        status_code = response_obj.status_code if hasattr(response_obj, 'status_code') else 200
-                    
-                    # Extraer los datos de la respuesta
-                    if hasattr(response_obj, 'get_json'):
-                        response_data = response_obj.get_json()
-                    elif hasattr(response_obj, 'data'):
-                        # Si es un Response object, obtener el JSON
-                        response_data = json.loads(response_obj.data.decode('utf-8'))
-                    else:
-                        # Si es un dict directamente
-                        response_data = response_obj if isinstance(response_obj, dict) else {}
-                    
-                    # Verificar el status code
-                    if status_code != 200:
-                        error_msg = response_data.get("message", "Error desconocido")
-                        # Si hay errores específicos, agregarlos al mensaje
-                        if "errors" in response_data:
-                            errors = response_data.get("errors", {})
-                            error_details = []
-                            for field, field_errors in errors.items():
-                                if isinstance(field_errors, list):
-                                    error_details.extend([f"{field}: {e}" for e in field_errors])
-                                else:
-                                    error_details.append(f"{field}: {field_errors}")
-                            if error_details:
-                                error_msg += " - " + ", ".join(error_details)
-                        
-                        return jsonify({
-                            'success': False,
-                            'error': f'Error al crear venta en CRM: {error_msg}'
-                        }), status_code
-                    
-                    if not response_data.get('status', False):
-                        return jsonify({
-                            'success': False,
-                            'error': f'Error al crear venta en CRM: {response_data.get("message", "Error desconocido")}'
-                        }), 500
-                    
-                    # Obtener el crm_order_id de la respuesta
-                    # El endpoint externo retorna venta_id en el root, pero crear_venta lo estructura en data.crm_order_id
-                    crm_order_id = response_data.get('data', {}).get('crm_order_id') or response_data.get('venta_id') or response_data.get('data', {}).get('venta_id')
-                    print(f"[DEBUG] crm_order_id extraído de la respuesta: {crm_order_id}")
-                    print(f"[DEBUG] Respuesta completa de crear_venta: {json.dumps(response_data, indent=2, default=str)}")
-                    
-                    # Forzar flush de la sesión para asegurar que los cambios se vean
-                    try:
-                        db.session.flush()
-                    except:
-                        pass
-                    
-                    # Verificar que crear_venta guardó los datos en crm_orders
-                    # Hacer esto después de que el contexto de test_request_context termine
-                    if crm_order_id:
-                        print(f"[DEBUG] Verificando datos en crm_orders para crm_order_id={crm_order_id}")
-                
-            except Exception as e:
-                import traceback
-                print(f"Error al crear venta en CRM: {str(e)}")
-                print(traceback.format_exc())
-                return jsonify({
-                    'success': False,
-                    'error': f'Error al crear venta en CRM: {str(e)}'
-                }), 500
-        
-        # Verificar que crear_venta guardó los datos en crm_orders (después de que termine el contexto test_request_context)
-        if crm_order_id:
-            try:
-                # Hacer un refresh de la sesión para ver los cambios
-                db.session.expire_all()
-                check_crm_order = text("""
-                    SELECT client_name, client_email, client_address, client_phone, 
-                           crm_zone_id, crm_province_id, city, total_sale, crm_sale_type_id,
-                           client_document, crm_doc_type_id, receipt_number
-                    FROM crm_orders 
-                    WHERE crm_order_id = :crm_order_id
-                """)
-                result_check = db.session.execute(check_crm_order, {'crm_order_id': crm_order_id})
-                crm_order_row = result_check.fetchone()
-                if crm_order_row:
-                    print(f"[DEBUG] ✅ Datos en crm_orders: client_name={crm_order_row[0]}, client_email={crm_order_row[1]}, client_address={crm_order_row[2]}, client_phone={crm_order_row[3]}, crm_zone_id={crm_order_row[4]}, crm_province_id={crm_order_row[5]}, city={crm_order_row[6]}, total_sale={crm_order_row[7]}, crm_sale_type_id={crm_order_row[8]}, client_document={crm_order_row[9]}, crm_doc_type_id={crm_order_row[10]}, receipt_number={crm_order_row[11]}")
-                else:
-                    print(f"[DEBUG] ⚠️ No se encontró registro en crm_orders con crm_order_id={crm_order_id}")
-            except Exception as check_error:
-                print(f"[DEBUG] Error al verificar crm_orders: {str(check_error)}")
-                import traceback
-                print(traceback.format_exc())
-        
-        # Verificar si ya existe una orden con este crm_order_id
-        existing_order = None
-        if crm_order_id:
-            existing_order = Order.query.filter_by(crm_order_id=crm_order_id).first()
-            if existing_order:
-                print(f"[DEBUG] Orden existente encontrada con crm_order_id={crm_order_id}, actualizando campos...")
-                # Actualizar los campos de la orden existente
-                existing_order.user_id = user.id
-                existing_order.total = total
-                existing_order.payment_method = data.get('payment_method', 'card')
-                existing_order.payment_processed = not pay_on_delivery
-                existing_order.crm_sale_type_id = crm_sale_type_id if pay_on_delivery else None
-                
-                # Actualizar used_wallet_amount
-                used_wallet_amount = None
-                if data.get('used_wallet_amount'):
-                    used_wallet_amount = float(data.get('used_wallet_amount'))
-                elif data.get('wallet_amount'):
-                    used_wallet_amount = float(data.get('wallet_amount'))
-                elif data.get('use_wallet_balance') and data.get('wallet_amount'):
-                    used_wallet_amount = float(data.get('wallet_amount'))
-                existing_order.used_wallet_amount = used_wallet_amount
-                
-                try:
-                    db.session.commit()
-                    # Refrescar el objeto para asegurar que los cambios se persistan
-                    db.session.refresh(existing_order)
-                    print(f"[DEBUG] Orden existente actualizada exitosamente")
-                    print(f"[DEBUG] Verificación post-commit - user_id={existing_order.user_id}, total={existing_order.total}, payment_method={existing_order.payment_method}, payment_processed={existing_order.payment_processed}, crm_sale_type_id={existing_order.crm_sale_type_id}, used_wallet_amount={existing_order.used_wallet_amount}")
-                    order_dict = existing_order.to_dict()
-                    print(f"[DEBUG] Orden dict después de refresh: {json.dumps(order_dict, indent=2, default=str)}")
-                    return jsonify({
-                        'success': True,
-                        'data': order_dict,
-                        'message': 'Orden actualizada exitosamente'
-                    }), 200
-                except Exception as e:
-                    db.session.rollback()
-                    print(f"[DEBUG] Error al actualizar orden existente: {str(e)}")
-                    raise
-        
         # Obtener used_wallet_amount (puede venir como wallet_amount o used_wallet_amount)
         used_wallet_amount = None
         if data.get('used_wallet_amount'):
@@ -880,26 +676,271 @@ def create_order():
         elif data.get('use_wallet_balance') and data.get('wallet_amount'):
             used_wallet_amount = float(data.get('wallet_amount'))
         
-        # Crear la orden en la tabla orders
-        order = Order(
-            user_id=user.id,
-            crm_order_id=crm_order_id,
-            crm_sale_type_id=crm_sale_type_id if pay_on_delivery else None,
-            total=total,
-            status='pending',
-            payment_method=data.get('payment_method', 'card'),
-            payment_processed=not pay_on_delivery,  # False si es "abonar al recibir", True si ya se pagó
-            used_wallet_amount=used_wallet_amount
-        )
+        # Preparar datos para llamar a /api/ventas/crear
+        # Primero necesitamos obtener los datos del usuario y dirección
+        from models.address import Address
+        from models.doc_type import DocType
         
-        print(f"[DEBUG] Creando orden: user_id={user.id}, total={total}, payment_method={data.get('payment_method')}, used_wallet_amount={used_wallet_amount}, crm_sale_type_id={crm_sale_type_id if pay_on_delivery else None}")
+        # Obtener dirección
+        address = Address.query.filter_by(user_id=user.id, is_default=True).first()
+        if not address:
+            address = Address.query.filter_by(user_id=user.id).first()
+        
+        if not address:
+            # Si no hay dirección guardada, usar la dirección del request
+            address = Address(
+                user_id=user.id,
+                street=address_data.get('street', ''),
+                number=address_data.get('number', ''),
+                city=address_data.get('city', ''),
+                province_id=uuid.UUID(address_data['province_id']) if isinstance(address_data.get('province_id'), str) else address_data.get('province_id'),
+                phone=address_data.get('phone', ''),
+                additional_info=address_data.get('additional_info', '')
+            )
+        
+        # Obtener tipo de documento desde los datos del request o usar DNI por defecto
+        doc_type_id = formData.get('document_type') or formData.get('doc_type_id')
+        doc_type = None
+        crm_doc_type_id_int = 1  # DNI por defecto
+        
+        if doc_type_id:
+            try:
+                doc_type_uuid = uuid.UUID(doc_type_id) if isinstance(doc_type_id, str) else doc_type_id
+                doc_type = DocType.query.get(doc_type_uuid)
+                if doc_type:
+                    # Obtener crm_doc_type_id
+                    crm_doc_type_id_int = get_crm_doc_type_id_from_doc_type(doc_type_id)
+                    if not crm_doc_type_id_int:
+                        doc_type_name_lower = doc_type.name.lower() if doc_type.name else ""
+                        if 'cuit' in doc_type_name_lower or 'cuil' in doc_type_name_lower:
+                            crm_doc_type_id_int = 2
+                        else:
+                            crm_doc_type_id_int = 1
+            except Exception as e:
+                print(f"[DEBUG] Error al obtener tipo de documento: {str(e)}")
+                # Usar DNI por defecto si hay error
+                crm_doc_type_id_int = 1
+        
+        # Si no hay doc_type pero necesitamos uno, usar DNI por defecto
+        if not doc_type:
+            doc_type = DocType.query.filter_by(code='DNI').first()
+            if not doc_type:
+                # Si no existe DNI, usar el primero disponible
+                doc_type = DocType.query.first()
+        
+        if not doc_type:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudo determinar el tipo de documento'
+            }), 400
+        
+        # Obtener provincia y zona
+        province_id = address_data.get('province_id') or (address.province_id if address else None)
+        if not province_id:
+            return jsonify({
+                'success': False,
+                'error': 'province_id es requerido'
+            }), 400
+        
+        crm_province_id = get_crm_province_id_from_province(province_id)
+        if not crm_province_id:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudo obtener crm_province_id para la provincia'
+            }), 400
+        
+        city = address_data.get('city') or (address.city if address else '')
+        crm_zone_id = data.get('crm_zone_id')
+        if not crm_zone_id:
+            crm_zone_id = get_crm_zone_id_from_locality(city)
+            if not crm_zone_id:
+                return jsonify({
+                    'success': False,
+                    'error': f'No se pudo obtener crm_zone_id para la localidad: {city}'
+                }), 400
+        
+        # Preparar items para el CRM
+        js_items = []
+        order_items_for_payload = []
+        for item in items:
+            product_id = uuid.UUID(item['product_id']) if isinstance(item['product_id'], str) else item['product_id']
+            product = Product.query.get(product_id)
+            if not product:
+                continue
+            
+            variant = ProductVariant.query.filter_by(product_id=product_id).first()
+            if not variant:
+                continue
+            
+            option = ProductVariantOption.query.filter_by(product_variant_id=variant.id).first()
+            if not option:
+                continue
+            
+            item_id = getattr(option, 'crm_item_id', None) or getattr(variant, 'crm_item_id', None)
+            if not item_id and product.crm_product_id:
+                item_id = product.crm_product_id
+            
+            if not item_id:
+                continue
+            
+            # Calcular precio total (precio unitario * cantidad)
+            precio_unitario = float(item.get('price', 0))
+            cantidad = item.get('quantity', 1)
+            precio_total = precio_unitario * cantidad
+            
+            js_items.append({
+                "id": None,
+                "accion": "N",
+                "item_id": item_id,
+                "cantidad_recibida": cantidad,
+                "precio": precio_total,  # Precio TOTAL según documentación del endpoint externo
+                "unitario_sin_fpago": precio_unitario,  # Precio unitario
+                "descripcion": product.name
+            })
+            
+            # Preparar items para la orden
+            variant_id = None
+            if item.get('variant_id'):
+                variant_id = uuid.UUID(item['variant_id']) if isinstance(item['variant_id'], str) else item['variant_id']
+            
+            order_items_for_payload.append({
+                'product_id': str(product_id),
+                'variant_id': str(variant_id) if variant_id else None,
+                'quantity': item.get('quantity', 1),
+                'price': float(item.get('price', 0))
+            })
+        
+        if not js_items:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudieron mapear los productos al CRM'
+            }), 400
+        
+        # Formatear documento
+        document_number = formData.get('dni') or formData.get('document_number') or user.dni or ''
+        formatted_document = format_document_number(str(doc_type.id), document_number, crm_sale_type_id)
+        
+        # Construir dirección
+        cliente_direccion = f"{address_data.get('street', address.street if address else '')} {address_data.get('number', address.number if address else '')}".strip()
+        cliente_direccion_barrio = city
+        cliente_direccion_mas_datos = address_data.get('additional_info') or (address.additional_info if address else None)
+        
+        # Normalizar teléfono
+        def normalize_phone(phone_str):
+            if not phone_str:
+                return "3510000000"
+            phone_str = str(phone_str).strip()
+            phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
+            if phone_cleaned.startswith('0'):
+                phone_cleaned = phone_cleaned[1:]
+            if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
+                return "3510000000"
+            return phone_cleaned
+        
+        phone_final = normalize_phone(user.phone or address_data.get('phone') or (address.phone if address else ''))
+        
+        # Determinar medio de pago
+        medios_pago_id = 2 if payment_method == 'card' else 1  # 2 = Tarjeta, 1 = Abonar al recibir
+        
+        # Preparar payload para /api/ventas/crear
+        venta_payload = {
+            "fecha_detalle": datetime.now().strftime('%Y-%m-%d'),
+            "tipo_venta": crm_sale_type_id,
+            "cliente_nombre": f"{user.first_name or ''} {user.last_name or ''}".strip() or "Cliente",
+            "cliente_direccion": cliente_direccion or "",
+            "cliente_direccion_barrio": cliente_direccion_barrio or "",
+            "cliente_direccion_mas_datos": cliente_direccion_mas_datos,
+            "tipo_documento_cliente": crm_doc_type_id_int,
+            "documento_cliente": formatted_document or "",
+            "cliente_telefono": phone_final or "",
+            "cel_alternativo": None,
+            "email_cliente": user.email or "",
+            "provincia_id": crm_province_id,
+            "localidad": city or "",
+            "zona_id": crm_zone_id,
+            "observaciones": "",
+            "lat_long": {"latitud": 0.0, "longitud": 0.0},
+            "js": js_items,
+            "formaPagos": [
+                {
+                    "medios_pago_id": medios_pago_id,
+                    "monto_total": total,
+                    "procesado": not pay_on_delivery  # True si ya se pagó, False si es "abonar al recibir"
+                }
+            ],
+            # Datos adicionales para crear la orden
+            "user_id": str(user.id),
+            "payment_method": payment_method,
+            "payment_processed": not pay_on_delivery,
+            "used_wallet_amount": used_wallet_amount,
+            "order_items": order_items_for_payload
+        }
+        
+        # Llamar a /api/ventas/crear
+        print(f"[DEBUG] Llamando a /api/ventas/crear para crear orden y venta en CRM...")
+        print(f"[DEBUG] Payload completo: {json.dumps(venta_payload, indent=2, default=str)}")
+        try:
+            from flask import current_app
+            from routes.public_api import crear_venta
+            
+            with current_app.test_request_context(
+                '/api/ventas/crear',
+                method='POST',
+                json=venta_payload,
+                headers={'Authorization': f'Bearer {Config.API_KEY}'}
+            ):
+                response = crear_venta()
+                
+                if isinstance(response, tuple):
+                    response_obj, status_code = response
+                else:
+                    response_obj = response
+                    status_code = response_obj.status_code if hasattr(response_obj, 'status_code') else 200
+                
+                if hasattr(response_obj, 'get_json'):
+                    response_data = response_obj.get_json()
+                elif hasattr(response_obj, 'data'):
+                    response_data = json.loads(response_obj.data.decode('utf-8'))
+                else:
+                    response_data = response_obj if isinstance(response_obj, dict) else {}
+                
+                print(f"[DEBUG] Respuesta de crear_venta: status_code={status_code}, response_data={json.dumps(response_data, indent=2, default=str)}")
+                
+                if status_code == 200 and response_data.get('status', False):
+                    order_id = response_data.get('data', {}).get('order_id')
+                    crm_order_id = response_data.get('data', {}).get('crm_order_id')
+                    
+                    if order_id:
+                        # Obtener la orden creada
+                        order = Order.query.get(uuid.UUID(order_id))
+                        if order:
+                            print(f"[DEBUG] ✅ Orden y venta creadas exitosamente - order_id={order_id}, crm_order_id={crm_order_id}")
+                        else:
+                            return jsonify({
+                                'success': False,
+                                'error': 'Orden creada pero no se pudo recuperar'
+                            }), 500
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': 'No se recibió order_id en la respuesta'
+                        }), 500
+                else:
+                    error_msg = response_data.get('message', 'Error desconocido al crear venta')
+                    return jsonify({
+                        'success': False,
+                        'error': error_msg
+                    }), status_code
+        except Exception as venta_error:
+            import traceback
+            print(f"[DEBUG] ⚠️ Error al llamar a /api/ventas/crear: {str(venta_error)}")
+            print(traceback.format_exc())
+            return jsonify({
+                'success': False,
+                'error': f'Error al crear orden: {str(venta_error)}'
+            }), 500
         
         try:
-            db.session.add(order)
-            db.session.commit()
-            # Refrescar el objeto para asegurar que los cambios se persistan
-            db.session.refresh(order)
-            print(f"[DEBUG] Orden creada exitosamente - user_id={order.user_id}, total={order.total}, payment_method={order.payment_method}, payment_processed={order.payment_processed}, crm_sale_type_id={order.crm_sale_type_id}, used_wallet_amount={order.used_wallet_amount}")
             
             # Enviar email de confirmación de compra
             try:
@@ -1063,11 +1104,19 @@ def create_order():
             mp_installments = data.get('mercadopago_installments', 1)
             mp_payment_method_id = data.get('mercadopago_payment_method_id')
             mp_issuer_id = data.get('mercadopago_issuer_id')
+            # Datos del cardholder del Brick (tienen prioridad sobre los datos del formulario)
+            mp_cardholder_name = data.get('mercadopago_cardholder_name')
+            mp_cardholder_email = data.get('mercadopago_cardholder_email')
+            mp_cardholder_identification_type = data.get('mercadopago_cardholder_identification_type')
+            mp_cardholder_identification_number = data.get('mercadopago_cardholder_identification_number')
             
-            print(f"[DEBUG] Token recibido: {mp_token[:20] if mp_token and len(mp_token) > 20 else mp_token}... (longitud: {len(mp_token) if mp_token else 0})")
-            print(f"[DEBUG] Installments: {mp_installments}")
-            print(f"[DEBUG] Payment Method ID: {mp_payment_method_id}")
-            print(f"[DEBUG] Issuer ID: {mp_issuer_id}")
+            # ========== DEBUG: Lo que llega del frontend ==========
+            print(f"[DEBUG] ========== DATOS DEL FRONTEND ==========")
+            print(f"[DEBUG] mercadopago_payment_method_id: {mp_payment_method_id} (tipo: {type(mp_payment_method_id).__name__})")
+            print(f"[DEBUG] mercadopago_issuer_id: {mp_issuer_id} (tipo: {type(mp_issuer_id).__name__})")
+            print(f"[DEBUG] mercadopago_token: {mp_token[:6] if mp_token and len(mp_token) >= 6 else mp_token}... (longitud: {len(mp_token) if mp_token else 0})")
+            print(f"[DEBUG] amount (total): {total} (tipo: {type(total).__name__})")
+            print(f"[DEBUG] ========================================")
             
             if not mp_token:
                 return jsonify({
@@ -1122,23 +1171,95 @@ def create_order():
                 print(f"[DEBUG] Total a pagar: {total_to_pay}")
                 
                 # Construir el objeto payer con toda la información disponible
-                payer_data = {
-                    "email": user.email or formData.get('email', '')
-                }
+                # PRIORIDAD: Usar datos del cardholder del Brick si están disponibles (son más confiables)
+                # Si no, usar datos del formulario
                 
-                # Agregar identificación solo si tenemos DNI
-                if customer_dni:
+                # Email: Prioridad 1) Cardholder del Brick, 2) Formulario, 3) Usuario, 4) Default
+                customer_email = mp_cardholder_email or (formData.get('email', '') if formData else '') or user.email or ''
+                if not customer_email or customer_email.strip() == "":
+                    customer_email = "test@example.com"
+                    print(f"[DEBUG] ⚠️ No se encontró email válido, usando email por defecto")
+                
+                # Nombre: Prioridad 1) Cardholder del Brick, 2) Formulario
+                if mp_cardholder_name:
+                    # El cardholder name puede venir como "Nombre Apellido", separarlo
+                    name_parts = mp_cardholder_name.strip().split(' ', 1)
+                    customer_first_name = name_parts[0] if name_parts else ''
+                    customer_last_name = name_parts[1] if len(name_parts) > 1 else ''
+                else:
+                    customer_first_name = formData.get('first_name', '') if formData else ''
+                    customer_last_name = formData.get('last_name', '') if formData else ''
+                
+                customer_phone = formData.get('phone', '') if formData else ''
+                
+                # Identificación: Prioridad 1) Cardholder del Brick, 2) Formulario, 3) Address
+                identification_type = mp_cardholder_identification_type
+                identification_number = mp_cardholder_identification_number
+                
+                if not identification_number:
+                    identification_number = customer_dni
+                if not identification_number:
+                    identification_number = address_data.get('dni', '')
+                
+                # Si no hay tipo de identificación pero hay número, usar DNI por defecto
+                if not identification_type and identification_number:
+                    identification_type = "DNI"
+                
+                # Construir el objeto payer completo
+                payer_data = {}
+                
+                # Email es obligatorio
+                payer_data["email"] = customer_email.strip()
+                
+                # Identificación (obligatorio para Argentina)
+                if identification_type and identification_number:
                     payer_data["identification"] = {
-                        "type": "DNI",
-                        "number": str(customer_dni)
+                        "type": identification_type,
+                        "number": str(identification_number)
                     }
                 
-                # Agregar nombre completo si está disponible
-                first_name = formData.get('first_name', '') if formData else ''
-                last_name = formData.get('last_name', '') if formData else ''
-                if first_name or last_name:
-                    payer_data["first_name"] = first_name
-                    payer_data["last_name"] = last_name
+                # Nombre completo
+                if customer_first_name:
+                    payer_data["first_name"] = customer_first_name
+                if customer_last_name:
+                    payer_data["last_name"] = customer_last_name
+                
+                # Teléfono (opcional pero recomendado)
+                if customer_phone:
+                    # Limpiar el teléfono (remover espacios, guiones, etc.)
+                    phone_clean = ''.join(filter(str.isdigit, str(customer_phone)))
+                    if phone_clean:
+                        payer_data["phone"] = {
+                            "number": phone_clean
+                        }
+                
+                print(f"[DEBUG] 🔍 Datos del payer (prioridad: Brick > Formulario > Usuario):")
+                print(f"[DEBUG]   - Email: {payer_data.get('email')} (fuente: {'Brick' if mp_cardholder_email else 'Formulario/Usuario'})")
+                print(f"[DEBUG]   - Nombre: {payer_data.get('first_name')} {payer_data.get('last_name')} (fuente: {'Brick' if mp_cardholder_name else 'Formulario'})")
+                print(f"[DEBUG]   - Identificación: {payer_data.get('identification')} (fuente: {'Brick' if mp_cardholder_identification_number else 'Formulario/Address'})")
+                
+                print(f"[DEBUG] Payer data construido: {json.dumps(payer_data, indent=2, default=str)}")
+                
+                # Asegurarse de que payer_data no tenga valores None o vacíos
+                payer_data_clean = {}
+                for key, value in payer_data.items():
+                    if value is not None and value != "":
+                        if isinstance(value, dict):
+                            # Limpiar diccionarios anidados también
+                            nested_clean = {}
+                            for nested_key, nested_value in value.items():
+                                if nested_value is not None and nested_value != "":
+                                    nested_clean[nested_key] = nested_value
+                            if nested_clean:
+                                payer_data_clean[key] = nested_clean
+                        else:
+                            payer_data_clean[key] = value
+                
+                # Asegurarse de que email siempre esté presente (es obligatorio)
+                if "email" not in payer_data_clean or not payer_data_clean["email"]:
+                    payer_data_clean["email"] = customer_email.strip() if customer_email else "test@example.com"
+                
+                print(f"[DEBUG] Datos del cliente obtenidos: email={customer_email}, first_name={customer_first_name}, last_name={customer_last_name}, dni={customer_dni}, phone={customer_phone}")
                 
                 payment_payload = {
                     "token": mp_token_clean,
@@ -1146,10 +1267,12 @@ def create_order():
                     "transaction_amount": float(total_to_pay),
                     "description": f"Orden {str(order.id)[:8]}",
                     "payment_method_id": mp_payment_method_id,
-                    "payer": payer_data,
+                    "payer": payer_data_clean,
                     "external_reference": str(order.id),
                     "statement_descriptor": "BAUSING"
                 }
+                
+                print(f"[DEBUG] Payment payload payer (limpio): {json.dumps(payer_data_clean, indent=2, default=str)}")
                 
                 # Agregar notification_url solo si BACKEND_URL está configurado y es válido
                 backend_url = Config.BACKEND_URL or os.getenv('BACKEND_URL', 'http://localhost:5000')
@@ -1172,17 +1295,123 @@ def create_order():
                     print(f"[DEBUG] ⚠️ notification_url no es válida: {notification_url}")
                 
                 # Agregar issuer_id si está disponible
+                issuer_id_final = None
                 if mp_issuer_id:
-                    payment_payload["issuer_id"] = int(mp_issuer_id)
+                    try:
+                        issuer_id_final = int(mp_issuer_id)
+                        payment_payload["issuer_id"] = issuer_id_final
+                    except (ValueError, TypeError) as e:
+                        print(f"[DEBUG] ⚠️ ERROR: No se pudo convertir issuer_id a int: {mp_issuer_id} (tipo: {type(mp_issuer_id).__name__})")
+                        print(f"[DEBUG] ⚠️ ERROR: Exception: {e}")
+                
+                # ========== DEBUG: Lo que se envía a MercadoPago ==========
+                print(f"[DEBUG] ========== DATOS ENVIADOS A MERCADOPAGO ==========")
+                print(f"[DEBUG] payment_method_id: {payment_payload.get('payment_method_id')} (tipo: {type(payment_payload.get('payment_method_id')).__name__})")
+                print(f"[DEBUG] issuer_id: {issuer_id_final} (tipo: {type(issuer_id_final).__name__ if issuer_id_final is not None else 'None'})")
+                print(f"[DEBUG] payer.email: {payer_data_clean.get('email')} (tipo: {type(payer_data_clean.get('email')).__name__ if payer_data_clean.get('email') else 'None'})")
+                print(f"[DEBUG] transaction_amount: {payment_payload.get('transaction_amount')} (tipo: {type(payment_payload.get('transaction_amount')).__name__})")
+                print(f"[DEBUG] ===================================================")
+                
+                # ========== VERIFICACIÓN DE COINCIDENCIA ==========
+                if mp_payment_method_id != payment_payload.get('payment_method_id'):
+                    print(f"[DEBUG] ⚠️ ERROR: payment_method_id NO COINCIDE!")
+                    print(f"[DEBUG]   Frontend: {mp_payment_method_id}")
+                    print(f"[DEBUG]   Backend: {payment_payload.get('payment_method_id')}")
+                else:
+                    print(f"[DEBUG] ✅ payment_method_id coincide: {mp_payment_method_id}")
+                
+                if mp_issuer_id is None and issuer_id_final is not None:
+                    print(f"[DEBUG] ⚠️ ADVERTENCIA: issuer_id viene undefined del frontend pero se está enviando: {issuer_id_final}")
+                elif mp_issuer_id is not None and issuer_id_final is None:
+                    print(f"[DEBUG] ⚠️ ERROR: issuer_id viene del frontend ({mp_issuer_id}) pero NO se está enviando!")
+                elif mp_issuer_id is not None and issuer_id_final is not None:
+                    if int(mp_issuer_id) != issuer_id_final:
+                        print(f"[DEBUG] ⚠️ ERROR: issuer_id NO COINCIDE!")
+                        print(f"[DEBUG]   Frontend: {mp_issuer_id} (int: {int(mp_issuer_id)})")
+                        print(f"[DEBUG]   Backend: {issuer_id_final}")
+                    else:
+                        print(f"[DEBUG] ✅ issuer_id coincide: {issuer_id_final}")
+                else:
+                    print(f"[DEBUG] ℹ️ issuer_id no está presente (es opcional)")
                 
                 # Generar idempotency key único para este pago (usar el ID de la orden)
                 idempotency_key = str(order.id)
+                
+                # ========== VERIFICACIÓN DE CAMPOS MÍNIMOS REQUERIDOS (según documentación oficial) ==========
+                campos_minimos_requeridos = {
+                    "token": mp_token_clean,
+                    "transaction_amount": float(total_to_pay),
+                    "installments": int(mp_installments),
+                    "payment_method_id": mp_payment_method_id,
+                    "payer.email": payer_data_clean.get('email')
+                }
+                
+                campos_faltantes = []
+                for campo, valor in campos_minimos_requeridos.items():
+                    if valor is None or valor == "":
+                        campos_faltantes.append(campo)
+                
+                if campos_faltantes:
+                    print(f"[DEBUG] ❌ ERROR: Faltan campos mínimos requeridos por MercadoPago: {', '.join(campos_faltantes)}")
+                    return jsonify({
+                        'success': False,
+                        'error': f'Faltan campos requeridos para el pago: {", ".join(campos_faltantes)}'
+                    }), 400
+                else:
+                    print(f"[DEBUG] ✅ Todos los campos mínimos requeridos están presentes:")
+                    print(f"[DEBUG]   - token: {'✅' if mp_token_clean else '❌'}")
+                    print(f"[DEBUG]   - transaction_amount: {'✅' if float(total_to_pay) > 0 else '❌'} ({total_to_pay})")
+                    print(f"[DEBUG]   - installments: {'✅' if int(mp_installments) > 0 else '❌'} ({mp_installments})")
+                    print(f"[DEBUG]   - payment_method_id: {'✅' if mp_payment_method_id else '❌'} ({mp_payment_method_id})")
+                    print(f"[DEBUG]   - payer.email: {'✅' if payer_data_clean.get('email') else '❌'} ({payer_data_clean.get('email')})")
                 
                 # Log del payload completo (sin mostrar el token completo por seguridad)
                 payload_log = payment_payload.copy()
                 if 'token' in payload_log:
                     payload_log['token'] = f"{payload_log['token'][:20]}... (oculto)"
                 print(f"[DEBUG] Payload completo a enviar a MercadoPago: {json.dumps(payload_log, indent=2, default=str)}")
+                print(f"[DEBUG] Payer completo en payload (verificación): {json.dumps(payment_payload.get('payer', {}), indent=2, default=str)}")
+                print(f"[DEBUG] Email en payer: {payment_payload.get('payer', {}).get('email', 'NO ENCONTRADO')}")
+                print(f"[DEBUG] Identification en payer: {payment_payload.get('payer', {}).get('identification', 'NO ENCONTRADO')}")
+                print(f"[DEBUG] First name en payer: {payment_payload.get('payer', {}).get('first_name', 'NO ENCONTRADO')}")
+                print(f"[DEBUG] Last name en payer: {payment_payload.get('payer', {}).get('last_name', 'NO ENCONTRADO')}")
+                
+                # Verificar que el objeto payer esté correctamente formateado antes de enviar
+                payer_in_payload = payment_payload.get('payer', {})
+                print(f"[DEBUG] 🔍 Verificación final del payer antes de enviar:")
+                print(f"[DEBUG]   - Email: {payer_in_payload.get('email', 'NO ENCONTRADO')}")
+                print(f"[DEBUG]   - Identification: {payer_in_payload.get('identification', 'NO ENCONTRADO')}")
+                print(f"[DEBUG]   - First name: {payer_in_payload.get('first_name', 'NO ENCONTRADO')}")
+                print(f"[DEBUG]   - Last name: {payer_in_payload.get('last_name', 'NO ENCONTRADO')}")
+                print(f"[DEBUG]   - Phone: {payer_in_payload.get('phone', 'NO ENCONTRADO')}")
+                
+                # Serializar el payload a JSON para verificar que se serializa correctamente
+                payload_json = json.dumps(payment_payload, default=str)
+                print(f"[DEBUG] Payload JSON serializado (primeros 500 caracteres): {payload_json[:500]}")
+                
+                # Verificar que el objeto payer esté presente y correcto antes de enviar
+                payer_in_payload = payment_payload.get('payer', {})
+                if not payer_in_payload or not payer_in_payload.get('email'):
+                    print(f"[DEBUG] ⚠️ ERROR: El objeto payer no tiene email o está vacío!")
+                    print(f"[DEBUG] Payer en payload: {payer_in_payload}")
+                else:
+                    print(f"[DEBUG] ✅ Payer verificado antes de enviar: email={payer_in_payload.get('email')}")
+                
+                # Serializar manualmente para verificar el JSON
+                try:
+                    payload_json_str = json.dumps(payment_payload, default=str, ensure_ascii=False)
+                    # Verificar que el payer esté en el JSON serializado
+                    if '"payer"' in payload_json_str and '"email"' in payload_json_str:
+                        print(f"[DEBUG] ✅ Payer encontrado en JSON serializado")
+                        # Mostrar solo la parte del payer en el JSON
+                        import re
+                        payer_match = re.search(r'"payer"\s*:\s*\{[^}]*\}', payload_json_str)
+                        if payer_match:
+                            print(f"[DEBUG] Payer en JSON: {payer_match.group(0)[:200]}...")
+                    else:
+                        print(f"[DEBUG] ⚠️ ERROR: Payer NO encontrado en JSON serializado!")
+                except Exception as e:
+                    print(f"[DEBUG] ⚠️ Error al serializar JSON: {e}")
                 
                 mp_response = requests.post(
                     "https://api.mercadopago.com/v1/payments",
@@ -1198,6 +1427,15 @@ def create_order():
                 print(f"[DEBUG] Respuesta de MercadoPago: Status {mp_response.status_code}")
                 if mp_response.status_code != 201:
                     print(f"[DEBUG] Respuesta completa: {mp_response.text}")
+                else:
+                    # Incluso si es 201, verificar el payer en la respuesta
+                    response_data = mp_response.json()
+                    payer_in_response = response_data.get('payer', {})
+                    print(f"[DEBUG] 🔍 Payer en la respuesta de MercadoPago:")
+                    print(f"[DEBUG]   - Email: {payer_in_response.get('email', 'NULL')}")
+                    print(f"[DEBUG]   - Identification: {payer_in_response.get('identification', 'NULL')}")
+                    print(f"[DEBUG]   - First name: {payer_in_response.get('first_name', 'NULL')}")
+                    print(f"[DEBUG]   - Last name: {payer_in_response.get('last_name', 'NULL')}")
                 
                 if mp_response.status_code == 201:
                     mp_payment = mp_response.json()
@@ -1216,9 +1454,43 @@ def create_order():
                         order.status = 'pending'
                         db.session.commit()
                         print(f"[DEBUG] ✅ Orden {order.id} marcada como pagada")
-                    elif payment_status == 'pending':
-                        # El pago está pendiente, se procesará vía webhook
-                        print(f"[DEBUG] ⚠️ Pago pendiente, esperando webhook")
+                        
+                        # Retornar la orden con la estructura estándar
+                        return jsonify({
+                            'success': True,
+                            'data': order.to_dict(),
+                            'message': 'Orden creada y pago aprobado exitosamente'
+                        }), 201
+                    elif payment_status == 'pending' or payment_status == 'in_process':
+                        # El pago está pendiente o en proceso, se procesará vía webhook
+                        status_detail = mp_payment.get('status_detail', '')
+                        if status_detail == 'pending_contingency':
+                            print(f"[DEBUG] ⚠️ Pago en proceso (pending_contingency) - MercadoPago está revisando el pago")
+                            print(f"[DEBUG] ⚠️ Este estado es común en pagos de prueba. El pago puede ser aprobado o rechazado más tarde.")
+                            print(f"[DEBUG] ⚠️ El webhook notificará cuando el estado cambie.")
+                        else:
+                            print(f"[DEBUG] ⚠️ Pago pendiente (status: {payment_status}, detail: {status_detail}), esperando webhook")
+                        
+                        # Marcar la orden como pendiente de pago
+                        order.payment_processed = False
+                        order.status = 'pending'
+                        db.session.commit()
+                        
+                        # Retornar éxito pero indicando que el pago está pendiente
+                        # IMPORTANTE: Retornar la estructura estándar con 'data' usando order.to_dict() para consistencia
+                        # El order.to_dict() ya incluye el 'id' (UUID de la orden), no el payment_id
+                        order_dict = order.to_dict()
+                        # Agregar información adicional del pago sin sobrescribir el 'id'
+                        order_dict['payment_status'] = payment_status
+                        order_dict['payment_id'] = payment_id  # ID de MercadoPago (solo para referencia, NO usar para acceder a la orden)
+                        order_dict['status_detail'] = status_detail
+                        order_dict['pending'] = True
+                        
+                        return jsonify({
+                            'success': True,
+                            'message': 'Orden creada exitosamente. El pago está siendo procesado por MercadoPago.',
+                            'data': order_dict  # Incluye 'id' que es el UUID de la orden
+                        }), 201
                     else:
                         # Pago rechazado o en otro estado
                         # Construir mensaje de error más descriptivo
@@ -1228,10 +1500,20 @@ def create_order():
                         if error_message_mp:
                             error_msg += f': {error_message_mp}'
                         else:
-                            error_msg += '. Por favor, intenta con otra tarjeta o verifica los datos de la tarjeta.'
+                            # Mensajes más específicos según el motivo del rechazo
+                            if status_detail == 'cc_rejected_other_reason':
+                                error_msg += '. Posibles causas:\n'
+                                error_msg += '1. Monto muy bajo (prueba con más de $10 ARS)\n'
+                                error_msg += '2. Tarjeta asociada a tu cuenta de MercadoPago\n'
+                                error_msg += '3. Cuenta no configurada como vendedor (necesitas activar cuenta vendedor)\n'
+                                error_msg += '4. Tarjeta de prueba no válida para este monto'
+                            else:
+                                error_msg += '. Por favor, intenta con otra tarjeta o verifica los datos de la tarjeta.'
                         
                         print(f"[DEBUG] ❌ Pago rechazado: {error_msg}")
                         print(f"[DEBUG] Detalles completos del pago: {json.dumps(mp_payment, indent=2, default=str)}")
+                        print(f"[DEBUG] Monto enviado: {total_to_pay} ARS")
+                        print(f"[DEBUG] ⚠️ NOTA: El objeto payer en la respuesta aparece como null porque MercadoPago usa la información del token del Card Payment Brick")
                         
                         # Marcar la orden como no pagada
                         order.payment_processed = False
@@ -1243,7 +1525,8 @@ def create_order():
                             'error': error_msg,
                             'payment_status': payment_status,
                             'payment_id': payment_id,
-                            'status_detail': status_detail
+                            'status_detail': status_detail,
+                            'amount': total_to_pay
                         }), 400
                     
                     response_data['payment'] = {
@@ -1363,11 +1646,6 @@ def mercadopago_webhook():
             order.status = 'pending'  # Cambiar a 'pending' para que se procese
             db.session.commit()
             print(f"[MP-WH] ✅ Orden {order_id} marcada como pagada")
-            
-            # Aquí podrías agregar lógica adicional como:
-            # - Descontar el wallet_amount si se usó
-            # - Enviar email de confirmación
-            # - Crear la venta en el CRM si es necesario
             
         except Exception as e:
             db.session.rollback()

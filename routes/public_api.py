@@ -1636,12 +1636,16 @@ def crear_venta():
             return validation_error("No se pudo obtener el vendedor_id desde el api_secret")
         
         from sqlalchemy import text
+        from sqlalchemy.exc import IntegrityError
         from datetime import datetime
         import re
         
         # ========================================================================
         # VALIDACIONES DE CAMPOS REQUERIDOS
         # ========================================================================
+        print(f"[DEBUG crear_venta] Validando campos requeridos...")
+        print(f"[DEBUG crear_venta] Data recibida: {json.dumps(data, indent=2, default=str)}")
+        
         campos_requeridos = {
             'fecha_detalle': 'La fecha de detalle es requerida',
             'tipo_venta': 'El tipo de venta es requerido',
@@ -1656,7 +1660,9 @@ def crear_venta():
         }
         
         for campo, mensaje in campos_requeridos.items():
-            if campo not in data or data[campo] is None or (isinstance(data[campo], str) and not data[campo].strip()):
+            valor = data.get(campo)
+            if campo not in data or valor is None or (isinstance(valor, str) and not valor.strip()):
+                print(f"[DEBUG crear_venta] ❌ Campo faltante o vacío: {campo}, valor: {valor}, tipo: {type(valor)}")
                 return validation_error(mensaje)
         
         # Validar que js sea un array con al menos un elemento
@@ -1849,7 +1855,11 @@ def crear_venta():
                 productos_invalidos.append(str(item_id))
                 continue
             
-            total_venta += float(precio)
+            # Calcular el subtotal del renglón
+            # IMPORTANTE: 'precio' ya es el precio TOTAL (precio unitario * cantidad)
+            # según la documentación del endpoint externo
+            subtotal_renglon = float(precio)  # precio ya incluye cantidad
+            total_venta += subtotal_renglon
         
         if productos_invalidos:
             # Limpiar transacción antes de retornar error
@@ -2489,16 +2499,27 @@ def crear_venta():
                             print(f"[DEBUG sincronizar_datos] CUIT formateado en payload externo: '{documento_formateado}'")
                     
                     # Construir el array js con la estructura exacta esperada
+                    # IMPORTANTE: El campo "precio" en data['js'] ya es el precio TOTAL (precio unitario * cantidad)
+                    # según la documentación del endpoint externo
                     js_array = []
                     for renglon in data.get('js', []):
                         if renglon.get('accion') == 'N':
+                            cantidad = float(renglon.get('cantidad_recibida', 0))
+                            # 'precio' ya es el precio TOTAL, no el unitario
+                            precio_total = float(renglon.get('precio', 0))
+                            unitario_sin_fpago = float(renglon.get('unitario_sin_fpago', 0))
+                            
+                            # Si unitario_sin_fpago no está presente, calcularlo dividiendo el total por la cantidad
+                            if unitario_sin_fpago <= 0 and cantidad > 0:
+                                unitario_sin_fpago = precio_total / cantidad
+                            
                             js_item = {
                                 "id": None,
                                 "accion": "N",
                                 "item_id": renglon.get('item_id'),
-                                "cantidad_recibida": renglon.get('cantidad_recibida'),
-                                "precio": float(renglon.get('precio', 0)),
-                                "unitario_sin_fpago": float(renglon.get('unitario_sin_fpago', 0)),
+                                "cantidad_recibida": cantidad,
+                                "precio": precio_total,  # Precio TOTAL del producto (ya viene calculado)
+                                "unitario_sin_fpago": unitario_sin_fpago,
                                 "descripcion": renglon.get('descripcion', '')
                             }
                             js_array.append(js_item)
@@ -2514,6 +2535,9 @@ def crear_venta():
                         }
                         forma_pagos_array.append(forma_pago_item)
                     payload_externo["formaPagos"] = forma_pagos_array
+                    
+                    # Agregar el total calculado (el endpoint externo no calcula, necesita recibirlo)
+                    payload_externo["total"] = total_venta
                     
                     # Token de autorización
                     external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
@@ -2532,6 +2556,17 @@ def crear_venta():
                     print(f"DEBUG: Payload keys: {list(payload_externo.keys())}")
                     if payload_externo.get('documento_cliente'):
                         print(f"DEBUG: documento_cliente: {payload_externo.get('documento_cliente')}")
+                    
+                    # Debug: Verificar items y totales
+                    if payload_externo.get('js'):
+                        # IMPORTANTE: 'precio' ya es el precio TOTAL (precio unitario * cantidad)
+                        total_calculado = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
+                        print(f"DEBUG: Total calculado de items (suma de precios totales): {total_calculado}")
+                        print(f"DEBUG: Items enviados: {json.dumps(payload_externo['js'], indent=2, default=str)}")
+                    if payload_externo.get('formaPagos'):
+                        total_pagos = sum(float(pago.get('monto_total', 0)) for pago in payload_externo['formaPagos'])
+                        print(f"DEBUG: Total de pagos: {total_pagos}")
+                        print(f"DEBUG: FormaPagos enviados: {json.dumps(payload_externo['formaPagos'], indent=2, default=str)}")
                     
                     # Hacer la llamada POST con el payload preparado
                     response = requests.post(
@@ -2636,10 +2671,103 @@ def crear_venta():
                 if mensaje_error_externo:
                     mensaje_respuesta = f"Venta creada localmente, pero falló en endpoint externo: {mensaje_error_externo}"
             
+            # Crear la orden en la tabla orders si se recibió user_id
+            # Solo crear la orden si la venta se creó exitosamente (antes de llamar al endpoint externo)
+            order_id = None
+            if data.get('user_id'):
+                try:
+                    from models.order import Order
+                    from models.order_item import OrderItem
+                    import uuid as uuid_lib
+                    
+                    user_id = uuid_lib.UUID(data['user_id']) if isinstance(data['user_id'], str) else data['user_id']
+                    
+                    # Obtener datos adicionales para la orden
+                    payment_method = data.get('payment_method', 'card')
+                    payment_processed = data.get('payment_processed', False)
+                    used_wallet_amount = data.get('used_wallet_amount')
+                    
+                    # Verificar si ya existe una orden con este crm_order_id
+                    existing_order = Order.query.filter_by(crm_order_id=venta_id_final).first()
+                    if existing_order:
+                        # Actualizar la orden existente
+                        existing_order.user_id = user_id
+                        existing_order.total = total_venta
+                        existing_order.payment_method = payment_method
+                        existing_order.payment_processed = payment_processed
+                        existing_order.crm_sale_type_id = data.get('tipo_venta')
+                        existing_order.used_wallet_amount = float(used_wallet_amount) if used_wallet_amount else None
+                        order = existing_order
+                        order_id = str(order.id)
+                        print(f"[DEBUG crear_venta] ✅ Orden existente actualizada con id={order_id}")
+                    else:
+                        # Crear la orden
+                        order = Order(
+                            user_id=user_id,
+                            crm_order_id=venta_id_final,
+                            crm_sale_type_id=data.get('tipo_venta'),
+                            total=total_venta,
+                            status='pending',
+                            payment_method=payment_method,
+                            payment_processed=payment_processed,
+                            used_wallet_amount=float(used_wallet_amount) if used_wallet_amount else None
+                        )
+                        db.session.add(order)
+                        db.session.flush()
+                        order_id = str(order.id)
+                        print(f"[DEBUG crear_venta] ✅ Orden creada en tabla orders con id={order_id}")
+                    
+                    # Crear o actualizar los items de la orden
+                    if data.get('order_items'):
+                        # Eliminar items existentes si la orden ya existía
+                        if existing_order:
+                            OrderItem.query.filter_by(order_id=order.id).delete()
+                        
+                        for item_data in data['order_items']:
+                            product_id = uuid_lib.UUID(item_data['product_id']) if isinstance(item_data['product_id'], str) else item_data['product_id']
+                            variant_id = None
+                            if item_data.get('variant_id'):
+                                variant_id = uuid_lib.UUID(item_data['variant_id']) if isinstance(item_data['variant_id'], str) else item_data['variant_id']
+                            
+                            # Crear OrderItem
+                            # Nota: variant_id no está disponible porque la columna no existe en la tabla
+                            # Si necesitas variant_id, necesitas hacer una migración para agregar la columna
+                            # La columna en la BD es unit_price, no price
+                            order_item = OrderItem(
+                                order_id=order.id,
+                                product_id=product_id,
+                                quantity=item_data.get('quantity', 1),
+                                unit_price=float(item_data.get('price', 0))  # price en item_data es el precio unitario
+                            )
+                            db.session.add(order_item)
+                    
+                    db.session.commit()
+                except IntegrityError as integrity_error:
+                    db.session.rollback()
+                    # Si es un error de duplicado, intentar obtener la orden existente
+                    if 'crm_order_id' in str(integrity_error):
+                        existing_order = Order.query.filter_by(crm_order_id=venta_id_final).first()
+                        if existing_order:
+                            order_id = str(existing_order.id)
+                            print(f"[DEBUG crear_venta] ✅ Orden ya existía, usando orden con id={order_id}")
+                        else:
+                            raise
+                    else:
+                        raise
+                except Exception as order_error:
+                    db.session.rollback()
+                    import traceback
+                    print(f"[DEBUG crear_venta] ⚠️ Error al crear orden en tabla orders: {str(order_error)}")
+                    print(traceback.format_exc())
+                    # No fallar la creación de la venta si falla la creación de la orden
+            
             response_data = {
                 "crm_order_id": venta_id_final,
                 "numero_comprobante": numero_comprobante
             }
+            
+            if order_id:
+                response_data["order_id"] = order_id
             
             # Agregar información del endpoint externo a la respuesta
             if external_response_info:
