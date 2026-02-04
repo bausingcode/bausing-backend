@@ -645,9 +645,48 @@ def create_order():
         crm_sale_type_id = data.get('crm_sale_type_id', 1)  # Default: Consumidor Final
         address_data = data['address']
         items = data['items']
-        total = float(data['total'])
+        total = float(data['total'])  # Este total ya viene con el descuento de billetera aplicado desde el frontend
         formData = data.get('customer', {})  # Datos del cliente para el pago
         payment_method = data.get('payment_method', 'card')
+        
+        # Obtener used_wallet_amount (puede venir como wallet_amount o used_wallet_amount)
+        # IMPORTANTE: Definir esto ANTES de cualquier validación que lo use
+        used_wallet_amount = None
+        if data.get('used_wallet_amount'):
+            used_wallet_amount = float(data.get('used_wallet_amount'))
+        elif data.get('wallet_amount'):
+            used_wallet_amount = float(data.get('wallet_amount'))
+        elif data.get('use_wallet_balance') and data.get('wallet_amount'):
+            used_wallet_amount = float(data.get('wallet_amount'))
+        
+        # Si es pago con wallet completo y no se envió wallet_amount, usar el total original
+        # Calcular el total original (antes del descuento) sumando los items
+        if payment_method == 'wallet':
+            if not used_wallet_amount or used_wallet_amount <= 0:
+                # Si no se envió wallet_amount, calcular el total original desde los items
+                total_original = sum(float(item.get('price', 0)) * item.get('quantity', 1) for item in items)
+                if total_original > 0:
+                    used_wallet_amount = total_original
+                    print(f"[DEBUG] Método de pago wallet: usando total original como used_wallet_amount: {used_wallet_amount}")
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Para pagar con billetera, debes tener saldo disponible'
+                    }), 400
+            
+            # Si el total es mayor a 0 después del descuento, no se puede pagar completamente con wallet
+            # (pero el total ya viene con el descuento aplicado, así que si es 0 está bien)
+            if total > 0:
+                # Si el total es mayor a 0, significa que el wallet no cubre todo
+                # Pero espera, el total ya viene con el descuento aplicado desde el frontend
+                # Si el método es wallet completo, el total debería ser 0
+                # Si no es 0, significa que el wallet no cubre todo
+                total_original_calc = sum(float(item.get('price', 0)) * item.get('quantity', 1) for item in items)
+                if total_original_calc > used_wallet_amount:
+                    return jsonify({
+                        'success': False,
+                        'error': f'El saldo de billetera no cubre el total. Total: ${total_original_calc:.2f}, Saldo disponible: ${used_wallet_amount:.2f}'
+                    }), 400
         
         # Si es pago con tarjeta, verificar que MP_ACCESS_TOKEN esté configurado ANTES de crear la orden
         if payment_method == 'card' and not pay_on_delivery:
@@ -666,15 +705,7 @@ def create_order():
         print(f"[DEBUG] crm_zone_id recibido: {data.get('crm_zone_id')}")
         print(f"[DEBUG] wallet_amount recibido: {data.get('wallet_amount')}")
         print(f"[DEBUG] used_wallet_amount recibido: {data.get('used_wallet_amount')}")
-        
-        # Obtener used_wallet_amount (puede venir como wallet_amount o used_wallet_amount)
-        used_wallet_amount = None
-        if data.get('used_wallet_amount'):
-            used_wallet_amount = float(data.get('used_wallet_amount'))
-        elif data.get('wallet_amount'):
-            used_wallet_amount = float(data.get('wallet_amount'))
-        elif data.get('use_wallet_balance') and data.get('wallet_amount'):
-            used_wallet_amount = float(data.get('wallet_amount'))
+        print(f"[DEBUG] used_wallet_amount calculado: {used_wallet_amount}")
         
         # Preparar datos para llamar a /api/ventas/crear
         # Primero necesitamos obtener los datos del usuario y dirección
@@ -759,9 +790,9 @@ def create_order():
                     'error': f'No se pudo obtener crm_zone_id para la localidad: {city}'
                 }), 400
         
-        # Preparar items para el CRM
-        js_items = []
-        order_items_for_payload = []
+        # Preparar items para la orden (guardaremos los precios ajustados después de calcular el descuento)
+        # Por ahora solo guardamos la información básica, los precios se ajustarán después
+        items_info = []
         for item in items:
             product_id = uuid.UUID(item['product_id']) if isinstance(item['product_id'], str) else item['product_id']
             product = Product.query.get(product_id)
@@ -783,38 +814,21 @@ def create_order():
             if not item_id:
                 continue
             
-            # Calcular precio total (precio unitario * cantidad)
-            precio_unitario = float(item.get('price', 0))
+            # Precio unitario original
+            precio_unitario_original = float(item.get('price', 0))
             cantidad = item.get('quantity', 1)
-            precio_total = precio_unitario * cantidad
             
-            js_items.append({
-                "id": None,
-                "accion": "N",
-                "item_id": item_id,
-                "cantidad_recibida": cantidad,
-                "precio": precio_total,  # Precio TOTAL según documentación del endpoint externo
-                "unitario_sin_fpago": precio_unitario,  # Precio unitario
-                "descripcion": product.name
-            })
-            
-            # Preparar items para la orden
             variant_id = None
             if item.get('variant_id'):
                 variant_id = uuid.UUID(item['variant_id']) if isinstance(item['variant_id'], str) else item['variant_id']
             
-            order_items_for_payload.append({
+            items_info.append({
                 'product_id': str(product_id),
                 'variant_id': str(variant_id) if variant_id else None,
-                'quantity': item.get('quantity', 1),
-                'price': float(item.get('price', 0))
+                'quantity': cantidad,
+                'precio_unitario_original': precio_unitario_original,
+                'precio_total_original': precio_unitario_original * cantidad
             })
-        
-        if not js_items:
-            return jsonify({
-                'success': False,
-                'error': 'No se pudieron mapear los productos al CRM'
-            }), 400
         
         # Formatear documento
         document_number = formData.get('dni') or formData.get('document_number') or user.dni or ''
@@ -839,8 +853,196 @@ def create_order():
         
         phone_final = normalize_phone(user.phone or address_data.get('phone') or (address.phone if address else ''))
         
-        # Determinar medio de pago
-        medios_pago_id = 2 if payment_method == 'card' else 1  # 2 = Tarjeta, 1 = Abonar al recibir
+        # Calcular el total a pagar (después del descuento de billetera)
+        total_a_pagar = float(total)  # Este es el total después del descuento (lo que realmente se paga)
+        
+        # Calcular el total de productos (sin descuento de billetera)
+        # El total que viene del frontend ya tiene el descuento aplicado, así que necesitamos calcular el total original
+        # Sumar todos los items: precio unitario * cantidad
+        total_productos_original = 0.0
+        items_con_precios = []  # Guardar información de cada item para calcular descuento proporcional
+        
+        for item in items:
+            precio_unitario = float(item.get('price', 0))
+            cantidad = item.get('quantity', 1)
+            precio_total_item = precio_unitario * cantidad
+            total_productos_original += precio_total_item
+            
+            items_con_precios.append({
+                'item': item,
+                'precio_total_original': precio_total_item,
+                'precio_unitario_original': precio_unitario,
+                'cantidad': cantidad
+            })
+        
+        # Si hay descuento de billetera, dividirlo proporcionalmente entre los productos
+        # EXCEPTO si el método de pago es wallet completo, en cuyo caso se envían los precios originales
+        descuento_total = float(used_wallet_amount) if used_wallet_amount and used_wallet_amount > 0 else 0.0
+        es_pago_wallet_completo = payment_method == 'wallet'
+        
+        # Ajustar precios de los items proporcionalmente para el CRM
+        # Si es pago completo con wallet, NO ajustar precios (enviar precios originales)
+        js_items = []
+        for item_info in items_con_precios:
+            item = item_info['item']
+            precio_total_original = item_info['precio_total_original']
+            precio_unitario_original = item_info['precio_unitario_original']
+            cantidad = item_info['cantidad']
+            
+            product_id = uuid.UUID(item['product_id']) if isinstance(item['product_id'], str) else item['product_id']
+            product = Product.query.get(product_id)
+            if not product:
+                continue
+            
+            variant = ProductVariant.query.filter_by(product_id=product_id).first()
+            if not variant:
+                continue
+            
+            option = ProductVariantOption.query.filter_by(product_variant_id=variant.id).first()
+            if not option:
+                continue
+            
+            item_id = getattr(option, 'crm_item_id', None) or getattr(variant, 'crm_item_id', None)
+            if not item_id and product.crm_product_id:
+                item_id = product.crm_product_id
+            
+            if not item_id:
+                continue
+            
+            # Si es pago completo con wallet, usar precios originales (sin ajuste)
+            if es_pago_wallet_completo:
+                precio_total_ajustado = precio_total_original
+                precio_unitario_ajustado = precio_unitario_original
+                print(f"[DEBUG] Producto '{product.name}': pago completo con wallet, usando precio original={precio_total_original}")
+            # Si hay descuento de billetera (pero no es pago completo), calcular descuento proporcional
+            elif descuento_total > 0 and total_productos_original > 0:
+                # Porcentaje que representa este producto del total
+                porcentaje_producto = precio_total_original / total_productos_original
+                # Descuento que le corresponde a este producto
+                descuento_producto = descuento_total * porcentaje_producto
+                # Precio ajustado: precio original - descuento proporcional
+                precio_total_ajustado = precio_total_original - descuento_producto
+                precio_unitario_ajustado = precio_total_ajustado / cantidad if cantidad > 0 else 0
+                
+                print(f"[DEBUG] Producto '{product.name}': precio_original={precio_total_original}, descuento={descuento_producto:.2f}, precio_ajustado={precio_total_ajustado:.2f}")
+            else:
+                # No hay descuento, usar precios originales
+                precio_total_ajustado = precio_total_original
+                precio_unitario_ajustado = precio_unitario_original
+            
+            js_items.append({
+                "id": None,
+                "accion": "N",
+                "item_id": item_id,
+                "cantidad_recibida": cantidad,
+                "precio": precio_total_ajustado,  # Precio TOTAL (original si es wallet completo, ajustado si es descuento parcial)
+                "unitario_sin_fpago": precio_unitario_ajustado,  # Precio unitario
+                "descripcion": product.name
+            })
+        
+        if not js_items:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudieron mapear los productos al CRM'
+            }), 400
+        
+        # Preparar order_items con precios
+        # Si es pago completo con wallet, usar precios originales
+        # Si es descuento parcial, usar precios ajustados
+        order_items_for_payload = []
+        for idx, item_info in enumerate(items_info):
+            if es_pago_wallet_completo:
+                # Pago completo con wallet: usar precios originales
+                precio_unitario_final = item_info['precio_unitario_original']
+            elif descuento_total > 0 and total_productos_original > 0:
+                # Descuento parcial: calcular precio ajustado
+                porcentaje_item = item_info['precio_total_original'] / total_productos_original
+                descuento_item = descuento_total * porcentaje_item
+                precio_total_ajustado = item_info['precio_total_original'] - descuento_item
+                precio_unitario_final = precio_total_ajustado / item_info['quantity'] if item_info['quantity'] > 0 else 0
+            else:
+                # Sin descuento: usar precios originales
+                precio_unitario_final = item_info['precio_unitario_original']
+            
+            order_items_for_payload.append({
+                'product_id': item_info['product_id'],
+                'variant_id': item_info['variant_id'],
+                'quantity': item_info['quantity'],
+                'price': precio_unitario_final  # Precio unitario (original si es wallet completo, ajustado si es descuento parcial)
+            })
+        
+        # Verificar y descontar saldo de billetera ANTES de crear la orden
+        wallet_movement = None  # Guardar referencia al movimiento para poder revertirlo si hay error
+        wallet = None
+        if used_wallet_amount and used_wallet_amount > 0:
+            try:
+                from models.wallet import Wallet, WalletMovement
+                from routes.wallet import calculate_wallet_balance
+                
+                # Obtener o crear wallet del usuario
+                wallet = Wallet.query.filter_by(user_id=user.id).first()
+                if not wallet:
+                    wallet = Wallet(user_id=user.id, balance=0)
+                    db.session.add(wallet)
+                    db.session.flush()
+                
+                # Verificar que tenga saldo suficiente
+                current_balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                if current_balance < used_wallet_amount:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Saldo insuficiente en billetera. Saldo disponible: ${current_balance:.2f}, requerido: ${used_wallet_amount:.2f}'
+                    }), 400
+                
+                # Crear movimiento de débito (pero aún no hacer commit, lo haremos después de crear la orden)
+                wallet_movement = WalletMovement(
+                    wallet_id=wallet.id,
+                    type='order_payment',
+                    amount=-float(used_wallet_amount),  # Negativo para que reste del balance
+                    description=f'Pago de orden (pendiente)',
+                    order_id=None  # Se actualizará después de crear la orden
+                )
+                db.session.add(wallet_movement)
+                db.session.flush()  # Flush para obtener el ID del movimiento y que esté disponible para calcular el balance
+                
+                # Actualizar balance de la wallet (recalcular después de agregar el movimiento)
+                # Esto actualiza el balance en memoria, pero no se hace commit hasta después de crear la orden
+                wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                wallet.updated_at = datetime.utcnow()
+                
+                nuevo_balance = float(wallet.balance)
+                print(f"[DEBUG] ✅ Movimiento de billetera creado. Descontando ${used_wallet_amount:.2f}. Balance antes: ${current_balance:.2f}, Balance después: ${nuevo_balance:.2f}")
+            except Exception as wallet_error:
+                db.session.rollback()
+                import traceback
+                print(f"[DEBUG] ⚠️ Error al verificar/descontar saldo de billetera: {str(wallet_error)}")
+                print(traceback.format_exc())
+                return jsonify({
+                    'success': False,
+                    'error': f'Error al procesar el descuento de billetera: {str(wallet_error)}'
+                }), 500
+        
+        # Determinar medio de pago principal
+        # Si el método es wallet, usar medios_pago_id = 3 (o el ID que corresponda para wallet en tu CRM)
+        # Si es card, usar 2 (Tarjeta)
+        # Si es abonar al recibir, usar 1
+        if payment_method == 'wallet':
+            medios_pago_id = 3  # Wallet (ajustar según tu CRM si es diferente)
+        elif payment_method == 'card':
+            medios_pago_id = 2  # Tarjeta
+        else:
+            medios_pago_id = 1  # Abonar al recibir
+        
+        # Construir formaPagos: solo el método de pago principal con el total a pagar
+        # Si es pago completo con wallet, usar el total original (no el total después del descuento)
+        # Si es descuento parcial, usar el total después del descuento
+        monto_total_pago = total_productos_original if es_pago_wallet_completo else total_a_pagar
+        
+        forma_pagos_array = [{
+            "medios_pago_id": medios_pago_id,
+            "monto_total": monto_total_pago,  # Total original si es wallet completo, total después del descuento si es parcial
+            "procesado": payment_method == 'wallet' or (not pay_on_delivery)  # True si ya se pagó (wallet o tarjeta), False si es "abonar al recibir"
+        }]
         
         # Preparar payload para /api/ventas/crear
         venta_payload = {
@@ -860,18 +1062,12 @@ def create_order():
             "zona_id": crm_zone_id,
             "observaciones": "",
             "lat_long": {"latitud": 0.0, "longitud": 0.0},
-            "js": js_items,
-            "formaPagos": [
-                {
-                    "medios_pago_id": medios_pago_id,
-                    "monto_total": total,
-                    "procesado": not pay_on_delivery  # True si ya se pagó, False si es "abonar al recibir"
-                }
-            ],
+            "js": js_items,  # Items con precios ajustados si hay descuento de billetera
+            "formaPagos": forma_pagos_array,  # Solo el método de pago principal con el total a pagar
             # Datos adicionales para crear la orden
             "user_id": str(user.id),
             "payment_method": payment_method,
-            "payment_processed": not pay_on_delivery,
+            "payment_processed": payment_method == 'wallet' or (not pay_on_delivery),  # True si wallet o tarjeta, False si abonar al recibir
             "used_wallet_amount": used_wallet_amount,
             "order_items": order_items_for_payload
         }
@@ -927,6 +1123,102 @@ def create_order():
                         }), 500
                 else:
                     error_msg = response_data.get('message', 'Error desconocido al crear venta')
+                    
+                    # No guardar en sale_retry_queue si es error de stock
+                    es_error_stock = (
+                        'este artículo no tiene stock' in error_msg or
+                        'No se pudo obtener el precio de compra' in error_msg or
+                        'compras previas registradas' in error_msg
+                    )
+                    
+                    # Si el error indica que la venta se creó localmente pero falló en endpoint externo,
+                    # guardar en la tabla de reintentos (excepto si es error de stock)
+                    if 'Venta creada localmente, pero falló en endpoint externo' in error_msg and not es_error_stock:
+                        try:
+                            from models.sale_retry_queue import SaleRetryQueue
+                            from datetime import datetime as dt
+                            
+                            # Extraer campos del payload para facilitar consultas
+                            fecha_detalle = None
+                            if venta_payload and venta_payload.get('fecha_detalle'):
+                                try:
+                                    fecha_detalle = dt.strptime(venta_payload['fecha_detalle'], '%Y-%m-%d').date()
+                                except:
+                                    pass
+                            
+                            # Obtener user_id si está disponible
+                            user_id_uuid = None
+                            if venta_payload and venta_payload.get('user_id'):
+                                try:
+                                    user_id_uuid = uuid.UUID(venta_payload['user_id']) if isinstance(venta_payload['user_id'], str) else venta_payload['user_id']
+                                except:
+                                    pass
+                            
+                            # Obtener order_id si existe (puede que se haya creado antes del error)
+                            order_id_uuid = None
+                            order_id_from_response = response_data.get('data', {}).get('order_id')
+                            if order_id_from_response:
+                                try:
+                                    order_id_uuid = uuid.UUID(order_id_from_response) if isinstance(order_id_from_response, str) else order_id_from_response
+                                except:
+                                    pass
+                            
+                            # Calcular monto_total desde formaPagos
+                            monto_total = None
+                            if venta_payload and venta_payload.get('formaPagos'):
+                                forma_pagos = venta_payload['formaPagos']
+                                if isinstance(forma_pagos, list) and len(forma_pagos) > 0:
+                                    monto_total = forma_pagos[0].get('monto_total')
+                            
+                            # Obtener información del error externo
+                            external_api_info = response_data.get('external_api', {})
+                            error_details = external_api_info if external_api_info else None
+                            
+                            # Crear registro en sale_retry_queue
+                            retry_record = SaleRetryQueue(
+                                order_id=order_id_uuid,
+                                status='pending',
+                                retry_count=0,
+                                max_retries=5,
+                                error_message=error_msg,
+                                error_details=error_details,
+                                crm_payload=venta_payload,
+                                fecha_detalle=fecha_detalle,
+                                tipo_venta=venta_payload.get('tipo_venta') if venta_payload else None,
+                                cliente_nombre=venta_payload.get('cliente_nombre') if venta_payload else None,
+                                cliente_email=venta_payload.get('email_cliente') if venta_payload else None,
+                                provincia_id=venta_payload.get('provincia_id') if venta_payload else None,
+                                zona_id=venta_payload.get('zona_id') if venta_payload else None,
+                                monto_total=monto_total,
+                                payment_method=venta_payload.get('payment_method') if venta_payload else None,
+                                payment_processed=venta_payload.get('payment_processed') if venta_payload else None,
+                                user_id=user_id_uuid,
+                                priority=0
+                            )
+                            db.session.add(retry_record)
+                            db.session.commit()
+                            print(f"[DEBUG] ✅ Venta guardada en sale_retry_queue con id={retry_record.id} debido a fallo en endpoint externo")
+                        except Exception as retry_error:
+                            db.session.rollback()
+                            import traceback
+                            print(f"[DEBUG] ⚠️ Error al guardar en sale_retry_queue: {str(retry_error)}")
+                            print(traceback.format_exc())
+                            # No fallar si no se puede guardar en la cola de reintentos
+                    
+                    # Si hay error y se creó un movimiento de billetera, revertirlo
+                    if wallet_movement:
+                        try:
+                            from routes.wallet import calculate_wallet_balance
+                            db.session.delete(wallet_movement)
+                            if wallet:
+                                wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                                wallet.updated_at = datetime.utcnow()
+                            db.session.commit()
+                            print(f"[DEBUG] ✅ Movimiento de billetera revertido debido a error al crear la orden: {error_msg}")
+                        except Exception as revert_error:
+                            db.session.rollback()
+                            print(f"[DEBUG] ⚠️ Error al revertir movimiento de billetera: {str(revert_error)}")
+                    
                     return jsonify({
                         'success': False,
                         'error': error_msg
@@ -935,12 +1227,85 @@ def create_order():
             import traceback
             print(f"[DEBUG] ⚠️ Error al llamar a /api/ventas/crear: {str(venta_error)}")
             print(traceback.format_exc())
+            
+            # Si hay error y se creó un movimiento de billetera, revertirlo
+            if wallet_movement:
+                try:
+                    from routes.wallet import calculate_wallet_balance
+                    db.session.delete(wallet_movement)
+                    if wallet:
+                        wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                        wallet.updated_at = datetime.utcnow()
+                    db.session.commit()
+                    print(f"[DEBUG] ✅ Movimiento de billetera revertido debido a excepción al crear la orden")
+                except Exception as revert_error:
+                    db.session.rollback()
+                    print(f"[DEBUG] ⚠️ Error al revertir movimiento de billetera: {str(revert_error)}")
+            
             return jsonify({
                 'success': False,
                 'error': f'Error al crear orden: {str(venta_error)}'
             }), 500
         
         try:
+            # Actualizar el movimiento de billetera con el order_id si existe
+            if used_wallet_amount and used_wallet_amount > 0:
+                try:
+                    from models.wallet import Wallet, WalletMovement
+                    from routes.wallet import calculate_wallet_balance
+                    
+                    # Buscar el movimiento de billetera que creamos antes (el más reciente sin order_id)
+                    wallet = Wallet.query.filter_by(user_id=user.id).first()
+                    if wallet:
+                        movement = WalletMovement.query.filter_by(
+                            wallet_id=wallet.id,
+                            type='order_payment',
+                            order_id=None
+                        ).order_by(WalletMovement.created_at.desc()).first()
+                        
+                        if movement:
+                            # Actualizar el movimiento con el order_id y la descripción completa
+                            movement.order_id = order.id
+                            movement.description = f'Pago de orden {str(order.id)[:8]}'
+                            
+                            # Recalcular el balance de la wallet (por si acaso hay cambios)
+                            wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                            wallet.updated_at = datetime.utcnow()
+                            
+                            # Hacer commit para persistir el movimiento y el balance actualizado
+                            db.session.commit()
+                            
+                            balance_final = float(wallet.balance)
+                            print(f"[DEBUG] ✅ Movimiento de billetera registrado y balance actualizado para orden {order.id}")
+                            print(f"[DEBUG]    - Tipo: order_payment")
+                            print(f"[DEBUG]    - Monto descontado: ${used_wallet_amount:.2f}")
+                            print(f"[DEBUG]    - Balance final: ${balance_final:.2f}")
+                            print(f"[DEBUG]    - Order ID: {order.id}")
+                        else:
+                            print(f"[DEBUG] ⚠️ No se encontró movimiento de billetera pendiente para actualizar")
+                            # Si no se encontró el movimiento, intentar crearlo de nuevo
+                            try:
+                                movement = WalletMovement(
+                                    wallet_id=wallet.id,
+                                    type='order_payment',
+                                    amount=-float(used_wallet_amount),
+                                    description=f'Pago de orden {str(order.id)[:8]}',
+                                    order_id=order.id
+                                )
+                                db.session.add(movement)
+                                wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                                wallet.updated_at = datetime.utcnow()
+                                db.session.commit()
+                                print(f"[DEBUG] ✅ Movimiento de billetera creado después de crear la orden. Balance: ${wallet.balance}")
+                            except Exception as fallback_error:
+                                db.session.rollback()
+                                print(f"[DEBUG] ⚠️ Error al crear movimiento de billetera como fallback: {str(fallback_error)}")
+                except Exception as wallet_error:
+                    db.session.rollback()
+                    import traceback
+                    print(f"[DEBUG] ⚠️ Error al actualizar movimiento de billetera: {str(wallet_error)}")
+                    print(traceback.format_exc())
+                    # No fallar la orden si falla la actualización del movimiento, pero loguear el error
             
             # Enviar email de confirmación de compra
             try:
@@ -1153,10 +1518,17 @@ def create_order():
                         'order_id': str(order.id)
                     }), 500
                 
-                # Calcular el total a pagar (descontando wallet si aplica)
+                # Calcular el total a pagar con tarjeta
+                # El 'total' que viene del frontend ya tiene el descuento de billetera aplicado
+                # Por lo tanto, total_to_pay es simplemente el total (no hay que restar el descuento de nuevo)
                 total_to_pay = float(total)
-                if used_wallet_amount:
-                    total_to_pay = max(0, total_to_pay - float(used_wallet_amount))
+                
+                # Si el total es 0 o negativo, no se puede procesar el pago
+                if total_to_pay <= 0:
+                    return jsonify({
+                        'success': False,
+                        'error': 'El monto a pagar con tarjeta debe ser mayor a 0. Si el descuento de billetera cubre todo el total, no se puede pagar con tarjeta.'
+                    }), 400
                 
                 # Obtener DNI del cliente
                 customer_dni = formData.get('dni', '') if formData else ''
@@ -1519,6 +1891,25 @@ def create_order():
                         order.payment_processed = False
                         order.status = 'pending'
                         db.session.commit()
+                        
+                        # Si hay un movimiento de billetera asociado a esta orden, revertirlo
+                        if order.used_wallet_amount and order.used_wallet_amount > 0:
+                            try:
+                                from models.wallet import WalletMovement
+                                from routes.wallet import calculate_wallet_balance
+                                
+                                # Buscar el movimiento de billetera asociado a esta orden
+                                movement = WalletMovement.query.filter_by(order_id=order.id, type='order_payment').first()
+                                if movement:
+                                    wallet = movement.wallet
+                                    db.session.delete(movement)
+                                    wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                                    wallet.updated_at = datetime.utcnow()
+                                    db.session.commit()
+                                    print(f"[DEBUG] ✅ Movimiento de billetera revertido debido a pago rechazado con tarjeta para orden {order.id}")
+                            except Exception as revert_error:
+                                db.session.rollback()
+                                print(f"[DEBUG] ⚠️ Error al revertir movimiento de billetera por pago rechazado: {str(revert_error)}")
                         
                         return jsonify({
                             'success': False,

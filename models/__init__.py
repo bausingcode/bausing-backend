@@ -20,6 +20,7 @@ from .homepage_distribution import HomepageProductDistribution
 from .crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 from .crm_sale_type import CrmSaleType
 from .crm_province import CrmProvince, CrmProvinceMap
+from .sale_retry_queue import SaleRetryQueue
 
 __all__ = [
     'Category',
@@ -61,6 +62,7 @@ __all__ = [
     'CrmZoneLocality',
     'CrmSaleType',
     'CrmProvince',
-    'CrmProvinceMap'
+    'CrmProvinceMap',
+    'SaleRetryQueue'
 ]
 

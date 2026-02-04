@@ -1935,13 +1935,29 @@ def crear_venta():
             
             total_pagos += monto
         
+        # Obtener descuento de billetera si existe
+        used_wallet_amount = data.get('used_wallet_amount') or data.get('wallet_amount') or 0.0
+        if used_wallet_amount:
+            try:
+                used_wallet_amount = float(used_wallet_amount)
+            except (ValueError, TypeError):
+                used_wallet_amount = 0.0
+        
+        # IMPORTANTE: Si hay descuento de billetera, los precios en 'js' ya vienen ajustados
+        # (con el descuento aplicado proporcionalmente). Por lo tanto, total_venta ya es
+        # el total después del descuento. No debemos restar el descuento de nuevo.
+        # Si NO hay descuento, total_venta es el total original.
+        # En ambos casos, validamos que total_pagos == total_venta
+        
         # Validar que la suma de pagos coincida con el total de la venta
+        # (que ya incluye el descuento si fue aplicado en los precios)
         diferencia = abs(total_pagos - total_venta)
         if diferencia > 0.01:  # Tolerancia de 1 centavo
             return jsonify({
                 "status": False,
                 "message": "La suma de los pagos no coincide con el total de la venta",
-                "total_productos": total_venta,
+                "total_productos": total_venta,  # Este ya es el total después del descuento si aplica
+                "descuento_billetera": used_wallet_amount,
                 "total_pagos": total_pagos
             }), 422
         
@@ -2662,14 +2678,107 @@ def crear_venta():
             
             # Si el endpoint externo falló, incluir mensaje de advertencia
             mensaje_respuesta = "Venta creada exitosamente"
+            endpoint_externo_fallo = False
+            mensaje_error_externo = None
+            es_error_stock = False  # Flag para detectar error de stock
             if external_response_info and not external_response_info.get('success'):
                 response_json = external_response_info.get('response_json')
                 if isinstance(response_json, dict):
                     mensaje_error_externo = response_json.get('message') or external_response_info.get('error')
+                    # Detectar si es error de stock (precio de compra)
+                    if mensaje_error_externo and ("No se pudo obtener el precio de compra" in mensaje_error_externo or "compras previas registradas" in mensaje_error_externo):
+                        es_error_stock = True
+                        mensaje_error_externo = "Lo sentimos, pero este artículo no tiene stock."
                 else:
                     mensaje_error_externo = external_response_info.get('error')
-                if mensaje_error_externo:
+                if mensaje_error_externo and not es_error_stock:
                     mensaje_respuesta = f"Venta creada localmente, pero falló en endpoint externo: {mensaje_error_externo}"
+                    endpoint_externo_fallo = True
+            
+            # Si es error de stock, eliminar la venta creada localmente y retornar error
+            # IMPORTANTE: Esto debe hacerse ANTES de crear la orden en la tabla orders
+            if es_error_stock:
+                try:
+                    # Primero eliminar TODAS las órdenes de la tabla orders que tengan este crm_order_id (y sus items)
+                    # Esto debe hacerse antes de eliminar crm_orders por la foreign key constraint
+                    if crm_order_id:
+                        from models.order import Order
+                        from models.order_item import OrderItem
+                        
+                        # Buscar TODAS las órdenes con este crm_order_id (puede haber múltiples)
+                        orders_to_delete = Order.query.filter_by(crm_order_id=crm_order_id).all()
+                        for order_to_delete in orders_to_delete:
+                            # Eliminar los items de la orden primero
+                            OrderItem.query.filter_by(order_id=order_to_delete.id).delete()
+                            # Eliminar la orden
+                            db.session.delete(order_to_delete)
+                            print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, eliminada orden existente con id={order_to_delete.id}")
+                        
+                        # También verificar con venta_id_final por si acaso (puede ser diferente)
+                        if venta_id_final and venta_id_final != crm_order_id:
+                            orders_to_delete_final = Order.query.filter_by(crm_order_id=venta_id_final).all()
+                            for order_to_delete_final in orders_to_delete_final:
+                                OrderItem.query.filter_by(order_id=order_to_delete_final.id).delete()
+                                db.session.delete(order_to_delete_final)
+                                print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, eliminada orden existente con id={order_to_delete_final.id} (venta_id_final={venta_id_final})")
+                        
+                        # Hacer flush y commit de las eliminaciones de órdenes antes de eliminar crm_orders
+                        # Usar flush para asegurar que las eliminaciones se reflejen en la base de datos
+                        db.session.flush()
+                        db.session.commit()
+                        
+                        # Verificar que no queden órdenes con este crm_order_id antes de eliminar crm_orders
+                        remaining_orders = Order.query.filter_by(crm_order_id=crm_order_id).count()
+                        if remaining_orders > 0:
+                            print(f"[DEBUG crear_venta] ⚠️ ADVERTENCIA: Todavía hay {remaining_orders} órdenes con crm_order_id={crm_order_id}, eliminándolas...")
+                            remaining_orders_list = Order.query.filter_by(crm_order_id=crm_order_id).all()
+                            for remaining_order in remaining_orders_list:
+                                OrderItem.query.filter_by(order_id=remaining_order.id).delete()
+                                db.session.delete(remaining_order)
+                            db.session.flush()
+                            db.session.commit()
+                        
+                        # Ahora eliminar la venta creada localmente en crm_orders
+                        delete_query = text("""
+                            DELETE FROM crm_orders 
+                            WHERE crm_order_id = :crm_order_id
+                        """)
+                        db.session.execute(delete_query, {'crm_order_id': crm_order_id})
+                        db.session.commit()
+                        print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, eliminada venta local con crm_order_id={crm_order_id}")
+                    else:
+                        db.session.rollback()
+                        print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, haciendo rollback")
+                except Exception as delete_error:
+                    db.session.rollback()
+                    import traceback
+                    print(f"[DEBUG crear_venta] ⚠️ Error al eliminar venta local por error de stock: {str(delete_error)}")
+                    print(traceback.format_exc())
+                    # Intentar eliminar todas las órdenes si falla eliminar crm_orders
+                    try:
+                        if crm_order_id:
+                            from models.order import Order
+                            from models.order_item import OrderItem
+                            orders_to_delete = Order.query.filter_by(crm_order_id=crm_order_id).all()
+                            for order_to_delete in orders_to_delete:
+                                OrderItem.query.filter_by(order_id=order_to_delete.id).delete()
+                                db.session.delete(order_to_delete)
+                            if venta_id_final and venta_id_final != crm_order_id:
+                                orders_to_delete_final = Order.query.filter_by(crm_order_id=venta_id_final).all()
+                                for order_to_delete_final in orders_to_delete_final:
+                                    OrderItem.query.filter_by(order_id=order_to_delete_final.id).delete()
+                                    db.session.delete(order_to_delete_final)
+                            db.session.commit()
+                            print(f"[DEBUG crear_venta] ⚠️ Todas las órdenes eliminadas después de error al eliminar crm_orders")
+                    except Exception as cleanup_error:
+                        print(f"[DEBUG crear_venta] ⚠️ Error en limpieza de órdenes: {str(cleanup_error)}")
+                return jsonify({
+                    "status": False,
+                    "message": mensaje_error_externo,
+                    "data": {
+                        "external_api": external_response_info
+                    }
+                }), 400
             
             # Crear la orden en la tabla orders si se recibió user_id
             # Solo crear la orden si la venta se creó exitosamente (antes de llamar al endpoint externo)
@@ -2760,6 +2869,75 @@ def crear_venta():
                     print(f"[DEBUG crear_venta] ⚠️ Error al crear orden en tabla orders: {str(order_error)}")
                     print(traceback.format_exc())
                     # No fallar la creación de la venta si falla la creación de la orden
+            
+            # Si el endpoint externo falló, guardar en la tabla de reintentos
+            if endpoint_externo_fallo:
+                try:
+                    from models.sale_retry_queue import SaleRetryQueue
+                    import uuid as uuid_lib
+                    from datetime import datetime as dt
+                    
+                    # Extraer campos del payload para facilitar consultas
+                    fecha_detalle = None
+                    if payload_original and payload_original.get('fecha_detalle'):
+                        try:
+                            fecha_detalle = dt.strptime(payload_original['fecha_detalle'], '%Y-%m-%d').date()
+                        except:
+                            pass
+                    
+                    # Obtener user_id si está disponible
+                    user_id_uuid = None
+                    if payload_original and payload_original.get('user_id'):
+                        try:
+                            user_id_uuid = uuid_lib.UUID(payload_original['user_id']) if isinstance(payload_original['user_id'], str) else payload_original['user_id']
+                        except:
+                            pass
+                    
+                    # Obtener order_id si ya se creó la orden
+                    order_id_uuid = None
+                    if order_id:
+                        try:
+                            order_id_uuid = uuid_lib.UUID(order_id) if isinstance(order_id, str) else order_id
+                        except:
+                            pass
+                    
+                    # Calcular monto_total desde formaPagos
+                    monto_total = None
+                    if payload_original and payload_original.get('formaPagos'):
+                        forma_pagos = payload_original['formaPagos']
+                        if isinstance(forma_pagos, list) and len(forma_pagos) > 0:
+                            monto_total = forma_pagos[0].get('monto_total')
+                    
+                    # Crear registro en sale_retry_queue
+                    retry_record = SaleRetryQueue(
+                        order_id=order_id_uuid,
+                        status='pending',
+                        retry_count=0,
+                        max_retries=5,
+                        error_message=mensaje_error_externo,
+                        error_details=external_response_info,
+                        crm_payload=payload_original,
+                        fecha_detalle=fecha_detalle,
+                        tipo_venta=payload_original.get('tipo_venta') if payload_original else None,
+                        cliente_nombre=payload_original.get('cliente_nombre') if payload_original else None,
+                        cliente_email=payload_original.get('email_cliente') if payload_original else None,
+                        provincia_id=payload_original.get('provincia_id') if payload_original else None,
+                        zona_id=payload_original.get('zona_id') if payload_original else None,
+                        monto_total=monto_total,
+                        payment_method=payload_original.get('payment_method') if payload_original else None,
+                        payment_processed=payload_original.get('payment_processed') if payload_original else None,
+                        user_id=user_id_uuid,
+                        priority=0
+                    )
+                    db.session.add(retry_record)
+                    db.session.commit()
+                    print(f"[DEBUG crear_venta] ✅ Venta guardada en sale_retry_queue con id={retry_record.id} debido a fallo en endpoint externo")
+                except Exception as retry_error:
+                    db.session.rollback()
+                    import traceback
+                    print(f"[DEBUG crear_venta] ⚠️ Error al guardar en sale_retry_queue: {str(retry_error)}")
+                    print(traceback.format_exc())
+                    # No fallar la creación de la venta si falla el guardado en la cola de reintentos
             
             response_data = {
                 "crm_order_id": venta_id_final,

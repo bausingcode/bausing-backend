@@ -901,3 +901,194 @@ def get_sale_types():
             'success': False,
             'error': f'Error al obtener tipos de venta: {str(e)}'
         }), 500
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    """
+    Solicitar restablecimiento de contraseña.
+    Envía un email con un enlace para restablecer la contraseña.
+    
+    Body esperado:
+    {
+        "email": "user@example.com"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Email requerido'
+            }), 400
+        
+        email = data.get('email', '').strip().lower()
+        
+        if not email:
+            return jsonify({
+                'success': False,
+                'error': 'Email requerido'
+            }), 400
+        
+        # Validar formato de email básico
+        if '@' not in email or '.' not in email.split('@')[1]:
+            return jsonify({
+                'success': False,
+                'error': 'El formato del email no es válido'
+            }), 400
+        
+        # Buscar usuario
+        user = User.query.filter_by(email=email).first()
+        
+        # Por seguridad, siempre retornamos éxito aunque el usuario no exista
+        # Esto previene que se pueda descubrir qué emails están registrados
+        if user:
+            # Generar token JWT para reset de contraseña
+            # El token expira en 1 hora
+            payload = {
+                'user_id': str(user.id),
+                'email': user.email,
+                'scope': 'password_reset',
+                'exp': datetime.utcnow() + timedelta(hours=1),
+                'iat': datetime.utcnow()
+            }
+            reset_token = jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
+            
+            # Construir URL de reset
+            reset_url = f"{Config.FRONTEND_URL}/reset-password?token={reset_token}"
+            
+            # Enviar email de recuperación
+            try:
+                email_service.send_password_reset_email(
+                    user_email=user.email,
+                    user_first_name=user.first_name,
+                    reset_url=reset_url,
+                    expires_in="1 hora"
+                )
+            except Exception as e:
+                # Log el error pero no lo expongas al usuario
+                print(f"Error al enviar email de recuperación: {str(e)}")
+                # En producción, podrías querer retornar un error aquí
+                # pero por seguridad es mejor no revelar si el email existe
+        
+        # Siempre retornar éxito (por seguridad)
+        return jsonify({
+            'success': True,
+            'message': 'Si el email existe, recibirás un enlace para restablecer tu contraseña'
+        }), 200
+        
+    except Exception as e:
+        print(f"Error en forgot-password: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Error al procesar la solicitud'
+        }), 500
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    """
+    Restablecer contraseña usando el token recibido por email.
+    
+    Body esperado:
+    {
+        "token": "jwt-token",
+        "password": "nueva-contraseña",
+        "confirm_password": "nueva-contraseña"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+        
+        token = data.get('token')
+        password = data.get('password')
+        confirm_password = data.get('confirm_password')
+        
+        if not token:
+            return jsonify({
+                'success': False,
+                'error': 'Token requerido'
+            }), 400
+        
+        if not password:
+            return jsonify({
+                'success': False,
+                'error': 'Contraseña requerida'
+            }), 400
+        
+        if not confirm_password:
+            return jsonify({
+                'success': False,
+                'error': 'Confirmación de contraseña requerida'
+            }), 400
+        
+        if password != confirm_password:
+            return jsonify({
+                'success': False,
+                'error': 'Las contraseñas no coinciden'
+            }), 400
+        
+        if len(password) < 6:
+            return jsonify({
+                'success': False,
+                'error': 'La contraseña debe tener al menos 6 caracteres'
+            }), 400
+        
+        # Verificar y decodificar el token
+        try:
+            payload = jwt.decode(token, Config.SECRET_KEY, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({
+                'success': False,
+                'error': 'El token ha expirado. Por favor, solicita un nuevo enlace.'
+            }), 400
+        except jwt.InvalidTokenError:
+            return jsonify({
+                'success': False,
+                'error': 'Token inválido'
+            }), 400
+        
+        # Verificar que el token sea para reset de contraseña
+        if payload.get('scope') != 'password_reset':
+            return jsonify({
+                'success': False,
+                'error': 'Token inválido'
+            }), 400
+        
+        # Obtener el email del token
+        user_email = payload.get('email')
+        if not user_email:
+            return jsonify({
+                'success': False,
+                'error': 'Token inválido'
+            }), 400
+        
+        # Buscar usuario
+        user = User.query.filter_by(email=user_email).first()
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'Usuario no encontrado'
+            }), 404
+        
+        # Actualizar contraseña
+        user.set_password(password)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Contraseña restablecida correctamente'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error en reset-password: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Error al restablecer la contraseña'
+        }), 500
