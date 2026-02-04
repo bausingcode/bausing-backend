@@ -6,7 +6,7 @@ Flask-Migrate==4.0.5
 psycopg2
 SQLAlchemy>=2.0.36
 PyJWT==2.8.0
-supabase==2.3.4
+supabase>=2.8.0
 python-multipart==0.0.9
 resend==2.1.0
 requests==2.31.0

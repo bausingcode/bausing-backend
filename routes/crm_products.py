@@ -380,7 +380,39 @@ def complete_crm_product(product_id):
         if is_update:
             # Eliminar variants, options y precios (los precios se eliminan automáticamente por cascade)
             variants_to_delete = ProductVariant.query.filter_by(product_id=product.id).all()
+            
+            # Verificar si existe la columna product_variant_id en order_items
+            # y filtrar las variantes que están referenciadas
+            try:
+                check_column_query = """
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'order_items' 
+                    AND column_name = 'product_variant_id'
+                """
+                column_check = db.session.execute(text(check_column_query))
+                has_variant_column = column_check.fetchone() is not None
+            except Exception:
+                has_variant_column = False
+            
             for v in variants_to_delete:
+                # Verificar si la variante está referenciada en order_items
+                if has_variant_column:
+                    check_ref_query = """
+                        SELECT COUNT(*) 
+                        FROM order_items 
+                        WHERE product_variant_id = :variant_id
+                    """
+                    ref_count = db.session.execute(
+                        text(check_ref_query), 
+                        {'variant_id': str(v.id)}
+                    ).scalar()
+                    
+                    if ref_count and ref_count > 0:
+                        # Esta variante está referenciada, no la eliminamos
+                        print(f"[WARNING] No se puede eliminar la variante {v.id} porque está referenciada en {ref_count} order_items")
+                        continue
+                
                 # Eliminar opciones (los precios se eliminan automáticamente por cascade desde las opciones)
                 options_to_delete = ProductVariantOption.query.filter_by(product_variant_id=v.id).all()
                 for opt in options_to_delete:
@@ -705,20 +737,21 @@ def complete_crm_product(product_id):
         
         db.session.commit()
         
-        # Cargar imágenes si se proporcionaron
-        if data.get('images'):
+        # Procesar imágenes (siempre, incluso si está vacío para eliminar todas)
+        if 'images' in data:
             from models.image import ProductImage
             # Eliminar imágenes existentes
             ProductImage.query.filter_by(product_id=product.id).delete()
-            # Agregar nuevas imágenes
-            for idx, img_data in enumerate(data['images']):
-                image = ProductImage(
-                    product_id=product.id,
-                    image_url=img_data.get('image_url'),
-                    alt_text=img_data.get('alt_text'),
-                    position=img_data.get('position', idx)
-                )
-                db.session.add(image)
+            # Agregar nuevas imágenes solo si hay imágenes en el array
+            if data.get('images') and len(data['images']) > 0:
+                for idx, img_data in enumerate(data['images']):
+                    image = ProductImage(
+                        product_id=product.id,
+                        image_url=img_data.get('image_url'),
+                        alt_text=img_data.get('alt_text'),
+                        position=img_data.get('position', idx)
+                    )
+                    db.session.add(image)
             db.session.commit()
         
         return jsonify({

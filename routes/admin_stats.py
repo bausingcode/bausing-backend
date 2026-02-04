@@ -793,36 +793,35 @@ def get_general_metrics():
                 LEFT JOIN orders o ON u.id = o.user_id {date_filter}
                 GROUP BY u.id
             ),
-            user_abandoned_carts AS (
+            pending_orders_by_time AS (
                 SELECT 
-                    c.user_id,
-                    COUNT(*) as abandoned_carts
-                FROM carts c
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM orders o 
-                    WHERE o.user_id = c.user_id 
-                    AND o.created_at >= c.created_at
-                )
-                {cart_date_filter}
-                GROUP BY c.user_id
+                    o.user_id,
+                    COUNT(CASE WHEN o.created_at >= NOW() - INTERVAL '48 hours' THEN 1 END) as open_carts,
+                    COUNT(CASE WHEN o.created_at < NOW() - INTERVAL '48 hours' THEN 1 END) as abandoned_carts
+                FROM orders o
+                WHERE LOWER(o.status) LIKE '%pendiente%'
+                {date_filter if date_filter else ''}
+                GROUP BY o.user_id
             )
             SELECT 
                 COUNT(*) as total_users,
                 COUNT(CASE WHEN uo.total_orders > 0 THEN 1 END) as users_with_orders,
                 COUNT(CASE WHEN uo.completed_orders > 0 THEN 1 END) as users_with_purchases,
-                COUNT(CASE WHEN uac.abandoned_carts > 0 THEN 1 END) as users_with_abandoned_carts,
+                COUNT(CASE WHEN pot.abandoned_carts > 0 THEN 1 END) as users_with_abandoned_carts,
                 
                 -- Promedios
                 COALESCE(AVG(uo.total_orders), 0) as avg_orders_per_user,
                 COALESCE(AVG(uo.completed_orders), 0) as avg_completed_orders_per_user,
-                COALESCE(AVG(COALESCE(uac.abandoned_carts, 0)), 0) as avg_abandoned_carts_per_user,
+                COALESCE(AVG(COALESCE(pot.open_carts, 0)), 0) as avg_open_carts_per_user,
+                COALESCE(AVG(COALESCE(pot.abandoned_carts, 0)), 0) as avg_abandoned_carts_per_user,
                 COALESCE(AVG(uo.total_spent), 0) as avg_spent_per_user,
                 COALESCE(AVG(uo.avg_order_value), 0) as avg_order_value_general,
                 
                 -- Totales
                 COALESCE(SUM(uo.total_orders), 0) as total_orders_all,
                 COALESCE(SUM(uo.completed_orders), 0) as total_completed_orders,
-                COALESCE(SUM(COALESCE(uac.abandoned_carts, 0)), 0) as total_abandoned_carts,
+                COALESCE(SUM(COALESCE(pot.open_carts, 0)), 0) as total_open_carts,
+                COALESCE(SUM(COALESCE(pot.abandoned_carts, 0)), 0) as total_abandoned_carts,
                 COALESCE(SUM(uo.total_spent), 0) as total_spent_all,
                 0.0 as total_abandoned_value,
                 
@@ -834,7 +833,7 @@ def get_general_metrics():
                 END as avg_conversion_rate
             FROM users u
             LEFT JOIN user_orders uo ON u.id = uo.user_id
-            LEFT JOIN user_abandoned_carts uac ON u.id = uac.user_id
+            LEFT JOIN pending_orders_by_time pot ON u.id = pot.user_id
         """)
         
         result = db.session.execute(query, all_params if all_params else {})
@@ -849,6 +848,7 @@ def get_general_metrics():
                 'averages': {
                     'orders_per_user': 0.0,
                     'completed_orders_per_user': 0.0,
+                    'open_carts_per_user': 0.0,
                     'pending_orders_per_user': 0.0,
                     'spent_per_user': 0.0,
                     'order_value': 0.0
@@ -856,6 +856,7 @@ def get_general_metrics():
                 'totals': {
                     'orders': 0,
                     'completed_orders': 0,
+                    'open_carts': 0,
                     'pending_orders': 0,
                     'total_spent': 0.0,
                     'abandoned_carts_value': 0.0
@@ -871,6 +872,7 @@ def get_general_metrics():
                 'averages': {
                     'orders_per_user': float(row.avg_orders_per_user or 0),
                     'completed_orders_per_user': float(row.avg_completed_orders_per_user or 0),
+                    'open_carts_per_user': float(row.avg_open_carts_per_user or 0),
                     'pending_orders_per_user': float(row.avg_abandoned_carts_per_user or 0),
                     'spent_per_user': float(row.avg_spent_per_user or 0),
                     'order_value': float(row.avg_order_value_general or 0)
@@ -878,6 +880,7 @@ def get_general_metrics():
                 'totals': {
                     'orders': int(row.total_orders_all or 0),
                     'completed_orders': int(row.total_completed_orders or 0),
+                    'open_carts': int(row.total_open_carts or 0),
                     'pending_orders': int(row.total_abandoned_carts or 0),
                     'total_spent': float(row.total_spent_all or 0),
                     'abandoned_carts_value': float(row.total_abandoned_value or 0)
