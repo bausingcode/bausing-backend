@@ -130,6 +130,7 @@ from sqlalchemy.orm import joinedload
 import json
 import uuid
 import requests
+from datetime import datetime
 
 public_api_bp = Blueprint('public_api', __name__)
 
@@ -414,27 +415,45 @@ def sync_data_new():
         "message": "Error interno del servidor"
     }
     """
+    print("=" * 80)
+    print("[DEBUG] /public/sincronizar - Llamada recibida")
+    print(f"[DEBUG] Método: {request.method}")
+    print(f"[DEBUG] Headers: {dict(request.headers)}")
+    print(f"[DEBUG] Remote Address: {request.remote_addr}")
+    print(f"[DEBUG] Timestamp: {datetime.now().isoformat()}")
+    print("=" * 80)
+    
     try:
         # Validar que se recibió un body
         if not request.is_json:
+            print("[DEBUG] Error: El body debe ser JSON")
             return validation_error("El body debe ser JSON")
         
         body_data = request.get_json()
         
         if body_data is None:
+            print("[DEBUG] Error: El body es requerido")
             return validation_error("El body es requerido")
+        
+        print(f"[DEBUG] Body recibido - Tipo: {body_data.get('tipo', 'N/A')}")
+        print(f"[DEBUG] Body recibido - Cantidad de datos: {len(body_data.get('datos', [])) if isinstance(body_data.get('datos'), list) else 'N/A'}")
+        print(f"[DEBUG] Body recibido - Sincronizar: {body_data.get('sincronizar', {})}")
         
         # Validar estructura básica
         if 'tipo' not in body_data:
+            print("[DEBUG] Error: El campo 'tipo' es requerido")
             return validation_error("El campo 'tipo' es requerido")
         
         if 'datos' not in body_data:
+            print("[DEBUG] Error: El campo 'datos' es requerido")
             return validation_error("El campo 'datos' es requerido")
         
         if 'sincronizar' not in body_data:
+            print("[DEBUG] Error: El campo 'sincronizar' es requerido")
             return validation_error("El campo 'sincronizar' es requerido")
         
         tipo = body_data.get('tipo')
+        print(f"[DEBUG] Procesando sincronización de tipo: {tipo}")
         
         # Tipos que se simulan (no se procesan realmente)
         tipos_simulados = ['medios_pago']
