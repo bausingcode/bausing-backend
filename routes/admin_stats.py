@@ -793,35 +793,35 @@ def get_general_metrics():
                 LEFT JOIN orders o ON u.id = o.user_id {date_filter}
                 GROUP BY u.id
             ),
-            pending_orders_by_time AS (
+            carts_by_time AS (
                 SELECT 
-                    o.user_id,
-                    COUNT(CASE WHEN o.created_at >= NOW() - INTERVAL '48 hours' THEN 1 END) as open_carts,
-                    COUNT(CASE WHEN o.created_at < NOW() - INTERVAL '48 hours' THEN 1 END) as abandoned_carts
-                FROM orders o
-                WHERE LOWER(o.status) LIKE '%pendiente%'
-                {date_filter if date_filter else ''}
-                GROUP BY o.user_id
+                    c.user_id,
+                    COUNT(CASE WHEN c.created_at >= NOW() - INTERVAL '48 hours' THEN 1 END) as open_carts,
+                    COUNT(CASE WHEN c.created_at < NOW() - INTERVAL '48 hours' THEN 1 END) as abandoned_carts
+                FROM carts c
+                WHERE 1=1
+                {cart_date_filter if cart_date_filter else ''}
+                GROUP BY c.user_id
             )
             SELECT 
                 COUNT(*) as total_users,
                 COUNT(CASE WHEN uo.total_orders > 0 THEN 1 END) as users_with_orders,
                 COUNT(CASE WHEN uo.completed_orders > 0 THEN 1 END) as users_with_purchases,
-                COUNT(CASE WHEN pot.abandoned_carts > 0 THEN 1 END) as users_with_abandoned_carts,
+                COUNT(CASE WHEN cbt.abandoned_carts > 0 THEN 1 END) as users_with_abandoned_carts,
                 
                 -- Promedios
                 COALESCE(AVG(uo.total_orders), 0) as avg_orders_per_user,
                 COALESCE(AVG(uo.completed_orders), 0) as avg_completed_orders_per_user,
-                COALESCE(AVG(COALESCE(pot.open_carts, 0)), 0) as avg_open_carts_per_user,
-                COALESCE(AVG(COALESCE(pot.abandoned_carts, 0)), 0) as avg_abandoned_carts_per_user,
+                COALESCE(AVG(COALESCE(cbt.open_carts, 0)), 0) as avg_open_carts_per_user,
+                COALESCE(AVG(COALESCE(cbt.abandoned_carts, 0)), 0) as avg_abandoned_carts_per_user,
                 COALESCE(AVG(uo.total_spent), 0) as avg_spent_per_user,
                 COALESCE(AVG(uo.avg_order_value), 0) as avg_order_value_general,
                 
                 -- Totales
                 COALESCE(SUM(uo.total_orders), 0) as total_orders_all,
                 COALESCE(SUM(uo.completed_orders), 0) as total_completed_orders,
-                COALESCE(SUM(COALESCE(pot.open_carts, 0)), 0) as total_open_carts,
-                COALESCE(SUM(COALESCE(pot.abandoned_carts, 0)), 0) as total_abandoned_carts,
+                COALESCE(SUM(COALESCE(cbt.open_carts, 0)), 0) as total_open_carts,
+                COALESCE(SUM(COALESCE(cbt.abandoned_carts, 0)), 0) as total_abandoned_carts,
                 COALESCE(SUM(uo.total_spent), 0) as total_spent_all,
                 0.0 as total_abandoned_value,
                 
@@ -833,11 +833,39 @@ def get_general_metrics():
                 END as avg_conversion_rate
             FROM users u
             LEFT JOIN user_orders uo ON u.id = uo.user_id
-            LEFT JOIN pending_orders_by_time pot ON u.id = pot.user_id
+            LEFT JOIN carts_by_time cbt ON u.id = cbt.user_id
         """)
         
         result = db.session.execute(query, all_params if all_params else {})
         row = result.fetchone()
+        
+        # Query para obtener métricas de métodos de pago
+        payment_methods_query = text(f"""
+            SELECT 
+                payment_method,
+                COUNT(*) as count
+            FROM orders o
+            WHERE 1=1
+            {date_filter if date_filter else ''}
+            AND payment_method IS NOT NULL
+            GROUP BY payment_method
+        """)
+        
+        payment_methods_result = db.session.execute(payment_methods_query, params if params else {})
+        payment_methods_data = payment_methods_result.fetchall()
+        
+        # Inicializar contadores de métodos de pago
+        payment_methods = {
+            'card': 0,
+            'cash': 0,
+            'transfer': 0
+        }
+        
+        for pm_row in payment_methods_data:
+            method = pm_row.payment_method.lower() if pm_row.payment_method else None
+            count = int(pm_row.count or 0)
+            if method in payment_methods:
+                payment_methods[method] = count
         
         if not row:
             metrics = {
@@ -861,7 +889,8 @@ def get_general_metrics():
                     'total_spent': 0.0,
                     'abandoned_carts_value': 0.0
                 },
-                'conversion_rate': 0.0
+                'conversion_rate': 0.0,
+                'payment_methods': payment_methods
             }
         else:
             metrics = {
@@ -885,7 +914,8 @@ def get_general_metrics():
                     'total_spent': float(row.total_spent_all or 0),
                     'abandoned_carts_value': float(row.total_abandoned_value or 0)
                 },
-                'conversion_rate': float(row.avg_conversion_rate or 0)
+                'conversion_rate': float(row.avg_conversion_rate or 0),
+                'payment_methods': payment_methods
             }
         
         return jsonify({

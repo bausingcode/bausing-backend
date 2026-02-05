@@ -685,7 +685,7 @@ def create_address():
             }), 400
         
         # Validar campos requeridos
-        required_fields = ['full_name', 'phone', 'street', 'number', 'postal_code', 'city', 'province']
+        required_fields = ['full_name', 'phone', 'street', 'number', 'postal_code', 'city', 'province_id']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({
@@ -694,6 +694,21 @@ def create_address():
                 }), 400
         
         user = request.user
+        
+        # Validar que la provincia existe
+        try:
+            province_id = uuid.UUID(data['province_id'])
+            province = Province.query.get(province_id)
+            if not province:
+                return jsonify({
+                    'success': False,
+                    'error': 'Provincia no encontrada'
+                }), 400
+        except (ValueError, TypeError):
+            return jsonify({
+                'success': False,
+                'error': 'ID de provincia inválido'
+            }), 400
         
         # Si se marca como default, quitar default de otras direcciones
         if data.get('is_default', False):
@@ -709,7 +724,7 @@ def create_address():
             additional_info=data.get('additional_info'),
             postal_code=data['postal_code'],
             city=data['city'],
-            province=data['province'],
+            province_id=province_id,
             is_default=data.get('is_default', False)
         )
         

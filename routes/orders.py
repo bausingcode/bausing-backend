@@ -463,10 +463,116 @@ def get_user_orders():
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
         orders = pagination.items
         
-        # Convertir órdenes a formato esperado por el frontend
+        # Optimización: Cargar datos de forma batch para mejorar rendimiento
+        order_ids = [order.id for order in orders]
+        user_ids = list(set([order.user_id for order in orders]))
+        crm_order_ids = [order.crm_order_id for order in orders if hasattr(order, 'crm_order_id') and order.crm_order_id]
+        
+        # Cargar direcciones de todos los usuarios en una sola query
+        addresses_map = {}
+        if user_ids:
+            addresses = Address.query.filter(Address.user_id.in_(user_ids)).all()
+            for address in addresses:
+                if address.user_id not in addresses_map:
+                    addresses_map[address.user_id] = address.to_dict()
+        
+        # Cargar receipt_numbers de todas las órdenes en una sola query
+        receipt_numbers_map = {}
+        if crm_order_ids:
+            try:
+                # Usar IN para PostgreSQL
+                placeholders = ','.join([f':id_{i}' for i in range(len(crm_order_ids))])
+                receipt_query = text(f"""
+                    SELECT crm_order_id, receipt_number 
+                    FROM crm_orders 
+                    WHERE crm_order_id IN ({placeholders})
+                """)
+                params = {f'id_{i}': crm_id for i, crm_id in enumerate(crm_order_ids)}
+                receipt_result = db.session.execute(receipt_query, params)
+                for row in receipt_result:
+                    if row[1]:  # receipt_number
+                        receipt_numbers_map[row[0]] = row[1]
+            except Exception as e:
+                print(f"[DEBUG] Error al cargar receipt_numbers: {str(e)}")
+                pass
+        
+        # Cargar items de todas las órdenes en una sola query
+        items_map = {}
+        if order_ids:
+            try:
+                from models.order_item import OrderItem
+                order_items = OrderItem.query.filter(OrderItem.order_id.in_(order_ids)).all()
+                
+                # Cargar todos los productos de una vez
+                product_ids = list(set([item.product_id for item in order_items]))
+                products_map = {}
+                if product_ids:
+                    products = Product.query.filter(Product.id.in_(product_ids)).all()
+                    products_map = {p.id: p for p in products}
+                
+                # Cargar todas las variantes de una vez
+                variants_map = {}
+                variant_ids = []
+                if product_ids:
+                    variants = ProductVariant.query.filter(ProductVariant.product_id.in_(product_ids)).all()
+                    for variant in variants:
+                        if variant.product_id not in variants_map:
+                            variants_map[variant.product_id] = variant
+                        variant_ids.append(variant.id)
+                
+                # Cargar todas las opciones de una vez
+                options_map = {}
+                if variant_ids:
+                    options = ProductVariantOption.query.filter(ProductVariantOption.product_variant_id.in_(variant_ids)).all()
+                    for option in options:
+                        if option.product_variant_id not in options_map:
+                            options_map[option.product_variant_id] = option
+                
+                # Procesar items con datos pre-cargados
+                for item in order_items:
+                    if item.order_id not in items_map:
+                        items_map[item.order_id] = []
+                    
+                    # Obtener información del producto desde el mapa
+                    product = products_map.get(item.product_id)
+                    product_name = product.name if product else "Producto"
+                    product_image = None
+                    if product:
+                        # Intentar obtener imagen del producto desde datos pre-cargados
+                        variant = variants_map.get(product.id)
+                        if variant:
+                            option = options_map.get(variant.id)
+                            if option and hasattr(option, 'image_url') and option.image_url:
+                                product_image = option.image_url
+                            elif hasattr(variant, 'image_url') and variant.image_url:
+                                product_image = variant.image_url
+                        if not product_image and hasattr(product, 'image_url') and product.image_url:
+                            product_image = product.image_url
+                    
+                    items_map[item.order_id].append({
+                        'id': str(item.id),
+                        'product_id': str(item.product_id),
+                        'product_name': product_name,
+                        'product_image': product_image,
+                        'quantity': item.quantity,
+                        'unit_price': float(item.unit_price) if item.unit_price else 0.0,
+                        'total_price': float(item.unit_price * item.quantity) if item.unit_price else 0.0,
+                    })
+            except Exception as e:
+                print(f"[DEBUG] Error al cargar items: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                # Si falla, items_map quedará vacío y se usarán arrays vacíos
+        
+        # Convertir órdenes a formato esperado por el frontend usando datos pre-cargados
         orders_data = []
         for order in orders:
-            order_dict = order_to_dict(order)
+            order_dict = order_to_dict_optimized(
+                order, 
+                addresses_map.get(order.user_id),
+                receipt_numbers_map.get(order.crm_order_id) if hasattr(order, 'crm_order_id') and order.crm_order_id else None,
+                items_map.get(order.id, [])
+            )
             orders_data.append(order_dict)
         
         return jsonify({
@@ -536,24 +642,85 @@ def get_user_order(order_id):
         }), 500
 
 
+def order_to_dict_optimized(order, shipping_address=None, receipt_number=None, items=None):
+    """
+    Versión optimizada de order_to_dict que acepta datos pre-cargados
+    """
+    # Determinar payment_status basado en el status de la orden
+    payment_status = "pending"
+    if order.status in ["in_transit", "pending_delivery", "delivered"]:
+        payment_status = "paid"
+    elif order.status == "cancelled":
+        payment_status = "failed"
+    
+    # Determinar pay_on_delivery
+    pay_on_delivery = (order.payment_method == "cash" or order.payment_method == "transfer") and payment_status == "pending"
+    
+    # Usar receipt_number pre-cargado o UUID de la orden
+    order_number = receipt_number if receipt_number else str(order.id)
+    
+    return {
+        'id': str(order.id),
+        'user_id': str(order.user_id),
+        'order_number': order_number,
+        'status': order.status,
+        'payment_method': order.payment_method or 'card',
+        'payment_status': payment_status,
+        'payment_processed': order.payment_processed if hasattr(order, 'payment_processed') else False,
+        'pay_on_delivery': pay_on_delivery,
+        'total_amount': float(order.total) if order.total else 0.0,
+        'shipping_address': shipping_address,
+        'items': items or [],
+        'tracking_number': None,  # Por ahora None, se puede agregar después
+        'tracking_url': None,  # Por ahora None, se puede agregar después
+        'created_at': order.created_at.isoformat() if order.created_at else None,
+        'updated_at': order.created_at.isoformat() if order.created_at else None  # Por ahora usamos created_at
+    }
+
 def order_to_dict(order):
     """
     Convierte una orden del modelo a el formato esperado por el frontend
+    Versión no optimizada para uso individual (mantener compatibilidad)
     """
     from sqlalchemy import text
     
     # Obtener la dirección de envío (si existe)
     shipping_address = None
-    # Por ahora, obtenemos la primera dirección del usuario como dirección de envío
-    # En el futuro, esto debería venir de una tabla order_addresses o similar
     address = Address.query.filter_by(user_id=order.user_id).first()
     if address:
         shipping_address = address.to_dict()
     
     # Obtener items de la orden
-    # Por ahora, como no hay tabla order_items, retornamos un array vacío
-    # En el futuro, esto debería venir de una tabla order_items
     items = []
+    try:
+        from models.order_item import OrderItem
+        order_items = OrderItem.query.filter_by(order_id=order.id).all()
+        for item in order_items:
+            product = Product.query.get(item.product_id)
+            product_name = product.name if product else "Producto"
+            product_image = None
+            if product:
+                variant = ProductVariant.query.filter_by(product_id=product.id).first()
+                if variant:
+                    option = ProductVariantOption.query.filter_by(product_variant_id=variant.id).first()
+                    if option and hasattr(option, 'image_url') and option.image_url:
+                        product_image = option.image_url
+                    elif hasattr(variant, 'image_url') and variant.image_url:
+                        product_image = variant.image_url
+                if not product_image and hasattr(product, 'image_url') and product.image_url:
+                    product_image = product.image_url
+            
+            items.append({
+                'id': str(item.id),
+                'product_id': str(item.product_id),
+                'product_name': product_name,
+                'product_image': product_image,
+                'quantity': item.quantity,
+                'unit_price': float(item.unit_price) if item.unit_price else 0.0,
+                'total_price': float(item.unit_price * item.quantity) if item.unit_price else 0.0,
+            })
+    except Exception:
+        pass
     
     # Determinar payment_status basado en el status de la orden
     payment_status = "pending"
@@ -563,7 +730,7 @@ def order_to_dict(order):
         payment_status = "failed"
     
     # Determinar pay_on_delivery
-    pay_on_delivery = order.payment_method == "cash" and payment_status == "pending"
+    pay_on_delivery = (order.payment_method == "cash" or order.payment_method == "transfer") and payment_status == "pending"
     
     # Obtener receipt_number desde crm_orders usando crm_order_id
     order_number = None
@@ -583,9 +750,9 @@ def order_to_dict(order):
         except Exception:
             pass
     
-    # Si no se encontró receipt_number, usar valor por defecto
+    # Si no se encontró receipt_number, usar UUID de la orden
     if not order_number:
-        order_number = f"ORD-{order.created_at.strftime('%Y')}-{str(order.id)[:8].upper()}"
+        order_number = str(order.id)
     
     return {
         'id': str(order.id),
@@ -1329,9 +1496,9 @@ def create_order():
                     except Exception as receipt_error:
                         print(f"[DEBUG] Error al obtener receipt_number: {str(receipt_error)}")
                 
-                # Si no se encontró receipt_number, usar valor por defecto
+                # Si no se encontró receipt_number, usar UUID de la orden
                 if not order_number:
-                    order_number = f"ORD-{order.created_at.strftime('%Y')}-{str(order.id)[:8].upper()}"
+                    order_number = str(order.id)
                 
                 # Obtener información del usuario
                 user_email = user.email
@@ -1404,9 +1571,9 @@ def create_order():
                                 except Exception as receipt_error:
                                     print(f"[DEBUG] Error al obtener receipt_number: {str(receipt_error)}")
                             
-                            # Si no se encontró receipt_number, usar valor por defecto
+                            # Si no se encontró receipt_number, usar UUID de la orden
                             if not order_number:
-                                order_number = f"ORD-{existing_order.created_at.strftime('%Y')}-{str(existing_order.id)[:8].upper()}"
+                                order_number = str(existing_order.id)
                             
                             # Obtener información del usuario
                             user_email = user.email

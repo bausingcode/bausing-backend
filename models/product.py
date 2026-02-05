@@ -271,6 +271,8 @@ class Product(db.Model):
             except:
                 pass
             
+            print(f"[DEBUG] Buscando promos para producto {self.id}, category_id: {self.category_id}")
+            
             promo_applicabilities = PromoApplicability.query.filter(
                 db.or_(
                     PromoApplicability.applies_to == 'all',
@@ -285,11 +287,22 @@ class Product(db.Model):
                 )
             ).all()
             
+            print(f"[DEBUG] Encontradas {len(promo_applicabilities)} promo_applicabilities para producto {self.id}")
+            
             for app in promo_applicabilities:
                 promo = Promo.query.get(app.promo_id)
-                if promo and promo.is_valid():
-                    applicable_promos.append(promo.to_dict())
+                if promo:
+                    is_valid = promo.is_valid()
+                    print(f"[DEBUG] Promo {promo.id} ({promo.type}): is_active={promo.is_active}, is_valid={is_valid}, start_at={promo.start_at}, end_at={promo.end_at}, now={now}")
+                    if is_valid:
+                        applicable_promos.append(promo.to_dict())
+                        print(f"[DEBUG] Promo {promo.id} agregada a applicable_promos")
+                    else:
+                        print(f"[DEBUG] Promo {promo.id} NO es válida (is_active={promo.is_active}, start_at={promo.start_at}, end_at={promo.end_at})")
+                else:
+                    print(f"[DEBUG] Promo con ID {app.promo_id} no encontrada")
             
+            print(f"[DEBUG] Total promos aplicables para producto {self.id}: {len(applicable_promos)}")
             data['promos'] = applicable_promos
         
         return data
