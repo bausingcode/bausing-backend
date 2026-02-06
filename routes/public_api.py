@@ -1656,8 +1656,14 @@ def crear_venta():
         
         from sqlalchemy import text
         from sqlalchemy.exc import IntegrityError
-        from datetime import datetime
+        from datetime import datetime, timezone, timedelta
         import re
+        
+        # Función helper para obtener la hora de Argentina (UTC-3)
+        def get_argentina_time():
+            """Retorna la fecha y hora actual en zona horaria de Argentina (UTC-3) como datetime naive"""
+            argentina_tz = timezone(timedelta(hours=-3))
+            return datetime.now(argentina_tz).replace(tzinfo=None)
         
         # ========================================================================
         # VALIDACIONES DE CAMPOS REQUERIDOS
@@ -2008,30 +2014,20 @@ def crear_venta():
             if data.get('cliente_direccion_mas_datos'):
                 cliente_direccion_completa += f", {data['cliente_direccion_mas_datos']}"
             
-            # Parsear fecha_detalle
-            fecha_detalle = datetime.strptime(data['fecha_detalle'], '%Y-%m-%d').date()
+            # Parsear fecha_detalle - debe venir en formato 'YYYY-MM-DD' desde orders.py
+            # Si no viene o está vacía, usar la fecha actual de Argentina
+            if data.get('fecha_detalle'):
+                try:
+                    fecha_detalle = datetime.strptime(data['fecha_detalle'], '%Y-%m-%d').date()
+                    print(f"[DEBUG crear_venta] fecha_detalle recibida: {fecha_detalle}")
+                except Exception as e:
+                    print(f"[DEBUG crear_venta] ⚠️ Error al parsear fecha_detalle '{data.get('fecha_detalle')}': {str(e)}, usando fecha actual de Argentina")
+                    fecha_detalle = get_argentina_time().date()
+            else:
+                print(f"[DEBUG crear_venta] ⚠️ fecha_detalle no recibida, usando fecha actual de Argentina")
+                fecha_detalle = get_argentina_time().date()
             
-            # Obtener el siguiente crm_order_id (usar secuencia o auto-incremental)
-            # Por ahora, obtenemos el máximo y sumamos 1
-            try:
-                db.session.rollback()
-            except:
-                pass
-            
-            try:
-                query_max_id = """
-                    SELECT COALESCE(MAX(crm_order_id), 0) + 1
-                    FROM crm_orders
-                """
-                result_max = db.session.execute(text(query_max_id))
-                nuevo_crm_order_id = result_max.scalar()
-            except Exception as e:
-                # Si falla obtener el crm_order_id, hacer rollback y retornar error
-                db.session.rollback()
-                return jsonify({
-                    "status": False,
-                    "message": f"Error al obtener el siguiente ID de orden: {str(e)}"
-                }), 400
+            print(f"[DEBUG crear_venta] fecha_detalle final: {fecha_detalle}")
             
             # Preparar datos para el campo raw (JSONB)
             raw_data = {
@@ -2044,10 +2040,259 @@ def crear_venta():
                 'created_from': 'web_externa'
             }
             
+            # ====================================================================
+            # LLAMAR AL ENDPOINT EXTERNO PRIMERO PARA OBTENER EL crm_order_id
+            # ====================================================================
+            external_response_info = None
+            external_venta_id = None  # ID que retorna el endpoint externo
+            external_numero_comprobante = None  # numero_comprobante que retorna el endpoint externo
+            
+            try:
+                # Enviar el payload original (misma estructura que recibimos) al endpoint externo
+                if not payload_original:
+                    print(f"Advertencia: No hay payload original para enviar al endpoint externo")
+                    external_response_info = {
+                        "success": False,
+                        "error": "No hay payload original para enviar",
+                        "status_code": None,
+                        "response": None
+                    }
+                else:
+                    # Construir payload para enviar al endpoint externo con solo los campos requeridos
+                    payload_externo = {
+                        "fecha_detalle": data.get('fecha_detalle'),
+                        "tipo_venta": data.get('tipo_venta'),
+                        "cliente_nombre": data.get('cliente_nombre'),
+                        "cliente_direccion": data.get('cliente_direccion'),
+                        "tipo_documento_cliente": data.get('tipo_documento_cliente'),
+                        "documento_cliente": data.get('documento_cliente', ''),
+                        "cliente_telefono": data.get('cliente_telefono'),
+                        "email_cliente": data.get('email_cliente'),
+                        "provincia_id": data.get('provincia_id'),
+                        "localidad": data.get('localidad'),
+                        "zona_id": data.get('zona_id')
+                    }
+                    
+                    # Normalizar el formato del CUIT si existe
+                    if payload_externo.get('tipo_documento_cliente') == 2 and payload_externo.get('documento_cliente'):
+                        documento = payload_externo.get('documento_cliente', '').strip()
+                        # Si el CUIT no tiene el formato correcto, intentar normalizarlo
+                        if documento and len(documento.replace('-', '').replace('.', '')) == 11:
+                            # Remover guiones y puntos existentes
+                            doc_limpio = documento.replace('-', '').replace('.', '')
+                            if doc_limpio.isdigit():
+                                # Formatear como XX-XXXXXXXX-X
+                                documento_formateado = f"{doc_limpio[:2]}-{doc_limpio[2:10]}-{doc_limpio[10:]}"
+                                payload_externo['documento_cliente'] = documento_formateado
+                                print(f"DEBUG: CUIT normalizado de '{documento}' a '{documento_formateado}'")
+                        
+                        # Validar el formato después de normalizar
+                        es_valido, mensaje_error, documento_formateado = validar_cuit(payload_externo['documento_cliente'])
+                        if not es_valido:
+                            print(f"ADVERTENCIA: CUIT aún inválido después de normalizar: {payload_externo['documento_cliente']}")
+                            print(f"Error: {mensaje_error}")
+                        elif documento_formateado:
+                            # Actualizar el payload con el CUIT formateado
+                            payload_externo['documento_cliente'] = documento_formateado
+                            print(f"[DEBUG sincronizar_datos] CUIT formateado en payload externo: '{documento_formateado}'")
+                    
+                    # Construir el array js con la estructura exacta esperada
+                    # IMPORTANTE: El campo "precio" en data['js'] ya es el precio TOTAL (precio unitario * cantidad)
+                    # según la documentación del endpoint externo
+                    js_array = []
+                    for renglon in data.get('js', []):
+                        if renglon.get('accion') == 'N':
+                            cantidad = float(renglon.get('cantidad_recibida', 0))
+                            # 'precio' ya es el precio TOTAL, no el unitario
+                            precio_total = float(renglon.get('precio', 0))
+                            unitario_sin_fpago = float(renglon.get('unitario_sin_fpago', 0))
+                            
+                            # Si unitario_sin_fpago no está presente, calcularlo dividiendo el total por la cantidad
+                            if unitario_sin_fpago <= 0 and cantidad > 0:
+                                unitario_sin_fpago = precio_total / cantidad
+                            
+                            js_item = {
+                                "id": None,
+                                "accion": "N",
+                                "item_id": renglon.get('item_id'),
+                                "cantidad_recibida": cantidad,
+                                "precio": precio_total,  # Precio TOTAL del producto (ya viene calculado)
+                                "unitario_sin_fpago": unitario_sin_fpago,
+                                "descripcion": renglon.get('descripcion', '')
+                            }
+                            js_array.append(js_item)
+                    payload_externo["js"] = js_array
+                    
+                    # Construir el array formaPagos con la estructura exacta esperada
+                    forma_pagos_array = []
+                    for pago in data.get('formaPagos', []):
+                        forma_pago_item = {
+                            "medios_pago_id": pago.get('medios_pago_id'),
+                            "monto_total": float(pago.get('monto_total', 0)),
+                            "procesado": bool(pago.get('procesado', False))
+                        }
+                        forma_pagos_array.append(forma_pago_item)
+                    payload_externo["formaPagos"] = forma_pagos_array
+                    
+                    # Agregar el total calculado (el endpoint externo no calcula, necesita recibirlo)
+                    payload_externo["total"] = total_venta
+                    
+                    # Token de autorización
+                    external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
+                    
+                    # URL del endpoint externo
+                    external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
+                    
+                    # Headers
+                    headers = {
+                        "Authorization": f"Bearer {external_token}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    print(f"DEBUG: Enviando venta al endpoint externo...")
+                    print(f"DEBUG: URL: {external_url}")
+                    print(f"DEBUG: Payload keys: {list(payload_externo.keys())}")
+                    if payload_externo.get('documento_cliente'):
+                        print(f"DEBUG: documento_cliente: {payload_externo.get('documento_cliente')}")
+                    
+                    # Debug: Verificar items y totales
+                    if payload_externo.get('js'):
+                        # IMPORTANTE: 'precio' ya es el precio TOTAL (precio unitario * cantidad)
+                        total_calculado = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
+                        print(f"DEBUG: Total calculado de items (suma de precios totales): {total_calculado}")
+                        print(f"DEBUG: Items enviados: {json.dumps(payload_externo['js'], indent=2, default=str)}")
+                    if payload_externo.get('formaPagos'):
+                        total_pagos = sum(float(pago.get('monto_total', 0)) for pago in payload_externo['formaPagos'])
+                        print(f"DEBUG: Total de pagos: {total_pagos}")
+                        print(f"DEBUG: FormaPagos enviados: {json.dumps(payload_externo['formaPagos'], indent=2, default=str)}")
+                    
+                    # Hacer la llamada POST con el payload preparado
+                    response = requests.post(
+                        external_url,
+                        json=payload_externo,
+                        headers=headers,
+                        timeout=30  # Timeout de 30 segundos
+                    )
+                    
+                    # Capturar información de la respuesta
+                    response_text = None
+                    response_json = None
+                    try:
+                        response_text = response.text
+                        try:
+                            response_json = response.json()
+                        except:
+                            pass
+                    except:
+                        pass
+                    
+                    external_response_info = {
+                        "success": response.status_code in [200, 201],
+                        "status_code": response.status_code,
+                        "response_text": response_text,
+                        "response_json": response_json,
+                        "headers": dict(response.headers) if hasattr(response, 'headers') else None
+                    }
+                    
+                    # Verificar el código de respuesta
+                    if response.status_code not in [200, 201]:
+                        print(f"Advertencia: El endpoint externo retornó código {response.status_code}")
+                        print(f"Respuesta completa: {response_text}")
+                    else:
+                        print(f"Éxito: Venta enviada al endpoint externo correctamente")
+                        print(f"Respuesta completa: {response_text}")
+                        
+                        # Extraer el venta_id y numero_comprobante de la respuesta del endpoint externo
+                        if response_json:
+                            print(f"[DEBUG crear_venta] response_json recibido: {json.dumps(response_json, indent=2, default=str)}")
+                            
+                            # Intentar obtener venta_id desde el root del JSON
+                            external_venta_id = response_json.get('venta_id')
+                            
+                            # Si no está en el root, intentar desde data
+                            if not external_venta_id and 'data' in response_json:
+                                external_venta_id = response_json.get('data', {}).get('venta_id') or response_json.get('data', {}).get('crm_order_id')
+                            
+                            # Extraer numero_comprobante desde el root del JSON
+                            external_numero_comprobante = response_json.get('numero_comprobante')
+                            print(f"[DEBUG crear_venta] numero_comprobante extraído del root: {external_numero_comprobante}")
+                            
+                            # Si no está en el root, intentar desde data
+                            if not external_numero_comprobante and 'data' in response_json:
+                                external_numero_comprobante = response_json.get('data', {}).get('numero_comprobante')
+                                print(f"[DEBUG crear_venta] numero_comprobante extraído de data: {external_numero_comprobante}")
+                            
+                            if external_venta_id:
+                                print(f"INFO: El endpoint externo retornó venta_id: {external_venta_id}")
+                                if external_numero_comprobante:
+                                    print(f"INFO: El endpoint externo retornó numero_comprobante: {external_numero_comprobante}")
+                                else:
+                                    print(f"ADVERTENCIA: No se pudo extraer numero_comprobante de la respuesta del endpoint externo")
+                                    print(f"[DEBUG crear_venta] Claves disponibles en response_json: {list(response_json.keys())}")
+                            else:
+                                print(f"ADVERTENCIA: No se pudo extraer venta_id de la respuesta del endpoint externo")
+                                print(f"Respuesta JSON completa: {response_json}")
+                        
+            except requests.exceptions.RequestException as req_error:
+                # Error de conexión o timeout
+                import traceback
+                error_traceback = traceback.format_exc()
+                print(f"Advertencia: Error al llamar al endpoint externo: {str(req_error)}")
+                print(error_traceback)
+                external_response_info = {
+                    "success": False,
+                    "error": str(req_error),
+                    "error_type": type(req_error).__name__,
+                    "status_code": None,
+                    "response": None,
+                    "traceback": error_traceback
+                }
+            except Exception as ext_error:
+                # Cualquier otro error
+                import traceback
+                error_traceback = traceback.format_exc()
+                print(f"Advertencia: Error inesperado al llamar al endpoint externo: {str(ext_error)}")
+                print(error_traceback)
+                external_response_info = {
+                    "success": False,
+                    "error": str(ext_error),
+                    "error_type": type(ext_error).__name__,
+                    "status_code": None,
+                    "response": None,
+                    "traceback": error_traceback
+                }
+            
+            # Si el endpoint externo no retornó un venta_id, retornar error
+            if not external_venta_id:
+                error_msg = "No se pudo obtener el ID de venta del endpoint externo"
+                if external_response_info and external_response_info.get('error'):
+                    error_msg = f"{error_msg}: {external_response_info.get('error')}"
+                return jsonify({
+                    "status": False,
+                    "message": error_msg,
+                    "data": {
+                        "external_api": external_response_info
+                    }
+                }), 400
+            
+            # Usar el venta_id del endpoint externo como crm_order_id
+            crm_order_id = external_venta_id
+            print(f"[DEBUG crear_venta] ✅ Usando crm_order_id={crm_order_id} del endpoint externo")
+            
+            # Usar el numero_comprobante del endpoint externo si está disponible, sino usar el calculado localmente
+            numero_comprobante_anterior = numero_comprobante  # Guardar el valor anterior para el log
+            if external_numero_comprobante:
+                numero_comprobante = external_numero_comprobante
+                print(f"[DEBUG crear_venta] ✅ Usando numero_comprobante={numero_comprobante} del endpoint externo (valor anterior era: {numero_comprobante_anterior})")
+            else:
+                print(f"[DEBUG crear_venta] ⚠️ No se recibió numero_comprobante del endpoint externo, usando el calculado localmente: {numero_comprobante}")
+                print(f"[DEBUG crear_venta] external_numero_comprobante es: {external_numero_comprobante}")
+            
             # Generar UUID para el campo id
             nuevo_uuid = uuid.uuid4()
             
-            # Insertar en crm_orders
+            # Insertar en crm_orders usando el crm_order_id del endpoint externo
+            # Si ya existe, actualizar el registro existente
             insert_order = """
                 INSERT INTO crm_orders (
                     id, crm_order_id, receipt_number, detail_date, crm_seller_id,
@@ -2064,14 +2309,39 @@ def crear_venta():
                     :crm_doc_type_id, :crm_province_id, :city,
                     :crm_zone_id, 'pendiente de entrega', :total_sale, :total_with_payment,
                     false, NULL,
-                    NOW(), NOW(), CAST(:raw AS jsonb)
-                ) RETURNING crm_order_id
+                    :crm_created_at, :crm_updated_at, CAST(:raw AS jsonb)
+                )
+                ON CONFLICT (crm_order_id) 
+                DO UPDATE SET
+                    receipt_number = EXCLUDED.receipt_number,
+                    detail_date = EXCLUDED.detail_date,
+                    crm_seller_id = EXCLUDED.crm_seller_id,
+                    crm_sale_type_id = EXCLUDED.crm_sale_type_id,
+                    client_name = EXCLUDED.client_name,
+                    client_address = EXCLUDED.client_address,
+                    client_phone = EXCLUDED.client_phone,
+                    client_email = EXCLUDED.client_email,
+                    client_document = EXCLUDED.client_document,
+                    crm_doc_type_id = EXCLUDED.crm_doc_type_id,
+                    crm_province_id = EXCLUDED.crm_province_id,
+                    city = EXCLUDED.city,
+                    crm_zone_id = EXCLUDED.crm_zone_id,
+                    status = EXCLUDED.status,
+                    total_sale = EXCLUDED.total_sale,
+                    total_with_payment = EXCLUDED.total_with_payment,
+                    is_cancelled = EXCLUDED.is_cancelled,
+                    crm_updated_at = EXCLUDED.crm_updated_at,
+                    raw = EXCLUDED.raw
+                RETURNING crm_order_id
             """
             
             try:
+                # Obtener hora de Argentina para crm_created_at y crm_updated_at
+                now_argentina = get_argentina_time()
+                
                 insert_params = {
                     'id': str(nuevo_uuid),
-                    'crm_order_id': nuevo_crm_order_id,
+                    'crm_order_id': crm_order_id,
                     'receipt_number': numero_comprobante,
                     'detail_date': fecha_detalle,
                     'crm_seller_id': vendedor_id,
@@ -2087,10 +2357,13 @@ def crear_venta():
                     'crm_zone_id': zona_id,
                     'total_sale': total_venta,
                     'total_with_payment': total_pagos,
+                    'crm_created_at': now_argentina,
+                    'crm_updated_at': now_argentina,
                     'raw': json.dumps(raw_data)
                 }
                 
-                print(f"[DEBUG crear_venta] Insertando en crm_orders con parámetros: {json.dumps({k: v for k, v in insert_params.items() if k != 'raw'}, indent=2, default=str)}")
+                print(f"[DEBUG crear_venta] Insertando/actualizando en crm_orders con parámetros: {json.dumps({k: v for k, v in insert_params.items() if k != 'raw'}, indent=2, default=str)}")
+                print(f"[DEBUG crear_venta] 🔍 VALOR DE receipt_number ANTES DEL INSERT: {insert_params.get('receipt_number')}")
                 
                 result_order = db.session.execute(
                     text(insert_order),
@@ -2098,14 +2371,28 @@ def crear_venta():
                 )
                 
                 crm_order_id = result_order.fetchone()[0]
-                print(f"[DEBUG crear_venta] ✅ Registro insertado en crm_orders con crm_order_id={crm_order_id}")
+                print(f"[DEBUG crear_venta] ✅ Registro insertado/actualizado en crm_orders con crm_order_id={crm_order_id}")
                 print(f"[DEBUG crear_venta] Parámetros insertados: client_name={insert_params.get('client_name')}, client_email={insert_params.get('client_email')}, client_address={insert_params.get('client_address')}, client_phone={insert_params.get('client_phone')}, crm_zone_id={insert_params.get('crm_zone_id')}, crm_province_id={insert_params.get('crm_province_id')}, city={insert_params.get('city')}, total_sale={insert_params.get('total_sale')}, crm_sale_type_id={insert_params.get('crm_sale_type_id')}, client_document={insert_params.get('client_document')}, crm_doc_type_id={insert_params.get('crm_doc_type_id')}, receipt_number={insert_params.get('receipt_number')}")
             except Exception as e:
                 # Si falla el INSERT de crm_orders, hacer rollback y retornar error
                 db.session.rollback()
                 error_msg = str(e)
+                # Verificar si es un error de unique constraint (aunque debería ser manejado por ON CONFLICT)
+                if 'UniqueViolation' in error_msg or 'duplicate key' in error_msg.lower():
+                    print(f"[DEBUG crear_venta] ⚠️ Error de clave duplicada (debería ser manejado por ON CONFLICT): {error_msg}")
+                    # Si aún así ocurre un error de duplicado para crm_order_id, el registro ya existe
+                    # y podemos continuar con el flujo usando el crm_order_id existente
+                    if 'crm_order_id' in error_msg:
+                        print(f"[DEBUG crear_venta] ✅ Orden con crm_order_id={crm_order_id} ya existe, continuando con el flujo...")
+                        # Continuar con el flujo - no hacer raise
+                    else:
+                        # Es un error de duplicado en otro campo, retornar error
+                        return jsonify({
+                            "status": False,
+                            "message": f"Error de clave duplicada: {error_msg}"
+                        }), 400
                 # Verificar si es un error de foreign key para dar mensaje más específico
-                if 'ForeignKeyViolation' in error_msg or 'foreign key' in error_msg.lower():
+                elif 'ForeignKeyViolation' in error_msg or 'foreign key' in error_msg.lower():
                     if 'crm_province' in error_msg:
                         return jsonify({
                             "status": False,
@@ -2126,9 +2413,16 @@ def crear_venta():
                             "status": False,
                             "message": f"La zona con ID {zona_id} no existe en el CRM"
                         }), 400
-                
-                # Error genérico
-                raise
+                    else:
+                        # Error de foreign key genérico
+                        return jsonify({
+                            "status": False,
+                            "message": f"Error de referencia: {error_msg}"
+                        }), 400
+                else:
+                    # Error genérico
+                    print(f"[DEBUG crear_venta] ⚠️ Error inesperado al insertar/actualizar crm_orders: {error_msg}")
+                    raise
             
             # ====================================================================
             # CREAR RENGLONES (CRM_ORDER_ITEMS)
@@ -2412,6 +2706,20 @@ def crear_venta():
             db.session.commit()
             print(f"[DEBUG crear_venta] ✅ Commit exitoso. crm_order_id={crm_order_id}")
             
+            # Verificar que el receipt_number se guardó correctamente
+            verify_query = text("SELECT receipt_number FROM crm_orders WHERE crm_order_id = :crm_order_id")
+            verify_result = db.session.execute(verify_query, {'crm_order_id': crm_order_id})
+            verify_row = verify_result.fetchone()
+            if verify_row:
+                saved_receipt_number = verify_row[0]
+                print(f"[DEBUG crear_venta] 🔍 VERIFICACIÓN POST-COMMIT: receipt_number guardado en BD: {saved_receipt_number}")
+                if saved_receipt_number != numero_comprobante:
+                    print(f"[DEBUG crear_venta] ⚠️ ADVERTENCIA: El receipt_number guardado ({saved_receipt_number}) no coincide con el esperado ({numero_comprobante})")
+                else:
+                    print(f"[DEBUG crear_venta] ✅ El receipt_number se guardó correctamente: {saved_receipt_number}")
+            else:
+                print(f"[DEBUG crear_venta] ⚠️ ADVERTENCIA: No se encontró el registro en crm_orders después del commit")
+            
             # Verificar que los datos se guardaron correctamente
             try:
                 verify_query = text("""
@@ -2424,282 +2732,27 @@ def crear_venta():
                 verify_result = db.session.execute(verify_query, {'crm_order_id': crm_order_id})
                 verify_row = verify_result.fetchone()
                 if verify_row:
-                    print(f"[DEBUG crear_venta] ✅ Verificación post-commit: client_name={verify_row[0]}, client_email={verify_row[1]}, client_address={verify_row[2]}, client_phone={verify_row[3]}, crm_zone_id={verify_row[4]}, crm_province_id={verify_row[5]}, city={verify_row[6]}, total_sale={verify_row[7]}, crm_sale_type_id={verify_row[8]}")
+                    print(f"[DEBUG crear_venta] ✅ Verificación post-commit: client_name={verify_row[0]}, client_email={verify_row[1]}, client_address={verify_row[2]}, client_phone={verify_row[3]}, crm_zone_id={verify_row[4]}, crm_province_id={verify_row[5]}, city={verify_row[6]}, total_sale={verify_row[7]}, crm_sale_type_id={verify_row[8]}, receipt_number={verify_row[11]}")
                 else:
                     print(f"[DEBUG crear_venta] ⚠️ No se encontró registro después del commit con crm_order_id={crm_order_id}")
             except Exception as verify_error:
                 print(f"[DEBUG crear_venta] Error al verificar después del commit: {str(verify_error)}")
             
-            # ====================================================================
-            # LLAMAR A SYNC_CRM_VENTAS
-            # ====================================================================
-            try:
-                # Construir el JSON para sync_crm_ventas
-                # La función espera el formato estándar de sincronización
-                sync_data = {
-                    "tipo": "ventas",
-                    "datos": [{
-                        "id": crm_order_id,
-                        "estado": "pendiente de entrega",
-                        # Agregar otros campos necesarios si la función los requiere
-                    }],
-                    "status": True,
-                    "filtros": {},
-                    "sincronizar": {
-                        "accion": "create",
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                }
-                
-                from sqlalchemy.dialects.postgresql import JSONB
-                from sqlalchemy import bindparam
-                
-                # Llamar a sync_crm_ventas
-                result_sync = db.session.execute(
-                    text("SELECT * FROM sync_crm_ventas(:json_data)").bindparams(
-                        bindparam('json_data', type_=JSONB)
-                    ),
-                    {"json_data": sync_data}
-                )
-                
-                # Procesar resultados si es necesario
-                rows_sync = result_sync.fetchall()
-                
-                # Commit de la sincronización
-                db.session.commit()
-                
-            except Exception as sync_error:
-                # Si falla la sincronización, hacer rollback y continuar
-                # La venta ya está creada, así que hacemos rollback del sync y continuamos
-                db.session.rollback()
-                # Re-hacer commit de la venta si es necesario
-                # Por ahora solo registramos el error pero no fallamos la creación
-                import traceback
-                print(f"Advertencia: Error al sincronizar venta después de crear: {str(sync_error)}")
-                print(traceback.format_exc())
+            # NOTA: No llamamos a sync_crm_ventas aquí porque los datos ya fueron
+            # insertados directamente en crm_orders. Llamar a sync_crm_ventas con datos
+            # mínimos (solo id y estado) sobreescribía la fila y borraba campos como
+            # receipt_number, client_name, etc.
             
             # ====================================================================
-            # LLAMAR AL ENDPOINT EXTERNO PARA CREAR LA VENTA
+            # PREPARAR RESPUESTA Y MANEJAR ERRORES
             # ====================================================================
-            external_response_info = None
-            external_venta_id = None  # ID que retorna el endpoint externo
-            
-            try:
-                # Enviar el payload original (misma estructura que recibimos) al endpoint externo
-                if not payload_original:
-                    print(f"Advertencia: No hay payload original para enviar al endpoint externo")
-                    external_response_info = {
-                        "success": False,
-                        "error": "No hay payload original para enviar",
-                        "status_code": None,
-                        "response": None
-                    }
-                else:
-                    # Construir payload para enviar al endpoint externo con solo los campos requeridos
-                    payload_externo = {
-                        "fecha_detalle": data.get('fecha_detalle'),
-                        "tipo_venta": data.get('tipo_venta'),
-                        "cliente_nombre": data.get('cliente_nombre'),
-                        "cliente_direccion": data.get('cliente_direccion'),
-                        "tipo_documento_cliente": data.get('tipo_documento_cliente'),
-                        "documento_cliente": data.get('documento_cliente', ''),
-                        "cliente_telefono": data.get('cliente_telefono'),
-                        "email_cliente": data.get('email_cliente'),
-                        "provincia_id": data.get('provincia_id'),
-                        "localidad": data.get('localidad'),
-                        "zona_id": data.get('zona_id')
-                    }
-                    
-                    # Normalizar el formato del CUIT si existe
-                    if payload_externo.get('tipo_documento_cliente') == 2 and payload_externo.get('documento_cliente'):
-                        documento = payload_externo.get('documento_cliente', '').strip()
-                        # Si el CUIT no tiene el formato correcto, intentar normalizarlo
-                        if documento and len(documento.replace('-', '').replace('.', '')) == 11:
-                            # Remover guiones y puntos existentes
-                            doc_limpio = documento.replace('-', '').replace('.', '')
-                            if doc_limpio.isdigit():
-                                # Formatear como XX-XXXXXXXX-X
-                                documento_formateado = f"{doc_limpio[:2]}-{doc_limpio[2:10]}-{doc_limpio[10:]}"
-                                payload_externo['documento_cliente'] = documento_formateado
-                                print(f"DEBUG: CUIT normalizado de '{documento}' a '{documento_formateado}'")
-                        
-                        # Validar el formato después de normalizar
-                        es_valido, mensaje_error, documento_formateado = validar_cuit(payload_externo['documento_cliente'])
-                        if not es_valido:
-                            print(f"ADVERTENCIA: CUIT aún inválido después de normalizar: {payload_externo['documento_cliente']}")
-                            print(f"Error: {mensaje_error}")
-                        elif documento_formateado:
-                            # Actualizar el payload con el CUIT formateado
-                            payload_externo['documento_cliente'] = documento_formateado
-                            print(f"[DEBUG sincronizar_datos] CUIT formateado en payload externo: '{documento_formateado}'")
-                    
-                    # Construir el array js con la estructura exacta esperada
-                    # IMPORTANTE: El campo "precio" en data['js'] ya es el precio TOTAL (precio unitario * cantidad)
-                    # según la documentación del endpoint externo
-                    js_array = []
-                    for renglon in data.get('js', []):
-                        if renglon.get('accion') == 'N':
-                            cantidad = float(renglon.get('cantidad_recibida', 0))
-                            # 'precio' ya es el precio TOTAL, no el unitario
-                            precio_total = float(renglon.get('precio', 0))
-                            unitario_sin_fpago = float(renglon.get('unitario_sin_fpago', 0))
-                            
-                            # Si unitario_sin_fpago no está presente, calcularlo dividiendo el total por la cantidad
-                            if unitario_sin_fpago <= 0 and cantidad > 0:
-                                unitario_sin_fpago = precio_total / cantidad
-                            
-                            js_item = {
-                                "id": None,
-                                "accion": "N",
-                                "item_id": renglon.get('item_id'),
-                                "cantidad_recibida": cantidad,
-                                "precio": precio_total,  # Precio TOTAL del producto (ya viene calculado)
-                                "unitario_sin_fpago": unitario_sin_fpago,
-                                "descripcion": renglon.get('descripcion', '')
-                            }
-                            js_array.append(js_item)
-                    payload_externo["js"] = js_array
-                    
-                    # Construir el array formaPagos con la estructura exacta esperada
-                    forma_pagos_array = []
-                    for pago in data.get('formaPagos', []):
-                        forma_pago_item = {
-                            "medios_pago_id": pago.get('medios_pago_id'),
-                            "monto_total": float(pago.get('monto_total', 0)),
-                            "procesado": bool(pago.get('procesado', False))
-                        }
-                        forma_pagos_array.append(forma_pago_item)
-                    payload_externo["formaPagos"] = forma_pagos_array
-                    
-                    # Agregar el total calculado (el endpoint externo no calcula, necesita recibirlo)
-                    payload_externo["total"] = total_venta
-                    
-                    # Token de autorización
-                    external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
-                    
-                    # URL del endpoint externo
-                    external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
-                    
-                    # Headers
-                    headers = {
-                        "Authorization": f"Bearer {external_token}",
-                        "Content-Type": "application/json"
-                    }
-                    
-                    print(f"DEBUG: Enviando venta al endpoint externo...")
-                    print(f"DEBUG: URL: {external_url}")
-                    print(f"DEBUG: Payload keys: {list(payload_externo.keys())}")
-                    if payload_externo.get('documento_cliente'):
-                        print(f"DEBUG: documento_cliente: {payload_externo.get('documento_cliente')}")
-                    
-                    # Debug: Verificar items y totales
-                    if payload_externo.get('js'):
-                        # IMPORTANTE: 'precio' ya es el precio TOTAL (precio unitario * cantidad)
-                        total_calculado = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
-                        print(f"DEBUG: Total calculado de items (suma de precios totales): {total_calculado}")
-                        print(f"DEBUG: Items enviados: {json.dumps(payload_externo['js'], indent=2, default=str)}")
-                    if payload_externo.get('formaPagos'):
-                        total_pagos = sum(float(pago.get('monto_total', 0)) for pago in payload_externo['formaPagos'])
-                        print(f"DEBUG: Total de pagos: {total_pagos}")
-                        print(f"DEBUG: FormaPagos enviados: {json.dumps(payload_externo['formaPagos'], indent=2, default=str)}")
-                    
-                    # Hacer la llamada POST con el payload preparado
-                    response = requests.post(
-                        external_url,
-                        json=payload_externo,
-                        headers=headers,
-                        timeout=30  # Timeout de 30 segundos
-                    )
-                    
-                    # Capturar información de la respuesta
-                    response_text = None
-                    response_json = None
-                    try:
-                        response_text = response.text
-                        try:
-                            response_json = response.json()
-                        except:
-                            pass
-                    except:
-                        pass
-                    
-                    external_response_info = {
-                        "success": response.status_code in [200, 201],
-                        "status_code": response.status_code,
-                        "response_text": response_text,
-                        "response_json": response_json,
-                        "headers": dict(response.headers) if hasattr(response, 'headers') else None
-                    }
-                    
-                    # Verificar el código de respuesta
-                    if response.status_code not in [200, 201]:
-                        print(f"Advertencia: El endpoint externo retornó código {response.status_code}")
-                        print(f"Respuesta completa: {response_text}")
-                    else:
-                        print(f"Éxito: Venta enviada al endpoint externo correctamente")
-                        print(f"Respuesta completa: {response_text}")
-                        
-                        # Extraer el venta_id de la respuesta del endpoint externo
-                        # Según la documentación, la respuesta tiene esta estructura:
-                        # {
-                        #   "status": true,
-                        #   "message": "Venta creada exitosamente",
-                        #   "venta_id": 12345,
-                        #   "numero_comprobante": "R-0001-000000123",
-                        #   "timestamp": "2024-01-15 10:30:00"
-                        # }
-                        if response_json:
-                            # Intentar obtener venta_id desde el root del JSON
-                            external_venta_id = response_json.get('venta_id')
-                            
-                            # Si no está en el root, intentar desde data
-                            if not external_venta_id and 'data' in response_json:
-                                external_venta_id = response_json.get('data', {}).get('venta_id') or response_json.get('data', {}).get('crm_order_id')
-                            
-                            if external_venta_id:
-                                print(f"INFO: El endpoint externo retornó venta_id: {external_venta_id}")
-                            else:
-                                print(f"ADVERTENCIA: No se pudo extraer venta_id de la respuesta del endpoint externo")
-                                print(f"Respuesta JSON completa: {response_json}")
-                        
-            except requests.exceptions.RequestException as req_error:
-                # Error de conexión o timeout
-                import traceback
-                error_traceback = traceback.format_exc()
-                print(f"Advertencia: Error al llamar al endpoint externo: {str(req_error)}")
-                print(error_traceback)
-                external_response_info = {
-                    "success": False,
-                    "error": str(req_error),
-                    "error_type": type(req_error).__name__,
-                    "status_code": None,
-                    "response": None,
-                    "traceback": error_traceback
-                }
-            except Exception as ext_error:
-                # Cualquier otro error
-                import traceback
-                error_traceback = traceback.format_exc()
-                print(f"Advertencia: Error inesperado al llamar al endpoint externo: {str(ext_error)}")
-                print(error_traceback)
-                external_response_info = {
-                    "success": False,
-                    "error": str(ext_error),
-                    "error_type": type(ext_error).__name__,
-                    "status_code": None,
-                    "response": None,
-                    "traceback": error_traceback
-                }
-            
-            # Retornar respuesta exitosa incluyendo información del endpoint externo
-            # Usar el venta_id del endpoint externo si está disponible, sino el crm_order_id local
-            venta_id_final = external_venta_id if external_venta_id else crm_order_id
-            
-            # Si el endpoint externo falló, incluir mensaje de advertencia
+            # El endpoint externo ya fue llamado al principio, ahora solo manejamos la respuesta
             mensaje_respuesta = "Venta creada exitosamente"
             endpoint_externo_fallo = False
             mensaje_error_externo = None
             es_error_stock = False  # Flag para detectar error de stock
+            
+            # Verificar si hubo errores en la llamada al endpoint externo
             if external_response_info and not external_response_info.get('success'):
                 response_json = external_response_info.get('response_json')
                 if isinstance(response_json, dict):
@@ -2714,83 +2767,9 @@ def crear_venta():
                     mensaje_respuesta = f"Venta creada localmente, pero falló en endpoint externo: {mensaje_error_externo}"
                     endpoint_externo_fallo = True
             
-            # Si es error de stock, eliminar la venta creada localmente y retornar error
-            # IMPORTANTE: Esto debe hacerse ANTES de crear la orden en la tabla orders
+            # Si es error de stock, retornar error sin crear nada (el endpoint externo ya fue llamado)
             if es_error_stock:
-                try:
-                    # Primero eliminar TODAS las órdenes de la tabla orders que tengan este crm_order_id (y sus items)
-                    # Esto debe hacerse antes de eliminar crm_orders por la foreign key constraint
-                    if crm_order_id:
-                        from models.order import Order
-                        from models.order_item import OrderItem
-                        
-                        # Buscar TODAS las órdenes con este crm_order_id (puede haber múltiples)
-                        orders_to_delete = Order.query.filter_by(crm_order_id=crm_order_id).all()
-                        for order_to_delete in orders_to_delete:
-                            # Eliminar los items de la orden primero
-                            OrderItem.query.filter_by(order_id=order_to_delete.id).delete()
-                            # Eliminar la orden
-                            db.session.delete(order_to_delete)
-                            print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, eliminada orden existente con id={order_to_delete.id}")
-                        
-                        # También verificar con venta_id_final por si acaso (puede ser diferente)
-                        if venta_id_final and venta_id_final != crm_order_id:
-                            orders_to_delete_final = Order.query.filter_by(crm_order_id=venta_id_final).all()
-                            for order_to_delete_final in orders_to_delete_final:
-                                OrderItem.query.filter_by(order_id=order_to_delete_final.id).delete()
-                                db.session.delete(order_to_delete_final)
-                                print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, eliminada orden existente con id={order_to_delete_final.id} (venta_id_final={venta_id_final})")
-                        
-                        # Hacer flush y commit de las eliminaciones de órdenes antes de eliminar crm_orders
-                        # Usar flush para asegurar que las eliminaciones se reflejen en la base de datos
-                        db.session.flush()
-                        db.session.commit()
-                        
-                        # Verificar que no queden órdenes con este crm_order_id antes de eliminar crm_orders
-                        remaining_orders = Order.query.filter_by(crm_order_id=crm_order_id).count()
-                        if remaining_orders > 0:
-                            print(f"[DEBUG crear_venta] ⚠️ ADVERTENCIA: Todavía hay {remaining_orders} órdenes con crm_order_id={crm_order_id}, eliminándolas...")
-                            remaining_orders_list = Order.query.filter_by(crm_order_id=crm_order_id).all()
-                            for remaining_order in remaining_orders_list:
-                                OrderItem.query.filter_by(order_id=remaining_order.id).delete()
-                                db.session.delete(remaining_order)
-                            db.session.flush()
-                            db.session.commit()
-                        
-                        # Ahora eliminar la venta creada localmente en crm_orders
-                        delete_query = text("""
-                            DELETE FROM crm_orders 
-                            WHERE crm_order_id = :crm_order_id
-                        """)
-                        db.session.execute(delete_query, {'crm_order_id': crm_order_id})
-                        db.session.commit()
-                        print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, eliminada venta local con crm_order_id={crm_order_id}")
-                    else:
-                        db.session.rollback()
-                        print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, haciendo rollback")
-                except Exception as delete_error:
-                    db.session.rollback()
-                    import traceback
-                    print(f"[DEBUG crear_venta] ⚠️ Error al eliminar venta local por error de stock: {str(delete_error)}")
-                    print(traceback.format_exc())
-                    # Intentar eliminar todas las órdenes si falla eliminar crm_orders
-                    try:
-                        if crm_order_id:
-                            from models.order import Order
-                            from models.order_item import OrderItem
-                            orders_to_delete = Order.query.filter_by(crm_order_id=crm_order_id).all()
-                            for order_to_delete in orders_to_delete:
-                                OrderItem.query.filter_by(order_id=order_to_delete.id).delete()
-                                db.session.delete(order_to_delete)
-                            if venta_id_final and venta_id_final != crm_order_id:
-                                orders_to_delete_final = Order.query.filter_by(crm_order_id=venta_id_final).all()
-                                for order_to_delete_final in orders_to_delete_final:
-                                    OrderItem.query.filter_by(order_id=order_to_delete_final.id).delete()
-                                    db.session.delete(order_to_delete_final)
-                            db.session.commit()
-                            print(f"[DEBUG crear_venta] ⚠️ Todas las órdenes eliminadas después de error al eliminar crm_orders")
-                    except Exception as cleanup_error:
-                        print(f"[DEBUG crear_venta] ⚠️ Error en limpieza de órdenes: {str(cleanup_error)}")
+                print(f"[DEBUG crear_venta] ⚠️ Error de stock detectado, no se creará la venta")
                 return jsonify({
                     "status": False,
                     "message": mensaje_error_externo,
@@ -2816,7 +2795,7 @@ def crear_venta():
                     used_wallet_amount = data.get('used_wallet_amount')
                     
                     # Verificar si ya existe una orden con este crm_order_id
-                    existing_order = Order.query.filter_by(crm_order_id=venta_id_final).first()
+                    existing_order = Order.query.filter_by(crm_order_id=crm_order_id).first()
                     if existing_order:
                         # Actualizar la orden existente
                         existing_order.user_id = user_id
@@ -2825,6 +2804,23 @@ def crear_venta():
                         existing_order.payment_processed = payment_processed
                         existing_order.crm_sale_type_id = data.get('tipo_venta')
                         existing_order.used_wallet_amount = float(used_wallet_amount) if used_wallet_amount else None
+                        
+                        # Si la orden tiene un created_at muy antiguo o parece estar en UTC (diferencia > 2 horas),
+                        # actualizarlo a la hora de Argentina
+                        from datetime import datetime, timezone, timedelta
+                        def get_argentina_time():
+                            argentina_tz = timezone(timedelta(hours=-3))
+                            return datetime.now(argentina_tz).replace(tzinfo=None)
+                        
+                        if existing_order.created_at:
+                            # Calcular diferencia entre created_at y ahora (en horas)
+                            now_argentina = get_argentina_time()
+                            time_diff = abs((now_argentina - existing_order.created_at).total_seconds() / 3600)
+                            # Si la diferencia es mayor a 2 horas, probablemente está en UTC, actualizar
+                            if time_diff > 2:
+                                existing_order.created_at = get_argentina_time()
+                                print(f"[DEBUG crear_venta] ⚠️ Actualizado created_at de orden existente (parecía estar en UTC)")
+                        
                         order = existing_order
                         order_id = str(order.id)
                         print(f"[DEBUG crear_venta] ✅ Orden existente actualizada con id={order_id}")
@@ -2832,7 +2828,7 @@ def crear_venta():
                         # Crear la orden
                         order = Order(
                             user_id=user_id,
-                            crm_order_id=venta_id_final,
+                            crm_order_id=crm_order_id,
                             crm_sale_type_id=data.get('tipo_venta'),
                             total=total_venta,
                             status='pending',
@@ -2843,7 +2839,7 @@ def crear_venta():
                         db.session.add(order)
                         db.session.flush()
                         order_id = str(order.id)
-                        print(f"[DEBUG crear_venta] ✅ Orden creada en tabla orders con id={order_id}")
+                        print(f"[DEBUG crear_venta] ✅ Orden creada en tabla orders con id={order_id} (antes de commit)")
                     
                     # Crear o actualizar los items de la orden
                     if data.get('order_items'):
@@ -2870,11 +2866,15 @@ def crear_venta():
                             db.session.add(order_item)
                     
                     db.session.commit()
+                    # Refrescar la orden después del commit para asegurar que todos los datos estén actualizados
+                    db.session.refresh(order)
+                    order_id = str(order.id)  # Asegurar que tenemos el ID correcto después del commit
+                    print(f"[DEBUG crear_venta] ✅ Orden guardada en BD con id={order_id}, total={order.total}, status={order.status}")
                 except IntegrityError as integrity_error:
                     db.session.rollback()
                     # Si es un error de duplicado, intentar obtener la orden existente
                     if 'crm_order_id' in str(integrity_error):
-                        existing_order = Order.query.filter_by(crm_order_id=venta_id_final).first()
+                        existing_order = Order.query.filter_by(crm_order_id=crm_order_id).first()
                         if existing_order:
                             order_id = str(existing_order.id)
                             print(f"[DEBUG crear_venta] ✅ Orden ya existía, usando orden con id={order_id}")
@@ -2959,7 +2959,7 @@ def crear_venta():
                     # No fallar la creación de la venta si falla el guardado en la cola de reintentos
             
             response_data = {
-                "crm_order_id": venta_id_final,
+                "crm_order_id": crm_order_id,
                 "numero_comprobante": numero_comprobante
             }
             

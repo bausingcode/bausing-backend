@@ -1,7 +1,12 @@
 from database import db
 from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import uuid
+
+def get_argentina_time():
+    """Retorna la fecha y hora actual en zona horaria de Argentina (UTC-3) como datetime naive"""
+    argentina_tz = timezone(timedelta(hours=-3))
+    return datetime.now(argentina_tz).replace(tzinfo=None)
 
 class Order(db.Model):
     """Modelo básico para la tabla orders (requerido para foreign keys)"""
@@ -17,7 +22,8 @@ class Order(db.Model):
     payment_method = db.Column(db.String(50), nullable=True)
     payment_processed = db.Column(db.Boolean, default=False, nullable=False)
     used_wallet_amount = db.Column(db.Numeric(10, 2), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Usar lambda para asegurar que se llame la función cada vez
+    created_at = db.Column(db.DateTime, default=lambda: get_argentina_time(), nullable=False)
 
     # Relación con User
     user = db.relationship('User', backref='orders', lazy=True)

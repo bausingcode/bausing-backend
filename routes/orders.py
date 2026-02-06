@@ -13,13 +13,19 @@ from sqlalchemy.exc import IntegrityError
 from routes.auth import user_required
 from config import Config
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 import json
 import os
 import requests
 
 orders_bp = Blueprint('orders', __name__)
+
+# Función helper para obtener la hora de Argentina (UTC-3)
+def get_argentina_time():
+    """Retorna la fecha y hora actual en zona horaria de Argentina (UTC-3) como datetime naive"""
+    argentina_tz = timezone(timedelta(hours=-3))
+    return datetime.now(argentina_tz).replace(tzinfo=None)
 
 # Funciones helper para obtener IDs del CRM
 def get_crm_zone_id_from_locality(locality_name):
@@ -318,7 +324,7 @@ def create_crm_order_from_order(order):
             return None
         
         # Preparar payload para crear_venta
-        fecha_detalle = datetime.now().strftime('%Y-%m-%d')
+        fecha_detalle = get_argentina_time().strftime('%Y-%m-%d')
         crm_sale_type_id = order.crm_sale_type_id or 1
         
         # Formatear documento
@@ -1213,7 +1219,7 @@ def create_order():
         
         # Preparar payload para /api/ventas/crear
         venta_payload = {
-            "fecha_detalle": datetime.now().strftime('%Y-%m-%d'),
+            "fecha_detalle": get_argentina_time().strftime('%Y-%m-%d'),
             "tipo_venta": crm_sale_type_id,
             "cliente_nombre": f"{user.first_name or ''} {user.last_name or ''}".strip() or "Cliente",
             "cliente_direccion": cliente_direccion or "",
@@ -1274,10 +1280,13 @@ def create_order():
                     crm_order_id = response_data.get('data', {}).get('crm_order_id')
                     
                     if order_id:
-                        # Obtener la orden creada
+                        # Obtener la orden creada - usar refresh para asegurar que tenemos los datos más recientes
                         order = Order.query.get(uuid.UUID(order_id))
                         if order:
+                            # Refrescar para asegurar que tenemos todos los datos actualizados
+                            db.session.refresh(order)
                             print(f"[DEBUG] ✅ Orden y venta creadas exitosamente - order_id={order_id}, crm_order_id={crm_order_id}")
+                            print(f"[DEBUG] ✅ Orden recuperada - total={order.total}, status={order.status}, payment_method={order.payment_method}")
                         else:
                             return jsonify({
                                 'success': False,
@@ -1544,6 +1553,17 @@ def create_order():
                     existing_order.payment_processed = not pay_on_delivery
                     existing_order.crm_sale_type_id = crm_sale_type_id if pay_on_delivery else None
                     existing_order.used_wallet_amount = used_wallet_amount
+                    
+                    # Si la orden tiene un created_at muy antiguo o parece estar en UTC (diferencia > 2 horas),
+                    # actualizarlo a la hora de Argentina
+                    if existing_order.created_at:
+                        now_argentina = get_argentina_time()
+                        time_diff = abs((now_argentina - existing_order.created_at).total_seconds() / 3600)
+                        # Si la diferencia es mayor a 2 horas, probablemente está en UTC, actualizar
+                        if time_diff > 2:
+                            existing_order.created_at = get_argentina_time()
+                            print(f"[DEBUG] ⚠️ Actualizado created_at de orden existente (parecía estar en UTC)")
+                    
                     try:
                         db.session.commit()
                         db.session.refresh(existing_order)
