@@ -22,6 +22,7 @@ def register_routes(app):
     from .locality_detection import locality_detection_bp
     from .catalogs import catalogs_bp
     from .carts import carts_bp
+    from .events import events_bp
 
     app.register_blueprint(categories_bp, url_prefix='/categories')
     app.register_blueprint(products_bp, url_prefix='/products')
@@ -45,4 +46,5 @@ def register_routes(app):
     app.register_blueprint(homepage_distribution_bp, url_prefix='')
     app.register_blueprint(locality_detection_bp, url_prefix='/')
     app.register_blueprint(carts_bp, url_prefix='/carts')
+    app.register_blueprint(events_bp, url_prefix='')
 
