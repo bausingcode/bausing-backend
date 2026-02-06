@@ -545,9 +545,9 @@ def get_user_metrics(user_id):
             'wallet': {
                 'balance': wallet_balance
             },
-            'conversion_rate': (
-                (int(row_orders.completed_orders or 0) / int(row_orders.total_orders or 1) * 100) 
-                if row_orders and row_orders.total_orders > 0 else 0.0
+            'cart_abandonment_rate': (
+                (int(abandoned_carts_count) / (int(abandoned_carts_count) + int(row_orders.completed_orders or 0)) * 100) 
+                if row_orders and (int(abandoned_carts_count) + int(row_orders.completed_orders or 0)) > 0 else 0.0
             )
         }
         
@@ -687,9 +687,9 @@ def get_users_metrics():
                 'wallet': {
                     'balance': float(row.wallet_balance or 0)
                 },
-                'conversion_rate': (
-                    (int(row.completed_orders or 0) / int(row.total_orders or 1) * 100) 
-                    if row.total_orders > 0 else 0.0
+                'cart_abandonment_rate': (
+                    (int(row.pending_orders or 0) / (int(row.pending_orders or 0) + int(row.completed_orders or 0)) * 100) 
+                    if (int(row.pending_orders or 0) + int(row.completed_orders or 0)) > 0 else 0.0
                 )
             })
         
@@ -825,12 +825,12 @@ def get_general_metrics():
                 COALESCE(SUM(uo.total_spent), 0) as total_spent_all,
                 0.0 as total_abandoned_value,
                 
-                -- Tasa de conversión promedio
+                -- Tasa de abandono de carritos promedio
                 CASE 
-                    WHEN SUM(uo.total_orders) > 0 
-                    THEN (SUM(uo.completed_orders)::numeric / SUM(uo.total_orders)::numeric * 100)
+                    WHEN (SUM(COALESCE(cbt.abandoned_carts, 0)) + SUM(uo.completed_orders)) > 0 
+                    THEN (SUM(COALESCE(cbt.abandoned_carts, 0))::numeric / (SUM(COALESCE(cbt.abandoned_carts, 0)) + SUM(uo.completed_orders))::numeric * 100)
                     ELSE 0 
-                END as avg_conversion_rate
+                END as avg_cart_abandonment_rate
             FROM users u
             LEFT JOIN user_orders uo ON u.id = uo.user_id
             LEFT JOIN carts_by_time cbt ON u.id = cbt.user_id
@@ -889,7 +889,7 @@ def get_general_metrics():
                     'total_spent': 0.0,
                     'abandoned_carts_value': 0.0
                 },
-                'conversion_rate': 0.0,
+                'cart_abandonment_rate': 0.0,
                 'payment_methods': payment_methods
             }
         else:
@@ -914,7 +914,7 @@ def get_general_metrics():
                     'total_spent': float(row.total_spent_all or 0),
                     'abandoned_carts_value': float(row.total_abandoned_value or 0)
                 },
-                'conversion_rate': float(row.avg_conversion_rate or 0),
+                'cart_abandonment_rate': float(row.avg_cart_abandonment_rate or 0),
                 'payment_methods': payment_methods
             }
         
