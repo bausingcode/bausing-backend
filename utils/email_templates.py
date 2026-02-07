@@ -338,10 +338,17 @@ def get_custom_email_template(
     if button_text and button_url:
         button_html = get_button_html(button_text, button_url)
     
-    content = f"""
+    # Solo mostrar greeting si no está vacío
+    greeting_html = ""
+    if greeting and greeting.strip():
+        greeting_html = f"""
                                 <p style="margin: 0 0 20px; color: {TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                     {greeting}
                                 </p>
+        """
+    
+    content = f"""
+                                {greeting_html}
                                 <div style="margin: 0 0 30px; color: {TEXT_MEDIUM}; font-size: 16px; line-height: 1.6;">
                                     {main_content}
                                 </div>
