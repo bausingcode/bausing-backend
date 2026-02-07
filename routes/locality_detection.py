@@ -188,8 +188,6 @@ def get_coordinates_from_ip(ip_address, force_geolocation=False):
     """
     print(f"[DEBUG] get_coordinates_from_ip: Iniciando para IP: {ip_address}, force_geolocation: {force_geolocation}")
     
-    # Verificar si es una IP local
-    # Si force_geolocation es True, intentar geolocalizar de todas formas (útil para IPs simuladas)
     if is_local_ip(ip_address) and not force_geolocation:
         print(f"⚠️  IP local detectada ({ip_address}). No se puede geolocalizar.")
         print(f"[DEBUG] Para desarrollo local, considera usar coordenadas directamente o configurar una IP pública")
@@ -220,7 +218,6 @@ def get_coordinates_from_ip(ip_address, force_geolocation=False):
             data = response.json()
             print(f"[DEBUG] Response data keys: {list(data.keys())}")
             
-            # Verificar status de la respuesta (ip-api.com usa 'status' field)
             if data.get('status') == 'fail':
                 error_message = data.get('message', 'Unknown error')
                 print(f"❌ Error de ip-api.com: {error_message}")
@@ -298,11 +295,16 @@ def detect_locality():
             if not ip:
                 # Obtener IP del request
                 if request.headers.getlist("X-Forwarded-For"):
-                    ip = request.headers.getlist("X-Forwarded-For")[0]
-                    print(f"[DEBUG] IP obtenida de X-Forwarded-For: {ip}")
+                    # X-Forwarded-For puede contener múltiples IPs separadas por comas
+                    ip_header = request.headers.getlist("X-Forwarded-For")[0]
+                    # Tomar solo la primera IP (la del cliente original)
+                    ip = ip_header.split(',')[0].strip()
+                    print(f"[DEBUG] IP obtenida de X-Forwarded-For: {ip} (header completo: {ip_header})")
                 elif request.headers.getlist("X-Real-Ip"):
-                    ip = request.headers.getlist("X-Real-Ip")[0]
-                    print(f"[DEBUG] IP obtenida de X-Real-Ip: {ip}")
+                    ip_header = request.headers.getlist("X-Real-Ip")[0]
+                    # Por si acaso también tiene múltiples IPs
+                    ip = ip_header.split(',')[0].strip()
+                    print(f"[DEBUG] IP obtenida de X-Real-Ip: {ip} (header completo: {ip_header})")
                 else:
                     ip = request.remote_addr
                     print(f"[DEBUG] IP obtenida de request.remote_addr: {ip}")
