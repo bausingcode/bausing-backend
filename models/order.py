@@ -24,6 +24,7 @@ class Order(db.Model):
     used_wallet_amount = db.Column(db.Numeric(10, 2), nullable=True)
     # Usar lambda para asegurar que se llame la función cada vez
     created_at = db.Column(db.DateTime, default=lambda: get_argentina_time(), nullable=False)
+    finalized_at = db.Column(db.DateTime, nullable=True)  # Timestamp cuando la orden fue finalizada
 
     # Relación con User
     user = db.relationship('User', backref='orders', lazy=True)
@@ -41,6 +42,7 @@ class Order(db.Model):
             'payment_method': self.payment_method,
             'payment_processed': self.payment_processed,
             'used_wallet_amount': float(self.used_wallet_amount) if self.used_wallet_amount else 0.0,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'finalized_at': self.finalized_at.isoformat() if self.finalized_at else None
         }
 

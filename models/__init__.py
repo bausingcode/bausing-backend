@@ -22,6 +22,7 @@ from .crm_sale_type import CrmSaleType
 from .crm_province import CrmProvince, CrmProvinceMap
 from .sale_retry_queue import SaleRetryQueue
 from .event import Event
+from .product_review import ProductReview
 
 __all__ = [
     'Category',
@@ -65,6 +66,7 @@ __all__ = [
     'CrmProvince',
     'CrmProvinceMap',
     'SaleRetryQueue',
-    'Event'
+    'Event',
+    'ProductReview'
 ]
 
