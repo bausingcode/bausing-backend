@@ -322,8 +322,8 @@ def send_review_reminders():
             if item.id not in reviewed_order_item_ids
         ]
         
-        # Agrupar por orden y usuario
-        orders_by_user = {}
+        # Agrupar por orden (un email por orden)
+        orders_with_items = {}
         for item in unreviewed_items:
             order = next((o for o in finalizado_orders if o.id == item.order_id), None)
             if not order:
@@ -339,39 +339,41 @@ def send_review_reminders():
             days_since_finalization = (now - finalization_date).days
             
             if days_since_finalization >= 5:
-                if order.user_id not in orders_by_user:
-                    orders_by_user[order.user_id] = {
+                if order.id not in orders_with_items:
+                    orders_with_items[order.id] = {
                         'order': order,
                         'items': []
                     }
-                orders_by_user[order.user_id]['items'].append(item)
+                orders_with_items[order.id]['items'].append(item)
         
-        # Enviar emails
+        # Enviar emails (un email por orden)
         emails_sent = 0
         emails_failed = 0
         
-        for user_id, data in orders_by_user.items():
-            user = User.query.get(user_id)
-            if not user or not user.email:
-                continue
-            
+        for order_id, data in orders_with_items.items():
             order = data['order']
             items = data['items']
+            
+            user = User.query.get(order.user_id)
+            if not user or not user.email:
+                continue
             
             # Construir URL de reseñas usando FRONTEND_URL del .env
             frontend_url = Config.FRONTEND_URL
             review_url = f"{frontend_url}/reviews/{order.id}"
             
-            # Construir lista de productos
-            product_names = []
-            for item in items[:3]:  # Limitar a 3 productos en el email
+            # Construir lista de productos únicos (sin duplicados)
+            product_names_set = set()
+            for item in items:
                 product = Product.query.get(item.product_id)
                 if product:
-                    product_names.append(product.name)
+                    product_names_set.add(product.name)
             
+            # Convertir a lista y limitar a 3 productos para mostrar
+            product_names = list(product_names_set)[:3]
             products_text = ', '.join(product_names)
-            if len(items) > 3:
-                products_text += f" y {len(items) - 3} más"
+            if len(product_names_set) > 3:
+                products_text += f" y {len(product_names_set) - 3} más"
             
             # Enviar email
             email_sent = email_service.send_custom_email(
@@ -399,7 +401,7 @@ def send_review_reminders():
             'message': f'Proceso completado. {emails_sent} emails enviados, {emails_failed} fallidos',
             'emails_sent': emails_sent,
             'emails_failed': emails_failed,
-            'users_notified': len(orders_by_user)
+            'orders_processed': len(orders_with_items)
         }), 200
         
     except Exception as e:
