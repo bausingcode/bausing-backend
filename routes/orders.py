@@ -349,8 +349,44 @@ def create_crm_order_from_order(order):
         
         phone_final = normalize_phone(phone)
         
-        # Determinar medio de pago según payment_method
-        medios_pago_id = 2 if order.payment_method == 'card' else 1  # 2 = Tarjeta, 1 = Abonar al recibir
+        # Construir formaPagos según payment_method almacenado (puede ser múltiple, separado por coma)
+        payment_methods_list = (order.payment_method or 'card').split(',')
+        
+        if len(payment_methods_list) > 1:
+            # Multi-payment: distribuir el monto proporcionalmente
+            # (la distribución exacta se perdió, así que usamos partes iguales)
+            monto_por_metodo = float(order.total) / len(payment_methods_list)
+            forma_pagos_array = []
+            for pm in payment_methods_list:
+                pm = pm.strip()
+                if pm == 'wallet':
+                    pm_id = 3
+                elif pm == 'card':
+                    pm_id = 2
+                elif pm == 'transfer':
+                    pm_id = 4
+                else:
+                    pm_id = 1
+                forma_pagos_array.append({
+                    "medios_pago_id": pm_id,
+                    "monto_total": round(monto_por_metodo, 2),
+                    "procesado": order.payment_processed
+                })
+        else:
+            pm = payment_methods_list[0].strip()
+            if pm == 'wallet':
+                medios_pago_id = 3
+            elif pm == 'card':
+                medios_pago_id = 2
+            elif pm == 'transfer':
+                medios_pago_id = 4
+            else:
+                medios_pago_id = 1
+            forma_pagos_array = [{
+                "medios_pago_id": medios_pago_id,
+                "monto_total": float(order.total),
+                "procesado": order.payment_processed
+            }]
         
         venta_payload = {
             "fecha_detalle": fecha_detalle,
@@ -370,13 +406,7 @@ def create_crm_order_from_order(order):
             "observaciones": "",
             "lat_long": {"latitud": 0.0, "longitud": 0.0},
             "js": js_items,
-            "formaPagos": [
-                {
-                    "medios_pago_id": medios_pago_id,
-                    "monto_total": float(order.total),
-                    "procesado": order.payment_processed  # True si ya se pagó, False si es "abonar al recibir"
-                }
-            ]
+            "formaPagos": forma_pagos_array
         }
         
         # Llamar a crear_venta usando /api/ventas/crear
@@ -659,8 +689,10 @@ def order_to_dict_optimized(order, shipping_address=None, receipt_number=None, i
     elif order.status == "cancelled":
         payment_status = "failed"
     
-    # Determinar pay_on_delivery
-    pay_on_delivery = (order.payment_method == "cash" or order.payment_method == "transfer") and payment_status == "pending"
+    # Determinar pay_on_delivery (si alguno de los métodos es cash/transfer y está pendiente)
+    payment_method_str = order.payment_method or 'card'
+    payment_methods_list = [m.strip() for m in payment_method_str.split(',')]
+    pay_on_delivery = any(m in ("cash", "transfer") for m in payment_methods_list) and payment_status == "pending"
     
     # Usar receipt_number pre-cargado o UUID de la orden
     order_number = receipt_number if receipt_number else str(order.id)
@@ -670,7 +702,7 @@ def order_to_dict_optimized(order, shipping_address=None, receipt_number=None, i
         'user_id': str(order.user_id),
         'order_number': order_number,
         'status': order.status,
-        'payment_method': order.payment_method or 'card',
+        'payment_method': payment_method_str,
         'payment_status': payment_status,
         'payment_processed': order.payment_processed if hasattr(order, 'payment_processed') else False,
         'pay_on_delivery': pay_on_delivery,
@@ -735,8 +767,10 @@ def order_to_dict(order):
     elif order.status == "cancelled":
         payment_status = "failed"
     
-    # Determinar pay_on_delivery
-    pay_on_delivery = (order.payment_method == "cash" or order.payment_method == "transfer") and payment_status == "pending"
+    # Determinar pay_on_delivery (si alguno de los métodos es cash/transfer y está pendiente)
+    payment_method_str = order.payment_method or 'card'
+    payment_methods_list = [m.strip() for m in payment_method_str.split(',')]
+    pay_on_delivery = any(m in ("cash", "transfer") for m in payment_methods_list) and payment_status == "pending"
     
     # Obtener receipt_number desde crm_orders usando crm_order_id
     order_number = None
@@ -765,7 +799,7 @@ def order_to_dict(order):
         'user_id': str(order.user_id),
         'order_number': order_number,
         'status': order.status,
-        'payment_method': order.payment_method or 'card',
+        'payment_method': payment_method_str,
         'payment_status': payment_status,
         'payment_processed': order.payment_processed if hasattr(order, 'payment_processed') else False,
         'pay_on_delivery': pay_on_delivery,
@@ -821,6 +855,10 @@ def create_order():
         total = float(data['total'])  # Este total ya viene con el descuento de billetera aplicado desde el frontend
         formData = data.get('customer', {})  # Datos del cliente para el pago
         payment_method = data.get('payment_method', 'card')
+        
+        # Obtener payment_methods del frontend (para multi-payment)
+        # IMPORTANTE: Definir esto ANTES de cualquier uso
+        frontend_payment_methods = data.get('payment_methods', [])
         
         # Obtener used_wallet_amount (puede venir como wallet_amount o used_wallet_amount)
         # IMPORTANTE: Definir esto ANTES de cualquier validación que lo use
@@ -1049,9 +1087,11 @@ def create_order():
             })
         
         # Si hay descuento de billetera, dividirlo proporcionalmente entre los productos
-        # EXCEPTO si el método de pago es wallet completo, en cuyo caso se envían los precios originales
-        descuento_total = float(used_wallet_amount) if used_wallet_amount and used_wallet_amount > 0 else 0.0
-        es_pago_wallet_completo = payment_method == 'wallet'
+        # EXCEPTO si se usan múltiples medios de pago (multi-payment) o es wallet completo
+        # Con multi-payment, los precios no se ajustan - cada formaPago tiene su monto
+        es_multi_payment = len(frontend_payment_methods) > 1 if frontend_payment_methods else False
+        descuento_total = float(used_wallet_amount) if used_wallet_amount and used_wallet_amount > 0 and not es_multi_payment else 0.0
+        es_pago_wallet_completo = payment_method == 'wallet' or (es_multi_payment and len(frontend_payment_methods) == 1 and frontend_payment_methods[0].get('method') == 'wallet')
         
         # Ajustar precios de los items proporcionalmente para el CRM
         # Si es pago completo con wallet, NO ajustar precios (enviar precios originales)
@@ -1195,27 +1235,66 @@ def create_order():
                     'error': f'Error al procesar el descuento de billetera: {str(wallet_error)}'
                 }), 500
         
-        # Determinar medio de pago principal
-        # Si el método es wallet, usar medios_pago_id = 3 (o el ID que corresponda para wallet en tu CRM)
-        # Si es card, usar 2 (Tarjeta)
-        # Si es abonar al recibir, usar 1
-        if payment_method == 'wallet':
-            medios_pago_id = 3  # Wallet (ajustar según tu CRM si es diferente)
-        elif payment_method == 'card':
-            medios_pago_id = 2  # Tarjeta
+        # Construir formaPagos: soporte para múltiples medios de pago
+        # Si el frontend envía payment_methods (array), usarlos directamente
+        # Si no, construir uno solo con el método de pago principal (backward compat)
+        # Nota: frontend_payment_methods ya está definido arriba (línea 861)
+        
+        if frontend_payment_methods and isinstance(frontend_payment_methods, list) and len(frontend_payment_methods) > 0:
+            # Multi-payment: construir formaPagos desde el array del frontend
+            forma_pagos_array = []
+            for pm in frontend_payment_methods:
+                pm_method = pm.get('method', 'card')
+                pm_amount = float(pm.get('amount', 0))
+                pm_processed = pm.get('processed', False)
+                
+                # Mapear método a medios_pago_id
+                if pm_method == 'wallet':
+                    pm_medios_pago_id = 3
+                elif pm_method == 'card':
+                    pm_medios_pago_id = 2
+                elif pm_method == 'transfer':
+                    pm_medios_pago_id = 4
+                else:
+                    pm_medios_pago_id = 1  # cash / abonar al recibir
+                
+                # Usar el medios_pago_id del frontend si viene (puede tener mapeo propio)
+                if pm.get('medios_pago_id'):
+                    pm_medios_pago_id = int(pm['medios_pago_id'])
+                
+                if pm_amount > 0:
+                    forma_pagos_array.append({
+                        "medios_pago_id": pm_medios_pago_id,
+                        "monto_total": pm_amount,
+                        "procesado": pm_processed
+                    })
+            
+            print(f"[DEBUG] Multi-payment: {len(forma_pagos_array)} medios de pago")
+            for fp in forma_pagos_array:
+                print(f"[DEBUG]   - medios_pago_id={fp['medios_pago_id']}, monto={fp['monto_total']}, procesado={fp['procesado']}")
+            
+            # Guardar los métodos combinados en payment_method (separados por coma)
+            combined_methods = ','.join([pm.get('method', 'card') for pm in frontend_payment_methods if float(pm.get('amount', 0)) > 0])
+            if combined_methods:
+                payment_method = combined_methods
         else:
-            medios_pago_id = 1  # Abonar al recibir
-        
-        # Construir formaPagos: solo el método de pago principal con el total a pagar
-        # Si es pago completo con wallet, usar el total original (no el total después del descuento)
-        # Si es descuento parcial, usar el total después del descuento
-        monto_total_pago = total_productos_original if es_pago_wallet_completo else total_a_pagar
-        
-        forma_pagos_array = [{
-            "medios_pago_id": medios_pago_id,
-            "monto_total": monto_total_pago,  # Total original si es wallet completo, total después del descuento si es parcial
-            "procesado": payment_method == 'wallet' or (not pay_on_delivery)  # True si ya se pagó (wallet o tarjeta), False si es "abonar al recibir"
-        }]
+            # Backward compat: un solo método de pago
+            if payment_method == 'wallet':
+                medios_pago_id = 3
+            elif payment_method == 'card':
+                medios_pago_id = 2
+            elif payment_method == 'transfer':
+                medios_pago_id = 4
+            else:
+                medios_pago_id = 1  # Abonar al recibir
+            
+            monto_total_pago = total_productos_original if es_pago_wallet_completo else total_a_pagar
+            
+            forma_pagos_array = [{
+                "medios_pago_id": medios_pago_id,
+                "monto_total": monto_total_pago,
+                "procesado": payment_method == 'wallet' or (not pay_on_delivery)
+            }]
         
         # Preparar payload para /api/ventas/crear
         venta_payload = {
@@ -1236,11 +1315,11 @@ def create_order():
             "observaciones": "",
             "lat_long": {"latitud": 0.0, "longitud": 0.0},
             "js": js_items,  # Items con precios ajustados si hay descuento de billetera
-            "formaPagos": forma_pagos_array,  # Solo el método de pago principal con el total a pagar
+            "formaPagos": forma_pagos_array,  # Medios de pago (puede ser múltiples)
             # Datos adicionales para crear la orden
             "user_id": str(user.id),
             "payment_method": payment_method,
-            "payment_processed": payment_method == 'wallet' or (not pay_on_delivery),  # True si wallet o tarjeta, False si abonar al recibir
+            "payment_processed": any(fp.get('procesado', False) for fp in forma_pagos_array),  # True si al menos un pago fue procesado
             "used_wallet_amount": used_wallet_amount,
             "order_items": order_items_for_payload
         }
@@ -1549,7 +1628,7 @@ def create_order():
                     # Actualizar los campos de la orden existente
                     existing_order.user_id = user.id
                     existing_order.total = total
-                    existing_order.payment_method = data.get('payment_method', 'card')
+                    existing_order.payment_method = payment_method  # Puede ser combinado (ej: "card,wallet")
                     existing_order.payment_processed = not pay_on_delivery
                     existing_order.crm_sale_type_id = crm_sale_type_id if pay_on_delivery else None
                     existing_order.used_wallet_amount = used_wallet_amount
@@ -1648,10 +1727,19 @@ def create_order():
             'message': 'Orden creada exitosamente'
         }
         
-        # Obtener payment_method de los datos
-        payment_method = data.get('payment_method', 'card')
+        # Determinar si hay pago con tarjeta (puede ser multi-payment)
+        has_card_payment = False
+        card_amount = total  # monto a cobrar con tarjeta
+        if frontend_payment_methods and isinstance(frontend_payment_methods, list) and len(frontend_payment_methods) > 0:
+            for pm in frontend_payment_methods:
+                if pm.get('method') == 'card' and float(pm.get('amount', 0)) > 0:
+                    has_card_payment = True
+                    card_amount = float(pm['amount'])
+                    break
+        else:
+            has_card_payment = payment_method == 'card'
         
-        if payment_method == 'card' and not pay_on_delivery:
+        if has_card_payment and not pay_on_delivery:
             mp_token = data.get('mercadopago_token')
             mp_installments = data.get('mercadopago_installments', 1)
             mp_payment_method_id = data.get('mercadopago_payment_method_id')
@@ -1706,9 +1794,9 @@ def create_order():
                     }), 500
                 
                 # Calcular el total a pagar con tarjeta
-                # El 'total' que viene del frontend ya tiene el descuento de billetera aplicado
-                # Por lo tanto, total_to_pay es simplemente el total (no hay que restar el descuento de nuevo)
-                total_to_pay = float(total)
+                # Si es multi-payment, usar el monto asignado a tarjeta (card_amount)
+                # Si es single payment, usar el total completo
+                total_to_pay = float(card_amount)
                 
                 # Si el total es 0 o negativo, no se puede procesar el pago
                 if total_to_pay <= 0:

@@ -19,7 +19,7 @@ class Order(db.Model):
     sale_type_id = db.Column(UUID(as_uuid=True), nullable=True)
     total = db.Column(db.Numeric(10, 2), nullable=False)
     status = db.Column(db.String(50), nullable=False)
-    payment_method = db.Column(db.String(50), nullable=True)
+    payment_method = db.Column(db.String(200), nullable=True)  # Puede ser múltiples métodos separados por coma
     payment_processed = db.Column(db.Boolean, default=False, nullable=False)
     used_wallet_amount = db.Column(db.Numeric(10, 2), nullable=True)
     # Usar lambda para asegurar que se llame la función cada vez

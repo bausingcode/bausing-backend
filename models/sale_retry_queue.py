@@ -40,7 +40,7 @@ class SaleRetryQueue(db.Model):
     provincia_id = db.Column(db.Integer, nullable=True)
     zona_id = db.Column(db.Integer, nullable=True)
     monto_total = db.Column(db.Numeric(10, 2), nullable=True)
-    payment_method = db.Column(db.String(50), nullable=True)
+    payment_method = db.Column(db.String(200), nullable=True)  # Puede ser múltiples métodos separados por coma
     payment_processed = db.Column(db.Boolean, nullable=True)
     
     # Metadata adicional
