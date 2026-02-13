@@ -5,6 +5,7 @@ from models.product import Product, ProductVariant, ProductPrice
 from models.locality import Locality
 from models.admin_user import AdminUser, AdminRole
 from models.user import User
+from models.product_review import ProductReview
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 import jwt
@@ -626,3 +627,80 @@ def toggle_suspend_customer(user_id):
             'error': str(e)
         }), 500
 
+@admin_bp.route('/reviews', methods=['GET'])
+@admin_required
+def get_all_reviews():
+    """
+    Obtener todas las reseñas creadas con paginación
+    
+    Query parameters:
+    - page: número de página (default: 1)
+    - per_page: items por página (default: 20, max: 100)
+    """
+    try:
+        # Paginación
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        
+        # Query base
+        query = ProductReview.query.order_by(ProductReview.created_at.desc())
+        
+        # Aplicar paginación
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        reviews = pagination.items
+        
+        return jsonify({
+            'success': True,
+            'data': [review.to_dict() for review in reviews],
+            'pagination': {
+                'page': pagination.page,
+                'per_page': pagination.per_page,
+                'total': pagination.total,
+                'pages': pagination.pages,
+                'has_prev': pagination.has_prev,
+                'has_next': pagination.has_next
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@admin_bp.route('/reviews/<uuid:review_id>/status', methods=['PUT'])
+@admin_required
+def update_review_status(review_id):
+    """
+    Cambiar el status de una reseña (published o hidden)
+    """
+    try:
+        data = request.get_json()
+        status = data.get('status')
+        
+        if status not in ['published', 'hidden']:
+            return jsonify({
+                'success': False,
+                'error': 'El status debe ser "published" o "hidden"'
+            }), 400
+        
+        review = ProductReview.query.get(review_id)
+        if not review:
+            return jsonify({
+                'success': False,
+                'error': 'Reseña no encontrada'
+            }), 404
+        
+        review.status = status
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': review.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500

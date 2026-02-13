@@ -114,7 +114,9 @@ def create_event():
             text_color=data.get('text_color', '#FFFFFF'),
             is_active=data.get('is_active', False),
             display_type=data.get('display_type', 'fixed'),
-            countdown_end_date=countdown_end_date
+            countdown_end_date=countdown_end_date,
+            font_family=data.get('font_family'),
+            animation_type=data.get('animation_type')
         )
         
         db.session.add(event)
@@ -167,6 +169,10 @@ def update_event(event_id):
             event.text_color = data['text_color']
         if 'display_type' in data:
             event.display_type = data['display_type']
+        if 'font_family' in data:
+            event.font_family = data['font_family'] if data['font_family'] else None
+        if 'animation_type' in data:
+            event.animation_type = data['animation_type'] if data['animation_type'] else None
         
         # Manejar countdown_end_date
         if 'countdown_end_date' in data:

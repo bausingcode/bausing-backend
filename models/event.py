@@ -13,6 +13,8 @@ class Event(db.Model):
     is_active = db.Column(db.Boolean, default=False, nullable=False)  # Si el evento está activo
     display_type = db.Column(db.String(20), nullable=False, default='fixed')  # 'fixed' o 'countdown'
     countdown_end_date = db.Column(db.DateTime, nullable=True)  # Fecha de fin para countdown (opcional)
+    font_family = db.Column(db.String(100), nullable=True)  # Tipografía del texto (opcional, null = default)
+    animation_type = db.Column(db.String(50), nullable=True)  # Tipo de animación (opcional, null = sin animación)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -26,6 +28,8 @@ class Event(db.Model):
             'is_active': self.is_active,
             'display_type': self.display_type,
             'countdown_end_date': self.countdown_end_date.isoformat() if self.countdown_end_date else None,
+            'font_family': self.font_family,
+            'animation_type': self.animation_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
