@@ -17,6 +17,7 @@ class Address(db.Model):
     city = db.Column(db.String(255), nullable=False)
     province_id = db.Column(UUID(as_uuid=True), db.ForeignKey('provinces.id'), nullable=False)
     is_default = db.Column(db.Boolean, default=False, nullable=False)
+    lat_lon = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relación con User
@@ -39,6 +40,7 @@ class Address(db.Model):
             'province_id': str(self.province_id) if self.province_id else None,
             'province': self.province.name if self.province else None,
             'is_default': self.is_default,
+            'lat_lon': self.lat_lon,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

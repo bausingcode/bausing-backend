@@ -23,6 +23,9 @@ from .crm_province import CrmProvince, CrmProvinceMap
 from .sale_retry_queue import SaleRetryQueue
 from .event import Event
 from .product_review import ProductReview
+from .card_type import CardType
+from .bank import Bank
+from .card_bank_installment import CardBankInstallment
 
 __all__ = [
     'Category',
@@ -67,6 +70,9 @@ __all__ = [
     'CrmProvinceMap',
     'SaleRetryQueue',
     'Event',
-    'ProductReview'
+    'ProductReview',
+    'CardType',
+    'Bank',
+    'CardBankInstallment'
 ]
 

@@ -349,6 +349,18 @@ def create_crm_order_from_order(order):
         
         phone_final = normalize_phone(phone)
         
+        # Obtener latitud y longitud de la dirección
+        latitud = 0.0
+        longitud = 0.0
+        if address.lat_lon:
+            try:
+                lat_lon_parts = address.lat_lon.split(',')
+                if len(lat_lon_parts) == 2:
+                    latitud = float(lat_lon_parts[0].strip())
+                    longitud = float(lat_lon_parts[1].strip())
+            except (ValueError, AttributeError) as e:
+                print(f"[DEBUG] ⚠️ Error al parsear lat_lon '{address.lat_lon}': {str(e)}")
+        
         # Construir formaPagos según payment_method almacenado (puede ser múltiple, separado por coma)
         payment_methods_list = (order.payment_method or 'card').split(',')
         
@@ -404,7 +416,7 @@ def create_crm_order_from_order(order):
             "localidad": address.city or "",
             "zona_id": crm_zone_id,
             "observaciones": "",
-            "lat_long": {"latitud": 0.0, "longitud": 0.0},
+            "lat_long": {"latitud": latitud, "longitud": longitud},
             "js": js_items,
             "formaPagos": forma_pagos_array
         }
@@ -1296,6 +1308,25 @@ def create_order():
                 "procesado": payment_method == 'wallet' or (not pay_on_delivery)
             }]
         
+        # Obtener latitud y longitud de la dirección
+        latitud = 0.0
+        longitud = 0.0
+        # Intentar obtener lat_lon de la dirección guardada en BD o del address_data del request
+        lat_lon_str = None
+        if address and hasattr(address, 'lat_lon') and address.lat_lon:
+            lat_lon_str = address.lat_lon
+        elif address_data.get('lat_lon'):
+            lat_lon_str = address_data.get('lat_lon')
+        
+        if lat_lon_str:
+            try:
+                lat_lon_parts = lat_lon_str.split(',')
+                if len(lat_lon_parts) == 2:
+                    latitud = float(lat_lon_parts[0].strip())
+                    longitud = float(lat_lon_parts[1].strip())
+            except (ValueError, AttributeError) as e:
+                print(f"[DEBUG] ⚠️ Error al parsear lat_lon '{lat_lon_str}': {str(e)}")
+        
         # Preparar payload para /api/ventas/crear
         venta_payload = {
             "fecha_detalle": get_argentina_time().strftime('%Y-%m-%d'),
@@ -1313,7 +1344,7 @@ def create_order():
             "localidad": city or "",
             "zona_id": crm_zone_id,
             "observaciones": "",
-            "lat_long": {"latitud": 0.0, "longitud": 0.0},
+            "lat_long": {"latitud": latitud, "longitud": longitud},
             "js": js_items,  # Items con precios ajustados si hay descuento de billetera
             "formaPagos": forma_pagos_array,  # Medios de pago (puede ser múltiples)
             # Datos adicionales para crear la orden

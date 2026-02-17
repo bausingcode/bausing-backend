@@ -186,7 +186,8 @@ class EmailService:
         main_content: str,
         button_text: Optional[str] = None,
         button_url: Optional[str] = None,
-        footer_note: Optional[str] = None
+        footer_note: Optional[str] = None,
+        image_url: Optional[str] = None
     ) -> bool:
         """
         Envía un email personalizado usando la plantilla genérica.
@@ -200,6 +201,7 @@ class EmailService:
             button_text: Texto del botón CTA (opcional)
             button_url: URL del botón CTA (opcional)
             footer_note: Nota adicional para el footer (opcional)
+            image_url: URL de la imagen a mostrar en el email (opcional)
         
         Returns:
             True si se envió correctamente
@@ -213,7 +215,8 @@ class EmailService:
             main_content=main_content,
             button_text=button_text,
             button_url=button_url,
-            footer_note=footer_note
+            footer_note=footer_note,
+            image_url=image_url
         )
         
         return self._send_email(

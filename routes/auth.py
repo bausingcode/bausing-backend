@@ -14,8 +14,62 @@ import secrets
 from datetime import datetime, timedelta, date
 from config import Config
 from utils.email_service import email_service
+import requests
+import time
 
 auth_bp = Blueprint('auth', __name__)
+
+def get_lat_lon_from_address(street, number, city, postal_code, province_name=None):
+    """
+    Obtiene latitud y longitud de una dirección usando Nominatim (OpenStreetMap)
+    Retorna un string en formato "lat,lon" o None si no se puede obtener
+    """
+    try:
+        # Construir la dirección completa
+        address_parts = []
+        if street:
+            address_parts.append(street)
+        if number:
+            address_parts.append(number)
+        if city:
+            address_parts.append(city)
+        if postal_code:
+            address_parts.append(postal_code)
+        if province_name:
+            address_parts.append(province_name)
+        address_parts.append("Argentina")
+        
+        query = ", ".join(address_parts)
+        
+        # Usar Nominatim API (gratuita, sin API key)
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {
+            "q": query,
+            "format": "json",
+            "limit": 1,
+            "addressdetails": 1
+        }
+        headers = {
+            "User-Agent": "BausingApp/1.0"  # Nominatim requiere User-Agent
+        }
+        
+        # Hacer la petición con un pequeño delay para respetar rate limits
+        time.sleep(1)  # Nominatim permite 1 request por segundo
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data and len(data) > 0:
+                lat = data[0].get("lat")
+                lon = data[0].get("lon")
+                if lat and lon:
+                    return f"{lat},{lon}"
+        
+        return None
+    except Exception as e:
+        # Si falla la geocodificación, no fallar la creación de la dirección
+        print(f"Error al obtener lat/lon: {str(e)}")
+        return None
 
 def generate_token(user):
     """Genera un token JWT para el usuario"""
@@ -714,6 +768,15 @@ def create_address():
         if data.get('is_default', False):
             Address.query.filter_by(user_id=user.id, is_default=True).update({'is_default': False})
         
+        # Obtener latitud y longitud usando geocodificación
+        lat_lon = get_lat_lon_from_address(
+            street=data['street'],
+            number=data['number'],
+            city=data['city'],
+            postal_code=data['postal_code'],
+            province_name=province.name if province else None
+        )
+        
         # Crear nueva dirección
         address = Address(
             user_id=user.id,
@@ -725,7 +788,8 @@ def create_address():
             postal_code=data['postal_code'],
             city=data['city'],
             province_id=province_id,
-            is_default=data.get('is_default', False)
+            is_default=data.get('is_default', False),
+            lat_lon=lat_lon
         )
         
         db.session.add(address)
@@ -776,6 +840,9 @@ def update_address(address_id):
                 'error': 'Dirección no encontrada'
             }), 404
         
+        # Trackear si cambió algún campo que afecte la geocodificación
+        address_changed = False
+        
         # Actualizar campos
         if 'full_name' in data:
             address.full_name = data['full_name']
@@ -783,14 +850,18 @@ def update_address(address_id):
             address.phone = data['phone']
         if 'street' in data:
             address.street = data['street']
+            address_changed = True
         if 'number' in data:
             address.number = data['number']
+            address_changed = True
         if 'additional_info' in data:
             address.additional_info = data['additional_info']
         if 'postal_code' in data:
             address.postal_code = data['postal_code']
+            address_changed = True
         if 'city' in data:
             address.city = data['city']
+            address_changed = True
         if 'province_id' in data:
             province_id = uuid.UUID(data['province_id'])
             province = Province.query.get(province_id)
@@ -800,6 +871,20 @@ def update_address(address_id):
                     'error': 'Provincia no encontrada'
                 }), 400
             address.province_id = province_id
+            address_changed = True
+        
+        # Recalcular lat/lon si cambió algún campo relevante
+        if address_changed:
+            province = Province.query.get(address.province_id)
+            lat_lon = get_lat_lon_from_address(
+                street=address.street,
+                number=address.number,
+                city=address.city,
+                postal_code=address.postal_code,
+                province_name=province.name if province else None
+            )
+            address.lat_lon = lat_lon
+        
         if 'is_default' in data:
             # Si se marca como default, quitar default de otras direcciones
             if data['is_default']:

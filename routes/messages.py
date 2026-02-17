@@ -43,6 +43,7 @@ def send_promotional_emails():
         subject = data.get('subject', '').strip()
         message = data.get('message', '').strip()
         user_filter = data.get('user_filter', 'all')
+        image_url = data.get('image_url', '').strip()
         
         if not subject:
             return jsonify({
@@ -116,7 +117,8 @@ def send_promotional_emails():
                     main_content=personalized_message_html,
                     button_text="Ver productos",
                     button_url=f"{Config.FRONTEND_URL}/productos" if Config.FRONTEND_URL else None,
-                    footer_note="Este es un mensaje promocional de Bausing."
+                    footer_note="Este es un mensaje promocional de Bausing.",
+                    image_url=image_url if image_url else None
                 )
                 
                 if success:

@@ -317,7 +317,8 @@ def get_custom_email_template(
     main_content: str,
     button_text: Optional[str] = None,
     button_url: Optional[str] = None,
-    footer_note: Optional[str] = None
+    footer_note: Optional[str] = None,
+    image_url: Optional[str] = None
 ) -> str:
     """
     Plantilla genérica para crear emails personalizados.
@@ -330,6 +331,7 @@ def get_custom_email_template(
         button_text: Texto del botón CTA (opcional)
         button_url: URL del botón CTA (opcional)
         footer_note: Nota adicional para el footer (opcional)
+        image_url: URL de la imagen a mostrar en el email (opcional)
     
     Returns:
         HTML completo del email
@@ -347,8 +349,18 @@ def get_custom_email_template(
                                 </p>
         """
     
+    # Imagen del email (si se proporciona)
+    image_html = ""
+    if image_url:
+        image_html = f"""
+                                <div style="margin: 0 0 30px; text-align: center;">
+                                    <img src="{image_url}" alt="Imagen promocional" style="max-width: 100%; height: auto; border-radius: 8px; display: block; margin: 0 auto;" />
+                                </div>
+        """
+    
     content = f"""
                                 {greeting_html}
+                                {image_html}
                                 <div style="margin: 0 0 30px; color: {TEXT_MEDIUM}; font-size: 16px; line-height: 1.6;">
                                     {main_content}
                                 </div>
