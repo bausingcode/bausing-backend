@@ -130,7 +130,11 @@ from sqlalchemy.orm import joinedload
 import json
 import uuid
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
+from models.user import User
+from models.wallet import Wallet, WalletMovement
+from utils.email_service import email_service
 
 public_api_bp = Blueprint('public_api', __name__)
 
@@ -3000,3 +3004,184 @@ def crear_venta():
         print(f"ERROR del servidor: {str(e)}")
         print(f"Traceback completo:\n{error_traceback}")
         return server_error(f"Error del servidor: {str(e)}")
+
+
+@public_api_bp.route('/public/wallet/expiring-balance-reminders', methods=['POST'])
+@api_key_required
+def send_wallet_expiring_balance_reminders():
+    """
+    Endpoint para ser llamado mediante cron job que revisa usuarios con saldo próximo a vencer
+    en la billetera y les envía un email de aviso.
+    
+    Requiere API key en header: X-API-Key o Authorization: Bearer <key>
+    
+    Request Body (opcional):
+    {
+        "days_ahead": 7  // Días por adelantado para considerar saldo próximo a vencer (default: 7)
+    }
+    
+    Response - Éxito:
+    HTTP Status: 200 OK
+    {
+        "status": true,
+        "data": {
+            "sent_count": 5,
+            "failed_count": 0,
+            "total_users": 5
+        },
+        "message": "Se enviaron 5 recordatorios exitosamente"
+    }
+    
+    Response - Error:
+    HTTP Status: 200 (con status: false) o 500
+    {
+        "status": false,
+        "message": "Error al procesar los recordatorios: [descripción]"
+    }
+    """
+    try:
+        # Obtener días por adelantado desde el body (default: 7 días)
+        data = request.get_json() or {}
+        days_ahead = data.get('days_ahead', 7)
+        
+        try:
+            days_ahead = int(days_ahead)
+            if days_ahead < 1:
+                return validation_error("days_ahead debe ser un número positivo")
+        except (ValueError, TypeError):
+            return validation_error("days_ahead debe ser un número válido")
+        
+        # Calcular fecha límite
+        now = datetime.utcnow()
+        expiration_limit = now + timedelta(days=days_ahead)
+        
+        # Tipos de movimientos de crédito (suman dinero)
+        credit_types = ['manual_credit', 'cashback', 'refund', 'transfer_in', 'accreditation', 'credit']
+        
+        # Query para obtener usuarios con saldo próximo a vencer
+        # Buscamos movimientos de crédito que:
+        # 1. Tienen expires_at (no son None)
+        # 2. Vencen entre ahora y days_ahead días
+        # 3. Aún no han vencido (expires_at > now)
+        # 4. Son movimientos de crédito (suman dinero)
+        upcoming_expirations = db.session.query(
+            User.id,
+            User.email,
+            User.first_name,
+            User.last_name,
+            func.sum(WalletMovement.amount).label('expiring_balance')
+        ).join(
+            Wallet, User.id == Wallet.user_id
+        ).join(
+            WalletMovement, Wallet.id == WalletMovement.wallet_id
+        ).filter(
+            and_(
+                User.email.isnot(None),
+                User.email != '',
+                WalletMovement.type.in_(credit_types),
+                WalletMovement.amount > 0,
+                WalletMovement.expires_at.isnot(None),
+                WalletMovement.expires_at > now,
+                WalletMovement.expires_at <= expiration_limit
+            )
+        ).group_by(
+            User.id, User.email, User.first_name, User.last_name
+        ).having(
+            func.sum(WalletMovement.amount) > 0
+        ).all()
+        
+        if not upcoming_expirations:
+            return success_response(
+                data={
+                    "sent_count": 0,
+                    "failed_count": 0,
+                    "total_users": 0
+                },
+                message="No hay usuarios con saldo próximo a vencer"
+            )
+        
+        sent_count = 0
+        failed_count = 0
+        
+        # Enviar recordatorio a cada usuario
+        for user_id, email, first_name, last_name, expiring_balance in upcoming_expirations:
+            try:
+                # Formatear el saldo (convertir Decimal a float y formatear en formato argentino)
+                balance_value = float(expiring_balance) if isinstance(expiring_balance, Decimal) else float(expiring_balance)
+                # Formato argentino: $1.234,56
+                balance_str = f"${balance_value:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                
+                # Obtener la fecha de vencimiento más próxima para este usuario
+                earliest_expiration = db.session.query(
+                    func.min(WalletMovement.expires_at)
+                ).join(
+                    Wallet, WalletMovement.wallet_id == Wallet.id
+                ).filter(
+                    and_(
+                        Wallet.user_id == user_id,
+                        WalletMovement.type.in_(credit_types),
+                        WalletMovement.amount > 0,
+                        WalletMovement.expires_at.isnot(None),
+                        WalletMovement.expires_at > now,
+                        WalletMovement.expires_at <= expiration_limit
+                    )
+                ).scalar()
+                
+                # Calcular días hasta el vencimiento
+                if earliest_expiration:
+                    days_until_expiry = (earliest_expiration - now).days
+                    if days_until_expiry == 0:
+                        expiry_text = "hoy"
+                    elif days_until_expiry == 1:
+                        expiry_text = "mañana"
+                    else:
+                        expiry_text = f"en {days_until_expiry} días"
+                else:
+                    expiry_text = "próximamente"
+                
+                # Crear el mensaje personalizado
+                main_content = f"""
+                <p>Tenés saldo en tu billetera Bausing que vence {expiry_text}.</p>
+                <p><strong>Saldo próximo a vencer: {balance_str}</strong></p>
+                <p>Te recomendamos que utilices tu saldo antes de que expire. Podés usarlo para realizar compras en nuestra tienda.</p>
+                <p>¡No dejes que se venza tu saldo!</p>
+                """
+                
+                # Enviar email
+                success = email_service.send_custom_email(
+                    to=email,
+                    title="Recordatorio: Tu saldo de billetera vence pronto",
+                    header_text="Recordatorio de Billetera",
+                    greeting=f"Hola {first_name},",
+                    main_content=main_content,
+                    button_text="Ver mi billetera",
+                    button_url=f"{Config.FRONTEND_URL}/billetera" if Config.FRONTEND_URL else None,
+                    footer_note="Este es un recordatorio automático de Bausing."
+                )
+                
+                if success:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+                    
+            except Exception as e:
+                print(f"Error al enviar recordatorio a {email}: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+                failed_count += 1
+        
+        return success_response(
+            data={
+                "sent_count": sent_count,
+                "failed_count": failed_count,
+                "total_users": len(upcoming_expirations)
+            },
+            message=f"Se enviaron {sent_count} recordatorios exitosamente"
+        )
+        
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"Error en send_wallet_expiring_balance_reminders: {str(e)}")
+        print(f"Traceback completo:\n{error_traceback}")
+        return server_error(f"Error al procesar los recordatorios: {str(e)}")

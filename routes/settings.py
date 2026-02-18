@@ -86,6 +86,37 @@ def get_public_footer():
             'error': str(e)
         }), 500
 
+
+@public_settings_bp.route('/settings/public/price-per-km', methods=['GET'])
+def get_public_price_per_km():
+    """
+    Obtener precio por kilómetro de envío (sin autenticación)
+    """
+    try:
+        price_setting = SystemSettings.query.filter_by(key='general.price_per_km').first()
+        
+        if price_setting and price_setting.value_type == 'number':
+            try:
+                price = float(price_setting.value)
+                return jsonify({
+                    'success': True,
+                    'price_per_km': price
+                }), 200
+            except ValueError:
+                pass
+        
+        # Valor por defecto si no está configurado
+        return jsonify({
+            'success': True,
+            'price_per_km': 105
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @settings_bp.route('/settings', methods=['GET'])
 @admin_required
 def get_settings():
@@ -441,7 +472,8 @@ def update_general_settings():
             'direccion': ('general.address', 'string', 'Dirección física de Bausing'),
             'instagramUrl': ('general.instagram_url', 'string', 'URL de Instagram'),
             'facebookUrl': ('general.facebook_url', 'string', 'URL de Facebook'),
-            'tiktokUrl': ('general.tiktok_url', 'string', 'URL de TikTok')
+            'tiktokUrl': ('general.tiktok_url', 'string', 'URL de TikTok'),
+            'precioPorKm': ('general.price_per_km', 'number', 'Precio por kilómetro de envío')
         }
 
         updated_settings = []
