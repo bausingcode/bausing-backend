@@ -664,10 +664,17 @@ def detect_locality():
         
         # Obtener la zona de entrega asociada a esta localidad
         crm_zone_id = None
+        is_third_party_transport = False
+        shipping_price = None
         zone_locality = CrmZoneLocality.query.filter_by(locality_id=locality.id).first()
+        is_third_party_transport = False
+        shipping_price = None
+        
         if zone_locality:
             crm_zone_id = zone_locality.crm_zone_id
-            print(f"[DEBUG] Zona de entrega encontrada: crm_zone_id={crm_zone_id}")
+            is_third_party_transport = zone_locality.is_third_party_transport or False
+            shipping_price = float(zone_locality.shipping_price) if zone_locality.shipping_price else None
+            print(f"[DEBUG] Zona de entrega encontrada: crm_zone_id={crm_zone_id}, is_third_party={is_third_party_transport}, shipping_price={shipping_price}")
         else:
             print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad: {locality.name} (id: {locality.id})")
             # Intentar buscar por nombre de localidad en crm_delivery_zones
@@ -692,6 +699,12 @@ def detect_locality():
             print(f"[DEBUG] crm_zone_id agregado a respuesta: {crm_zone_id}")
         else:
             print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad: {locality.name} (id: {locality.id})")
+        
+        # Agregar información de transporte tercerizado - SIEMPRE incluir estos campos
+        response_data['is_third_party_transport'] = is_third_party_transport
+        if shipping_price is not None:
+            response_data['shipping_price'] = shipping_price
+        # Si shipping_price es None, no lo agregamos (el frontend lo manejará como null)
         
         print(f"[DEBUG] Respuesta final de detect_locality: {json.dumps(response_data, indent=2, default=str)}")
         

@@ -52,7 +52,10 @@ class CrmZoneLocality(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     crm_zone_id = db.Column(db.Integer, db.ForeignKey('crm_delivery_zones.crm_zone_id'), nullable=False)
     locality_id = db.Column(UUID(as_uuid=True), db.ForeignKey('localities.id'), nullable=False)
+    is_third_party_transport = db.Column(db.Boolean, default=False, nullable=False)
+    shipping_price = db.Column(db.Numeric(10, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relación con Locality
     locality = db.relationship('Locality', backref='zone_associations', lazy=True)
@@ -63,5 +66,8 @@ class CrmZoneLocality(db.Model):
             'crm_zone_id': self.crm_zone_id,
             'locality_id': str(self.locality_id),
             'locality_name': self.locality.name if self.locality else None,
+            'is_third_party_transport': self.is_third_party_transport,
+            'shipping_price': float(self.shipping_price) if self.shipping_price else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
