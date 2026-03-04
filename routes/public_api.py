@@ -3198,7 +3198,7 @@ def process_sale_retries():
     
     Este endpoint:
     - Revisa las solicitudes de carga pendientes en sale_retry_queue
-    - Omite las que han alcanzado max_retries intentos o status 'done'
+    - Omite las que han alcanzado max_retries intentos o status 'completed'
     - Envía el crm_payload al endpoint externo de carga de ventas
     - Actualiza last_retry_at y completed_at cuando corresponda
     - Actualiza la tabla orders con crm_order_id cuando corresponda
@@ -3230,7 +3230,8 @@ def process_sale_retries():
         # Obtener reintentos pendientes que no estén completados y tengan menos intentos que max_retries
         pending_retries = SaleRetryQueue.query.filter(
             and_(
-                SaleRetryQueue.status != 'done',
+                SaleRetryQueue.status != 'completed',
+                SaleRetryQueue.status != 'done',  # Por si acaso hay registros antiguos con 'done'
                 SaleRetryQueue.retry_count < SaleRetryQueue.max_retries
             )
         ).all()
@@ -3262,7 +3263,7 @@ def process_sale_retries():
             retry_id = str(retry.id)
             try:
                 # Verificar nuevamente que no esté completado o haya alcanzado max_retries
-                if retry.status == 'done' or retry.retry_count >= retry.max_retries:
+                if retry.status in ['done', 'completed'] or retry.retry_count >= retry.max_retries:
                     skipped_count += 1
                     continue
                 
@@ -3336,7 +3337,7 @@ def process_sale_retries():
                             
                             if external_venta_id:
                                 # Éxito: actualizar el retry como completado
-                                retry.status = 'done'
+                                retry.status = 'completed'  # Usar 'completed' en lugar de 'done'
                                 retry.completed_at = now
                                 retry.error_message = None
                                 retry.error_details = {
@@ -3352,11 +3353,30 @@ def process_sale_retries():
                                         order.crm_order_id = external_venta_id
                                         print(f"[DEBUG process_sale_retries] ✅ Orden {order.id} actualizada con crm_order_id={external_venta_id}")
                                 
-                                db.session.flush()
-                                db.session.commit()
-                                db.session.refresh(retry)
-                                successful_count += 1
-                                print(f"[DEBUG process_sale_retries] ✅ Retry {retry.id} completado exitosamente con crm_order_id={external_venta_id}, status={retry.status}, retry_count={retry.retry_count}")
+                                try:
+                                    db.session.flush()
+                                    db.session.commit()
+                                    db.session.refresh(retry)
+                                    successful_count += 1
+                                    print(f"[DEBUG process_sale_retries] ✅ Retry {retry.id} completado exitosamente con crm_order_id={external_venta_id}, status={retry.status}, retry_count={retry.retry_count}")
+                                except Exception as commit_error:
+                                    db.session.rollback()
+                                    print(f"[DEBUG process_sale_retries] ⚠️ Error al hacer commit del retry {retry.id}: {str(commit_error)}")
+                                    # Intentar de nuevo con un nuevo query
+                                    retry = db.session.query(SaleRetryQueue).filter_by(id=retry.id).first()
+                                    if retry:
+                                        retry.status = 'completed'
+                                        retry.completed_at = now
+                                        retry.error_message = None
+                                        retry.error_details = {
+                                            "success": True,
+                                            "status_code": status_code,
+                                            "crm_order_id": external_venta_id
+                                        }
+                                        db.session.commit()
+                                        successful_count += 1
+                                    else:
+                                        failed_count += 1
                             else:
                                 # No se pudo obtener el venta_id
                                 error_msg = f"No se pudo obtener el ID de venta. Response: {json.dumps(response_data, default=str)}"
@@ -3369,11 +3389,16 @@ def process_sale_retries():
                                 }
                                 if retry.retry_count >= retry.max_retries:
                                     retry.completed_at = now
-                                db.session.flush()
-                                db.session.commit()
-                                db.session.refresh(retry)
-                                failed_count += 1
-                                print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}, status={retry.status}, retry_count={retry.retry_count}")
+                                try:
+                                    db.session.flush()
+                                    db.session.commit()
+                                    db.session.refresh(retry)
+                                    failed_count += 1
+                                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}, status={retry.status}, retry_count={retry.retry_count}")
+                                except Exception as commit_error:
+                                    db.session.rollback()
+                                    print(f"[DEBUG process_sale_retries] ⚠️ Error al hacer commit del retry {retry.id}: {str(commit_error)}")
+                                    failed_count += 1
                         else:
                             # Error en la respuesta
                             error_msg = response_data.get('message', f'Error al crear venta: status_code={status_code}, response={json.dumps(response_data, default=str)}')
@@ -3386,39 +3411,54 @@ def process_sale_retries():
                             }
                             if retry.retry_count >= retry.max_retries:
                                 retry.completed_at = now
-                            db.session.flush()
-                            db.session.commit()
-                            db.session.refresh(retry)
-                            failed_count += 1
-                            print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}, status={retry.status}, retry_count={retry.retry_count}")
+                            try:
+                                db.session.flush()
+                                db.session.commit()
+                                db.session.refresh(retry)
+                                failed_count += 1
+                                print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}, status={retry.status}, retry_count={retry.retry_count}")
+                            except Exception as commit_error:
+                                db.session.rollback()
+                                print(f"[DEBUG process_sale_retries] ⚠️ Error al hacer commit del retry {retry.id}: {str(commit_error)}")
+                                failed_count += 1
                             
                 except Exception as ext_error:
                     # Cualquier otro error
                     import traceback
+                    from sqlalchemy.exc import IntegrityError, PendingRollbackError
                     error_traceback = traceback.format_exc()
                     error_msg = f"Error inesperado: {str(ext_error)}"
                     
-                    # Refrescar el retry antes de actualizar
+                    # Hacer rollback si hay un error pendiente
                     try:
-                        db.session.refresh(retry)
+                        db.session.rollback()
                     except:
-                        # Si no se puede refrescar, obtener de nuevo
-                        retry = db.session.query(SaleRetryQueue).filter_by(id=retry.id).first()
+                        pass
+                    
+                    # Obtener el retry de nuevo después del rollback
+                    try:
+                        retry = db.session.query(SaleRetryQueue).filter_by(id=retry_id).first()
+                    except:
+                        retry = None
                     
                     if retry:
-                        retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
-                        retry.error_message = error_msg
-                        retry.error_details = {
-                            "success": False,
-                            "error": str(ext_error),
-                            "error_type": type(ext_error).__name__,
-                            "traceback": error_traceback
-                        }
-                        if retry.retry_count >= retry.max_retries:
-                            retry.completed_at = now
-                        db.session.flush()
-                        db.session.commit()
-                        db.session.refresh(retry)
+                        try:
+                            retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                            retry.error_message = error_msg
+                            retry.error_details = {
+                                "success": False,
+                                "error": str(ext_error),
+                                "error_type": type(ext_error).__name__,
+                                "traceback": error_traceback
+                            }
+                            if retry.retry_count >= retry.max_retries:
+                                retry.completed_at = now
+                            db.session.flush()
+                            db.session.commit()
+                            db.session.refresh(retry)
+                        except Exception as update_error:
+                            db.session.rollback()
+                            print(f"[DEBUG process_sale_retries] ⚠️ Error al actualizar retry {retry_id} después de error: {str(update_error)}")
                     
                     failed_count += 1
                     print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry_id} falló: {error_msg}")
