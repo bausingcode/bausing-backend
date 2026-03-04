@@ -3185,3 +3185,273 @@ def send_wallet_expiring_balance_reminders():
         print(f"Error en send_wallet_expiring_balance_reminders: {str(e)}")
         print(f"Traceback completo:\n{error_traceback}")
         return server_error(f"Error al procesar los recordatorios: {str(e)}")
+
+
+@public_api_bp.route('/public/sale-retry/process', methods=['POST'])
+@api_key_required
+def process_sale_retries():
+    """
+    Endpoint para ser llamado mediante cron job que procesa los reintentos de ventas pendientes
+    en la tabla sale_retry_queue.
+    
+    Requiere API key en header: X-API-Key o Authorization: Bearer <key>
+    
+    Este endpoint:
+    - Revisa las solicitudes de carga pendientes en sale_retry_queue
+    - Omite las que han alcanzado max_retries intentos o status 'done'
+    - Envía el crm_payload al endpoint externo de carga de ventas
+    - Actualiza last_retry_at y completed_at cuando corresponda
+    - Actualiza la tabla orders con crm_order_id cuando corresponda
+    
+    Response - Éxito:
+    HTTP Status: 200 OK
+    {
+        "status": true,
+        "data": {
+            "processed_count": 5,
+            "successful_count": 4,
+            "failed_count": 1,
+            "skipped_count": 2
+        },
+        "message": "Se procesaron 5 reintentos exitosamente"
+    }
+    
+    Response - Error:
+    HTTP Status: 200 (con status: false) o 500
+    {
+        "status": false,
+        "message": "Error al procesar los reintentos: [descripción]"
+    }
+    """
+    try:
+        from models.sale_retry_queue import SaleRetryQueue
+        from models.order import Order
+        
+        # Obtener reintentos pendientes que no estén completados y tengan menos intentos que max_retries
+        pending_retries = SaleRetryQueue.query.filter(
+            and_(
+                SaleRetryQueue.status != 'done',
+                SaleRetryQueue.retry_count < SaleRetryQueue.max_retries
+            )
+        ).all()
+        
+        if not pending_retries:
+            return success_response(
+                data={
+                    "processed_count": 0,
+                    "successful_count": 0,
+                    "failed_count": 0,
+                    "skipped_count": 0
+                },
+                message="No hay reintentos pendientes para procesar"
+            )
+        
+        processed_count = 0
+        successful_count = 0
+        failed_count = 0
+        skipped_count = 0
+        
+        # Token de autorización y URL del endpoint externo
+        external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
+        external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
+        
+        # Headers para la llamada externa
+        headers = {
+            "Authorization": f"Bearer {external_token}",
+            "Content-Type": "application/json"
+        }
+        
+        now = datetime.utcnow()
+        
+        # Procesar cada reintento
+        for retry in pending_retries:
+            try:
+                # Verificar nuevamente que no esté completado o haya alcanzado max_retries
+                if retry.status == 'done' or retry.retry_count >= retry.max_retries:
+                    skipped_count += 1
+                    continue
+                
+                processed_count += 1
+                
+                # Actualizar status a 'processing'
+                retry.status = 'processing'
+                retry.last_retry_at = now
+                retry.retry_count += 1
+                db.session.commit()
+                
+                # Obtener el crm_payload
+                crm_payload = retry.crm_payload
+                if not crm_payload:
+                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} no tiene crm_payload")
+                    retry.status = 'failed'
+                    retry.error_message = "No se encontró crm_payload"
+                    retry.completed_at = now
+                    db.session.commit()
+                    failed_count += 1
+                    continue
+                
+                # Preparar payload para enviar al endpoint externo
+                # El crm_payload ya debería tener la estructura correcta
+                payload_externo = dict(crm_payload)
+                
+                # Calcular total si no está presente
+                if 'total' not in payload_externo:
+                    total_venta = 0
+                    if payload_externo.get('js'):
+                        total_venta = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
+                    payload_externo["total"] = total_venta
+                
+                print(f"[DEBUG process_sale_retries] Procesando retry {retry.id}, intento {retry.retry_count}")
+                print(f"[DEBUG process_sale_retries] Payload keys: {list(payload_externo.keys())}")
+                
+                # Hacer la llamada POST al endpoint externo
+                try:
+                    response = requests.post(
+                        external_url,
+                        json=payload_externo,
+                        headers=headers,
+                        timeout=30
+                    )
+                    
+                    response_text = None
+                    response_json = None
+                    try:
+                        response_text = response.text
+                        try:
+                            response_json = response.json()
+                        except:
+                            pass
+                    except:
+                        pass
+                    
+                    # Verificar si fue exitoso
+                    if response.status_code in [200, 201] and response_json:
+                        # Intentar obtener venta_id desde el root del JSON
+                        external_venta_id = response_json.get('venta_id')
+                        
+                        # Si no está en el root, intentar desde data
+                        if not external_venta_id and 'data' in response_json:
+                            external_venta_id = response_json.get('data', {}).get('venta_id') or response_json.get('data', {}).get('crm_order_id')
+                        
+                        if external_venta_id:
+                            # Éxito: actualizar el retry como completado
+                            retry.status = 'done'
+                            retry.completed_at = now
+                            retry.error_message = None
+                            retry.error_details = {
+                                "success": True,
+                                "status_code": response.status_code,
+                                "crm_order_id": external_venta_id
+                            }
+                            
+                            # Si hay order_id, actualizar la orden con el crm_order_id
+                            if retry.order_id:
+                                order = Order.query.get(retry.order_id)
+                                if order:
+                                    order.crm_order_id = external_venta_id
+                                    print(f"[DEBUG process_sale_retries] ✅ Orden {order.id} actualizada con crm_order_id={external_venta_id}")
+                            
+                            db.session.commit()
+                            successful_count += 1
+                            print(f"[DEBUG process_sale_retries] ✅ Retry {retry.id} completado exitosamente con crm_order_id={external_venta_id}")
+                        else:
+                            # No se pudo obtener el venta_id
+                            error_msg = "No se pudo obtener el ID de venta del endpoint externo"
+                            retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                            retry.error_message = error_msg
+                            retry.error_details = {
+                                "success": False,
+                                "status_code": response.status_code,
+                                "response": response_json
+                            }
+                            if retry.retry_count >= retry.max_retries:
+                                retry.completed_at = now
+                            db.session.commit()
+                            failed_count += 1
+                            print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                    else:
+                        # Error en la respuesta
+                        error_msg = f"El endpoint externo retornó código {response.status_code}"
+                        retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                        retry.error_message = error_msg
+                        retry.error_details = {
+                            "success": False,
+                            "status_code": response.status_code,
+                            "response_text": response_text,
+                            "response_json": response_json
+                        }
+                        if retry.retry_count >= retry.max_retries:
+                            retry.completed_at = now
+                        db.session.commit()
+                        failed_count += 1
+                        print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                        
+                except requests.exceptions.RequestException as req_error:
+                    # Error de conexión o timeout
+                    error_msg = f"Error al llamar al endpoint externo: {str(req_error)}"
+                    retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                    retry.error_message = error_msg
+                    retry.error_details = {
+                        "success": False,
+                        "error": str(req_error),
+                        "error_type": type(req_error).__name__
+                    }
+                    if retry.retry_count >= retry.max_retries:
+                        retry.completed_at = now
+                    db.session.commit()
+                    failed_count += 1
+                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                    
+                except Exception as ext_error:
+                    # Cualquier otro error
+                    import traceback
+                    error_traceback = traceback.format_exc()
+                    error_msg = f"Error inesperado: {str(ext_error)}"
+                    retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                    retry.error_message = error_msg
+                    retry.error_details = {
+                        "success": False,
+                        "error": str(ext_error),
+                        "error_type": type(ext_error).__name__,
+                        "traceback": error_traceback
+                    }
+                    if retry.retry_count >= retry.max_retries:
+                        retry.completed_at = now
+                    db.session.commit()
+                    failed_count += 1
+                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                    
+            except Exception as retry_error:
+                # Error al procesar un retry individual
+                import traceback
+                error_traceback = traceback.format_exc()
+                print(f"[DEBUG process_sale_retries] ⚠️ Error al procesar retry {retry.id}: {str(retry_error)}")
+                print(f"Traceback:\n{error_traceback}")
+                
+                try:
+                    retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                    retry.error_message = f"Error al procesar: {str(retry_error)}"
+                    if retry.retry_count >= retry.max_retries:
+                        retry.completed_at = datetime.utcnow()
+                    db.session.commit()
+                except:
+                    db.session.rollback()
+                
+                failed_count += 1
+        
+        return success_response(
+            data={
+                "processed_count": processed_count,
+                "successful_count": successful_count,
+                "failed_count": failed_count,
+                "skipped_count": skipped_count
+            },
+            message=f"Se procesaron {processed_count} reintentos: {successful_count} exitosos, {failed_count} fallidos, {skipped_count} omitidos"
+        )
+        
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"Error en process_sale_retries: {str(e)}")
+        print(f"Traceback completo:\n{error_traceback}")
+        return server_error(f"Error al procesar los reintentos: {str(e)}")
