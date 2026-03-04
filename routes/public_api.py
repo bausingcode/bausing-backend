@@ -3256,16 +3256,24 @@ def process_sale_retries():
         # Importar crear_venta y Flask current_app
         from flask import current_app
         from routes.public_api import crear_venta
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
         
-        # Procesar cada reintento
-        for retry in pending_retries:
+        # Función para procesar un retry individual
+        def process_single_retry(retry_id):
+            """Procesa un retry individual con manejo robusto de errores"""
+            retry = None
             try:
+                # Obtener el retry con una nueva sesión de DB para threading
+                retry = db.session.query(SaleRetryQueue).filter_by(id=retry_id).first()
+                
+                if not retry:
+                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry_id} no encontrado")
+                    return {'success': False, 'retry_id': str(retry_id), 'error': 'Retry no encontrado'}
+                
                 # Verificar nuevamente que no esté completado o haya alcanzado max_retries
                 if retry.status == 'done' or retry.retry_count >= retry.max_retries:
-                    skipped_count += 1
-                    continue
-                
-                processed_count += 1
+                    return {'success': False, 'retry_id': str(retry_id), 'skipped': True}
                 
                 # Actualizar status a 'processing'
                 retry.status = 'processing'
@@ -3276,20 +3284,17 @@ def process_sale_retries():
                 # Obtener el crm_payload
                 crm_payload = retry.crm_payload
                 if not crm_payload:
-                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} no tiene crm_payload")
+                    error_msg = "No se encontró crm_payload"
                     retry.status = 'failed'
-                    retry.error_message = "No se encontró crm_payload"
+                    retry.error_message = error_msg
                     retry.completed_at = now
                     db.session.commit()
-                    failed_count += 1
-                    continue
+                    return {'success': False, 'retry_id': str(retry_id), 'error': error_msg}
                 
-                # Usar crear_venta() directamente en lugar de hacer llamada HTTP externa
                 print(f"[DEBUG process_sale_retries] Procesando retry {retry.id}, intento {retry.retry_count}")
-                print(f"[DEBUG process_sale_retries] Payload keys: {list(crm_payload.keys())}")
                 
+                # Llamar a crear_venta usando test_request_context
                 try:
-                    # Llamar a crear_venta usando test_request_context (igual que en orders.py)
                     with current_app.test_request_context(
                         '/api/ventas/crear',
                         method='POST',
@@ -3304,12 +3309,18 @@ def process_sale_retries():
                             response_obj = response
                             status_code = response_obj.status_code if hasattr(response_obj, 'status_code') else 200
                         
-                        if hasattr(response_obj, 'get_json'):
-                            response_data = response_obj.get_json()
-                        elif hasattr(response_obj, 'data'):
-                            response_data = json.loads(response_obj.data.decode('utf-8'))
-                        else:
-                            response_data = response_obj if isinstance(response_obj, dict) else {}
+                        # Obtener response_data
+                        response_data = {}
+                        try:
+                            if hasattr(response_obj, 'get_json'):
+                                response_data = response_obj.get_json() or {}
+                            elif hasattr(response_obj, 'data'):
+                                response_data = json.loads(response_obj.data.decode('utf-8'))
+                            elif isinstance(response_obj, dict):
+                                response_data = response_obj
+                        except Exception as parse_error:
+                            print(f"[DEBUG process_sale_retries] ⚠️ Error al parsear respuesta: {str(parse_error)}")
+                            response_data = {'error': f'Error al parsear respuesta: {str(parse_error)}'}
                         
                         # Verificar si fue exitoso
                         if status_code == 200 and response_data.get('status', False):
@@ -3328,17 +3339,17 @@ def process_sale_retries():
                                 
                                 # Si hay order_id, actualizar la orden con el crm_order_id
                                 if retry.order_id:
-                                    order = Order.query.get(retry.order_id)
+                                    order = db.session.query(Order).filter_by(id=retry.order_id).first()
                                     if order:
                                         order.crm_order_id = external_venta_id
                                         print(f"[DEBUG process_sale_retries] ✅ Orden {order.id} actualizada con crm_order_id={external_venta_id}")
                                 
                                 db.session.commit()
-                                successful_count += 1
                                 print(f"[DEBUG process_sale_retries] ✅ Retry {retry.id} completado exitosamente con crm_order_id={external_venta_id}")
+                                return {'success': True, 'retry_id': str(retry_id), 'crm_order_id': external_venta_id}
                             else:
                                 # No se pudo obtener el venta_id
-                                error_msg = "No se pudo obtener el ID de venta de crear_venta"
+                                error_msg = f"No se pudo obtener el ID de venta. Response: {json.dumps(response_data, default=str)}"
                                 retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
                                 retry.error_message = error_msg
                                 retry.error_details = {
@@ -3349,11 +3360,11 @@ def process_sale_retries():
                                 if retry.retry_count >= retry.max_retries:
                                     retry.completed_at = now
                                 db.session.commit()
-                                failed_count += 1
                                 print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                                return {'success': False, 'retry_id': str(retry_id), 'error': error_msg}
                         else:
                             # Error en la respuesta
-                            error_msg = response_data.get('message', f'Error al crear venta: status_code={status_code}')
+                            error_msg = response_data.get('message', f'Error al crear venta: status_code={status_code}, response={json.dumps(response_data, default=str)}')
                             retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
                             retry.error_message = error_msg
                             retry.error_details = {
@@ -3364,46 +3375,91 @@ def process_sale_retries():
                             if retry.retry_count >= retry.max_retries:
                                 retry.completed_at = now
                             db.session.commit()
-                            failed_count += 1
                             print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                            return {'success': False, 'retry_id': str(retry_id), 'error': error_msg}
                             
                 except Exception as ext_error:
                     # Cualquier otro error
                     import traceback
                     error_traceback = traceback.format_exc()
                     error_msg = f"Error inesperado: {str(ext_error)}"
-                    retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
-                    retry.error_message = error_msg
-                    retry.error_details = {
-                        "success": False,
-                        "error": str(ext_error),
-                        "error_type": type(ext_error).__name__,
-                        "traceback": error_traceback
-                    }
-                    if retry.retry_count >= retry.max_retries:
-                        retry.completed_at = now
-                    db.session.commit()
-                    failed_count += 1
-                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                    if retry:
+                        retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                        retry.error_message = error_msg
+                        retry.error_details = {
+                            "success": False,
+                            "error": str(ext_error),
+                            "error_type": type(ext_error).__name__,
+                            "traceback": error_traceback
+                        }
+                        if retry.retry_count >= retry.max_retries:
+                            retry.completed_at = now
+                        try:
+                            db.session.commit()
+                        except:
+                            db.session.rollback()
+                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry_id} falló: {error_msg}")
                     print(f"Traceback:\n{error_traceback}")
+                    return {'success': False, 'retry_id': str(retry_id), 'error': error_msg}
                     
             except Exception as retry_error:
                 # Error al procesar un retry individual
                 import traceback
                 error_traceback = traceback.format_exc()
-                print(f"[DEBUG process_sale_retries] ⚠️ Error al procesar retry {retry.id}: {str(retry_error)}")
+                error_msg = f"Error al procesar: {str(retry_error)}"
+                print(f"[DEBUG process_sale_retries] ⚠️ Error al procesar retry {retry_id}: {error_msg}")
                 print(f"Traceback:\n{error_traceback}")
                 
+                # Intentar actualizar el status incluso si hay error
                 try:
-                    retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
-                    retry.error_message = f"Error al procesar: {str(retry_error)}"
-                    if retry.retry_count >= retry.max_retries:
-                        retry.completed_at = datetime.utcnow()
-                    db.session.commit()
-                except:
-                    db.session.rollback()
+                    retry = db.session.query(SaleRetryQueue).filter_by(id=retry_id).first()
+                    if retry:
+                        retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                        retry.error_message = error_msg
+                        if retry.retry_count >= retry.max_retries:
+                            retry.completed_at = datetime.utcnow()
+                        db.session.commit()
+                except Exception as update_error:
+                    print(f"[DEBUG process_sale_retries] ⚠️ Error al actualizar status del retry {retry_id}: {str(update_error)}")
+                    try:
+                        db.session.rollback()
+                    except:
+                        pass
                 
-                failed_count += 1
+                return {'success': False, 'retry_id': str(retry_id), 'error': error_msg}
+            finally:
+                # Asegurar que siempre se haga rollback si hay error pendiente
+                try:
+                    if db.session.is_active:
+                        db.session.rollback()
+                except:
+                    pass
+        
+        # Procesar en paralelo usando ThreadPoolExecutor
+        retry_ids = [str(retry.id) for retry in pending_retries]
+        
+        # Procesar en paralelo (máximo 5 threads simultáneos)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_retry = {executor.submit(process_single_retry, retry_id): retry_id for retry_id in retry_ids}
+            
+            for future in as_completed(future_to_retry):
+                retry_id = future_to_retry[future]
+                try:
+                    result = future.result()
+                    if result.get('skipped'):
+                        skipped_count += 1
+                    elif result.get('success'):
+                        processed_count += 1
+                        successful_count += 1
+                    else:
+                        processed_count += 1
+                        failed_count += 1
+                except Exception as e:
+                    import traceback
+                    print(f"[DEBUG process_sale_retries] ⚠️ Error al obtener resultado del retry {retry_id}: {str(e)}")
+                    print(traceback.format_exc())
+                    processed_count += 1
+                    failed_count += 1
         
         return success_response(
             data={
