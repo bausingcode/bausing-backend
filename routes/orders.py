@@ -11,6 +11,7 @@ from models.product import Product, ProductVariant, ProductVariantOption
 from sqlalchemy import desc, func, text
 from sqlalchemy.exc import IntegrityError
 from routes.auth import user_required
+from routes.admin import admin_required
 from config import Config
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -2358,3 +2359,49 @@ def mercadopago_webhook():
         print(f"[MP-WH] ❌ Error en webhook: {str(e)}")
         print(traceback.format_exc())
         return '', 500
+
+
+@orders_bp.route('/failed-retries', methods=['GET'])
+@admin_required
+def get_failed_retries():
+    """
+    Endpoint para obtener los registros de sale_retry_queue con status 'pending'
+    Separados en dos grupos:
+    - Pendientes normales (retry_count < 5)
+    - Requieren proceso manual (retry_count >= 5)
+    """
+    try:
+        from models.sale_retry_queue import SaleRetryQueue
+        
+        # Obtener todos los registros con status 'pending'
+        pending_retries = SaleRetryQueue.query.filter(
+            SaleRetryQueue.status == 'pending'
+        ).order_by(SaleRetryQueue.created_at.desc()).all()
+        
+        # Separar en dos grupos
+        normal_pending = []
+        manual_required = []
+        
+        for retry in pending_retries:
+            retry_dict = retry.to_dict()
+            if retry.retry_count >= 5:
+                manual_required.append(retry_dict)
+            else:
+                normal_pending.append(retry_dict)
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'normal_pending': normal_pending,
+                'manual_required': manual_required
+            }
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Error al obtener failed retries: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener órdenes fallidas: {str(e)}'
+        }), 500
