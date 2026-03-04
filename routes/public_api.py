@@ -3251,17 +3251,11 @@ def process_sale_retries():
         failed_count = 0
         skipped_count = 0
         
-        # Token de autorización y URL del endpoint externo
-        external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
-        external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
-        
-        # Headers para la llamada externa
-        headers = {
-            "Authorization": f"Bearer {external_token}",
-            "Content-Type": "application/json"
-        }
-        
         now = datetime.utcnow()
+        
+        # Importar crear_venta y Flask current_app
+        from flask import current_app
+        from routes.public_api import crear_venta
         
         # Procesar cada reintento
         for retry in pending_retries:
@@ -3290,199 +3284,89 @@ def process_sale_retries():
                     failed_count += 1
                     continue
                 
-                # Preparar payload para enviar al endpoint externo con solo los campos requeridos
-                # Construir el payload igual que en crear_venta
-                payload_externo = {
-                    "fecha_detalle": crm_payload.get('fecha_detalle'),
-                    "tipo_venta": crm_payload.get('tipo_venta'),
-                    "cliente_nombre": crm_payload.get('cliente_nombre'),
-                    "cliente_direccion": crm_payload.get('cliente_direccion'),
-                    "tipo_documento_cliente": crm_payload.get('tipo_documento_cliente'),
-                    "documento_cliente": crm_payload.get('documento_cliente', ''),
-                    "cliente_telefono": crm_payload.get('cliente_telefono'),
-                    "email_cliente": crm_payload.get('email_cliente'),
-                    "provincia_id": crm_payload.get('provincia_id'),
-                    "localidad": crm_payload.get('localidad'),
-                    "zona_id": crm_payload.get('zona_id')
-                }
-                
-                # Normalizar el formato del CUIT si existe
-                if payload_externo.get('tipo_documento_cliente') == 2 and payload_externo.get('documento_cliente'):
-                    documento = payload_externo.get('documento_cliente', '').strip()
-                    # Si el CUIT no tiene el formato correcto, intentar normalizarlo
-                    if documento and len(documento.replace('-', '').replace('.', '')) == 11:
-                        # Remover guiones y puntos existentes
-                        doc_limpio = documento.replace('-', '').replace('.', '')
-                        if doc_limpio.isdigit():
-                            # Formatear como XX-XXXXXXXX-X
-                            documento_formateado = f"{doc_limpio[:2]}-{doc_limpio[2:10]}-{doc_limpio[10:]}"
-                            payload_externo['documento_cliente'] = documento_formateado
-                            print(f"[DEBUG process_sale_retries] CUIT normalizado de '{documento}' a '{documento_formateado}'")
-                    
-                    # Validar el formato después de normalizar
-                    es_valido, mensaje_error, documento_formateado = validar_cuit(payload_externo['documento_cliente'])
-                    if not es_valido:
-                        print(f"[DEBUG process_sale_retries] ADVERTENCIA: CUIT aún inválido después de normalizar: {payload_externo['documento_cliente']}")
-                        print(f"Error: {mensaje_error}")
-                    elif documento_formateado:
-                        # Actualizar el payload con el CUIT formateado
-                        payload_externo['documento_cliente'] = documento_formateado
-                        print(f"[DEBUG process_sale_retries] CUIT formateado en payload externo: '{documento_formateado}'")
-                
-                # Construir el array js con la estructura exacta esperada
-                # IMPORTANTE: El campo "precio" en crm_payload['js'] ya es el precio TOTAL (precio unitario * cantidad)
-                js_array = []
-                for renglon in crm_payload.get('js', []):
-                    if renglon.get('accion') == 'N':
-                        cantidad = float(renglon.get('cantidad_recibida', 0))
-                        # 'precio' ya es el precio TOTAL, no el unitario
-                        precio_total = float(renglon.get('precio', 0))
-                        unitario_sin_fpago = float(renglon.get('unitario_sin_fpago', 0))
-                        
-                        # Si unitario_sin_fpago no está presente, calcularlo dividiendo el total por la cantidad
-                        if unitario_sin_fpago <= 0 and cantidad > 0:
-                            unitario_sin_fpago = precio_total / cantidad
-                        
-                        js_item = {
-                            "id": None,
-                            "accion": "N",
-                            "item_id": renglon.get('item_id'),
-                            "cantidad_recibida": cantidad,
-                            "precio": precio_total,  # Precio TOTAL del producto (ya viene calculado)
-                            "unitario_sin_fpago": unitario_sin_fpago,
-                            "descripcion": renglon.get('descripcion', '')
-                        }
-                        js_array.append(js_item)
-                payload_externo["js"] = js_array
-                
-                # Construir el array formaPagos con la estructura exacta esperada
-                forma_pagos_array = []
-                for pago in crm_payload.get('formaPagos', []):
-                    forma_pago_item = {
-                        "medios_pago_id": pago.get('medios_pago_id'),
-                        "monto_total": float(pago.get('monto_total', 0)),
-                        "procesado": bool(pago.get('procesado', False))
-                    }
-                    forma_pagos_array.append(forma_pago_item)
-                payload_externo["formaPagos"] = forma_pagos_array
-                
-                # Calcular total (el endpoint externo no calcula, necesita recibirlo)
-                total_venta = 0
-                if payload_externo.get('js'):
-                    total_venta = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
-                payload_externo["total"] = total_venta
-                
+                # Usar crear_venta() directamente en lugar de hacer llamada HTTP externa
                 print(f"[DEBUG process_sale_retries] Procesando retry {retry.id}, intento {retry.retry_count}")
-                print(f"[DEBUG process_sale_retries] Payload keys: {list(payload_externo.keys())}")
-                if payload_externo.get('documento_cliente'):
-                    print(f"[DEBUG process_sale_retries] documento_cliente: {payload_externo.get('documento_cliente')}")
+                print(f"[DEBUG process_sale_retries] Payload keys: {list(crm_payload.keys())}")
                 
-                # Debug: Verificar items y totales
-                if payload_externo.get('js'):
-                    total_calculado = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
-                    print(f"[DEBUG process_sale_retries] Total calculado de items: {total_calculado}")
-                if payload_externo.get('formaPagos'):
-                    total_pagos = sum(float(pago.get('monto_total', 0)) for pago in payload_externo['formaPagos'])
-                    print(f"[DEBUG process_sale_retries] Total de pagos: {total_pagos}")
-                
-                # Hacer la llamada POST al endpoint externo
                 try:
-                    response = requests.post(
-                        external_url,
-                        json=payload_externo,
-                        headers=headers,
-                        timeout=30
-                    )
-                    
-                    response_text = None
-                    response_json = None
-                    try:
-                        response_text = response.text
-                        try:
-                            response_json = response.json()
-                        except:
-                            pass
-                    except:
-                        pass
-                    
-                    # Verificar si fue exitoso
-                    if response.status_code in [200, 201] and response_json:
-                        # Intentar obtener venta_id desde el root del JSON
-                        external_venta_id = response_json.get('venta_id')
+                    # Llamar a crear_venta usando test_request_context (igual que en orders.py)
+                    with current_app.test_request_context(
+                        '/api/ventas/crear',
+                        method='POST',
+                        json=crm_payload,
+                        headers={'Authorization': f'Bearer {Config.API_KEY}'}
+                    ):
+                        response = crear_venta()
                         
-                        # Si no está en el root, intentar desde data
-                        if not external_venta_id and 'data' in response_json:
-                            external_venta_id = response_json.get('data', {}).get('venta_id') or response_json.get('data', {}).get('crm_order_id')
-                        
-                        if external_venta_id:
-                            # Éxito: actualizar el retry como completado
-                            retry.status = 'done'
-                            retry.completed_at = now
-                            retry.error_message = None
-                            retry.error_details = {
-                                "success": True,
-                                "status_code": response.status_code,
-                                "crm_order_id": external_venta_id
-                            }
-                            
-                            # Si hay order_id, actualizar la orden con el crm_order_id
-                            if retry.order_id:
-                                order = Order.query.get(retry.order_id)
-                                if order:
-                                    order.crm_order_id = external_venta_id
-                                    print(f"[DEBUG process_sale_retries] ✅ Orden {order.id} actualizada con crm_order_id={external_venta_id}")
-                            
-                            db.session.commit()
-                            successful_count += 1
-                            print(f"[DEBUG process_sale_retries] ✅ Retry {retry.id} completado exitosamente con crm_order_id={external_venta_id}")
+                        if isinstance(response, tuple):
+                            response_obj, status_code = response
                         else:
-                            # No se pudo obtener el venta_id
-                            error_msg = "No se pudo obtener el ID de venta del endpoint externo"
+                            response_obj = response
+                            status_code = response_obj.status_code if hasattr(response_obj, 'status_code') else 200
+                        
+                        if hasattr(response_obj, 'get_json'):
+                            response_data = response_obj.get_json()
+                        elif hasattr(response_obj, 'data'):
+                            response_data = json.loads(response_obj.data.decode('utf-8'))
+                        else:
+                            response_data = response_obj if isinstance(response_obj, dict) else {}
+                        
+                        # Verificar si fue exitoso
+                        if status_code == 200 and response_data.get('status', False):
+                            external_venta_id = response_data.get('data', {}).get('crm_order_id') or response_data.get('data', {}).get('venta_id')
+                            
+                            if external_venta_id:
+                                # Éxito: actualizar el retry como completado
+                                retry.status = 'done'
+                                retry.completed_at = now
+                                retry.error_message = None
+                                retry.error_details = {
+                                    "success": True,
+                                    "status_code": status_code,
+                                    "crm_order_id": external_venta_id
+                                }
+                                
+                                # Si hay order_id, actualizar la orden con el crm_order_id
+                                if retry.order_id:
+                                    order = Order.query.get(retry.order_id)
+                                    if order:
+                                        order.crm_order_id = external_venta_id
+                                        print(f"[DEBUG process_sale_retries] ✅ Orden {order.id} actualizada con crm_order_id={external_venta_id}")
+                                
+                                db.session.commit()
+                                successful_count += 1
+                                print(f"[DEBUG process_sale_retries] ✅ Retry {retry.id} completado exitosamente con crm_order_id={external_venta_id}")
+                            else:
+                                # No se pudo obtener el venta_id
+                                error_msg = "No se pudo obtener el ID de venta de crear_venta"
+                                retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
+                                retry.error_message = error_msg
+                                retry.error_details = {
+                                    "success": False,
+                                    "status_code": status_code,
+                                    "response": response_data
+                                }
+                                if retry.retry_count >= retry.max_retries:
+                                    retry.completed_at = now
+                                db.session.commit()
+                                failed_count += 1
+                                print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                        else:
+                            # Error en la respuesta
+                            error_msg = response_data.get('message', f'Error al crear venta: status_code={status_code}')
                             retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
                             retry.error_message = error_msg
                             retry.error_details = {
                                 "success": False,
-                                "status_code": response.status_code,
-                                "response": response_json
+                                "status_code": status_code,
+                                "response": response_data
                             }
                             if retry.retry_count >= retry.max_retries:
                                 retry.completed_at = now
                             db.session.commit()
                             failed_count += 1
                             print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
-                    else:
-                        # Error en la respuesta
-                        error_msg = f"El endpoint externo retornó código {response.status_code}"
-                        retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
-                        retry.error_message = error_msg
-                        retry.error_details = {
-                            "success": False,
-                            "status_code": response.status_code,
-                            "response_text": response_text,
-                            "response_json": response_json
-                        }
-                        if retry.retry_count >= retry.max_retries:
-                            retry.completed_at = now
-                        db.session.commit()
-                        failed_count += 1
-                        print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
-                        
-                except requests.exceptions.RequestException as req_error:
-                    # Error de conexión o timeout
-                    error_msg = f"Error al llamar al endpoint externo: {str(req_error)}"
-                    retry.status = 'pending' if retry.retry_count < retry.max_retries else 'failed'
-                    retry.error_message = error_msg
-                    retry.error_details = {
-                        "success": False,
-                        "error": str(req_error),
-                        "error_type": type(req_error).__name__
-                    }
-                    if retry.retry_count >= retry.max_retries:
-                        retry.completed_at = now
-                    db.session.commit()
-                    failed_count += 1
-                    print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
-                    
+                            
                 except Exception as ext_error:
                     # Cualquier otro error
                     import traceback
@@ -3501,6 +3385,7 @@ def process_sale_retries():
                     db.session.commit()
                     failed_count += 1
                     print(f"[DEBUG process_sale_retries] ⚠️ Retry {retry.id} falló: {error_msg}")
+                    print(f"Traceback:\n{error_traceback}")
                     
             except Exception as retry_error:
                 # Error al procesar un retry individual
