@@ -3290,19 +3290,100 @@ def process_sale_retries():
                     failed_count += 1
                     continue
                 
-                # Preparar payload para enviar al endpoint externo
-                # El crm_payload ya debería tener la estructura correcta
-                payload_externo = dict(crm_payload)
+                # Preparar payload para enviar al endpoint externo con solo los campos requeridos
+                # Construir el payload igual que en crear_venta
+                payload_externo = {
+                    "fecha_detalle": crm_payload.get('fecha_detalle'),
+                    "tipo_venta": crm_payload.get('tipo_venta'),
+                    "cliente_nombre": crm_payload.get('cliente_nombre'),
+                    "cliente_direccion": crm_payload.get('cliente_direccion'),
+                    "tipo_documento_cliente": crm_payload.get('tipo_documento_cliente'),
+                    "documento_cliente": crm_payload.get('documento_cliente', ''),
+                    "cliente_telefono": crm_payload.get('cliente_telefono'),
+                    "email_cliente": crm_payload.get('email_cliente'),
+                    "provincia_id": crm_payload.get('provincia_id'),
+                    "localidad": crm_payload.get('localidad'),
+                    "zona_id": crm_payload.get('zona_id')
+                }
                 
-                # Calcular total si no está presente
-                if 'total' not in payload_externo:
-                    total_venta = 0
-                    if payload_externo.get('js'):
-                        total_venta = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
-                    payload_externo["total"] = total_venta
+                # Normalizar el formato del CUIT si existe
+                if payload_externo.get('tipo_documento_cliente') == 2 and payload_externo.get('documento_cliente'):
+                    documento = payload_externo.get('documento_cliente', '').strip()
+                    # Si el CUIT no tiene el formato correcto, intentar normalizarlo
+                    if documento and len(documento.replace('-', '').replace('.', '')) == 11:
+                        # Remover guiones y puntos existentes
+                        doc_limpio = documento.replace('-', '').replace('.', '')
+                        if doc_limpio.isdigit():
+                            # Formatear como XX-XXXXXXXX-X
+                            documento_formateado = f"{doc_limpio[:2]}-{doc_limpio[2:10]}-{doc_limpio[10:]}"
+                            payload_externo['documento_cliente'] = documento_formateado
+                            print(f"[DEBUG process_sale_retries] CUIT normalizado de '{documento}' a '{documento_formateado}'")
+                    
+                    # Validar el formato después de normalizar
+                    es_valido, mensaje_error, documento_formateado = validar_cuit(payload_externo['documento_cliente'])
+                    if not es_valido:
+                        print(f"[DEBUG process_sale_retries] ADVERTENCIA: CUIT aún inválido después de normalizar: {payload_externo['documento_cliente']}")
+                        print(f"Error: {mensaje_error}")
+                    elif documento_formateado:
+                        # Actualizar el payload con el CUIT formateado
+                        payload_externo['documento_cliente'] = documento_formateado
+                        print(f"[DEBUG process_sale_retries] CUIT formateado en payload externo: '{documento_formateado}'")
+                
+                # Construir el array js con la estructura exacta esperada
+                # IMPORTANTE: El campo "precio" en crm_payload['js'] ya es el precio TOTAL (precio unitario * cantidad)
+                js_array = []
+                for renglon in crm_payload.get('js', []):
+                    if renglon.get('accion') == 'N':
+                        cantidad = float(renglon.get('cantidad_recibida', 0))
+                        # 'precio' ya es el precio TOTAL, no el unitario
+                        precio_total = float(renglon.get('precio', 0))
+                        unitario_sin_fpago = float(renglon.get('unitario_sin_fpago', 0))
+                        
+                        # Si unitario_sin_fpago no está presente, calcularlo dividiendo el total por la cantidad
+                        if unitario_sin_fpago <= 0 and cantidad > 0:
+                            unitario_sin_fpago = precio_total / cantidad
+                        
+                        js_item = {
+                            "id": None,
+                            "accion": "N",
+                            "item_id": renglon.get('item_id'),
+                            "cantidad_recibida": cantidad,
+                            "precio": precio_total,  # Precio TOTAL del producto (ya viene calculado)
+                            "unitario_sin_fpago": unitario_sin_fpago,
+                            "descripcion": renglon.get('descripcion', '')
+                        }
+                        js_array.append(js_item)
+                payload_externo["js"] = js_array
+                
+                # Construir el array formaPagos con la estructura exacta esperada
+                forma_pagos_array = []
+                for pago in crm_payload.get('formaPagos', []):
+                    forma_pago_item = {
+                        "medios_pago_id": pago.get('medios_pago_id'),
+                        "monto_total": float(pago.get('monto_total', 0)),
+                        "procesado": bool(pago.get('procesado', False))
+                    }
+                    forma_pagos_array.append(forma_pago_item)
+                payload_externo["formaPagos"] = forma_pagos_array
+                
+                # Calcular total (el endpoint externo no calcula, necesita recibirlo)
+                total_venta = 0
+                if payload_externo.get('js'):
+                    total_venta = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
+                payload_externo["total"] = total_venta
                 
                 print(f"[DEBUG process_sale_retries] Procesando retry {retry.id}, intento {retry.retry_count}")
                 print(f"[DEBUG process_sale_retries] Payload keys: {list(payload_externo.keys())}")
+                if payload_externo.get('documento_cliente'):
+                    print(f"[DEBUG process_sale_retries] documento_cliente: {payload_externo.get('documento_cliente')}")
+                
+                # Debug: Verificar items y totales
+                if payload_externo.get('js'):
+                    total_calculado = sum(float(item.get('precio', 0)) for item in payload_externo['js'])
+                    print(f"[DEBUG process_sale_retries] Total calculado de items: {total_calculado}")
+                if payload_externo.get('formaPagos'):
+                    total_pagos = sum(float(pago.get('monto_total', 0)) for pago in payload_externo['formaPagos'])
+                    print(f"[DEBUG process_sale_retries] Total de pagos: {total_pagos}")
                 
                 # Hacer la llamada POST al endpoint externo
                 try:
