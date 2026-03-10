@@ -22,7 +22,7 @@ def point_in_polygon(lon, lat, polygon_coordinates):
     Args:
         lon: Longitud del punto
         lat: Latitud del punto
-        polygon_coordinates: Lista de coordenadas [[lon, lat], ...] del polígono
+        polygon_coordinates: Lista de coordenadas [[lon, lat], ...] o [[lon, lat, elevation], ...] del polígono
     
     Returns:
         True si el punto está dentro del polígono, False en caso contrario
@@ -30,17 +30,48 @@ def point_in_polygon(lon, lat, polygon_coordinates):
     if not polygon_coordinates or len(polygon_coordinates) < 3:
         return False
     
-    # Asegurarse de que el polígono esté cerrado
-    if polygon_coordinates[0] != polygon_coordinates[-1]:
-        polygon_coordinates = polygon_coordinates + [polygon_coordinates[0]]
+    # Normalizar coordenadas: tomar solo los primeros 2 valores (lon, lat) en caso de que haya elevación
+    # También manejar casos donde las coordenadas pueden estar anidadas de manera inesperada
+    normalized_coords = []
+    for coord in polygon_coordinates:
+        try:
+            # Si coord es una lista, tomar los primeros 2 elementos
+            if isinstance(coord, (list, tuple)):
+                if len(coord) >= 2:
+                    # Extraer lon y lat, manejando casos donde pueden ser listas anidadas
+                    lon_val = coord[0]
+                    lat_val = coord[1]
+                    
+                    # Si lon_val o lat_val son listas, tomar el primer elemento
+                    while isinstance(lon_val, (list, tuple)) and len(lon_val) > 0:
+                        lon_val = lon_val[0]
+                    while isinstance(lat_val, (list, tuple)) and len(lat_val) > 0:
+                        lat_val = lat_val[0]
+                    
+                    # Convertir a float
+                    lon_val = float(lon_val)
+                    lat_val = float(lat_val)
+                    
+                    normalized_coords.append([lon_val, lat_val])
+                else:
+                    return False  # Coordenada inválida
+            else:
+                return False  # Coordenada no es lista/tupla
+        except (ValueError, TypeError, IndexError) as e:
+            print(f"[DEBUG] Error normalizando coordenada {coord}: {e}")
+            return False  # Error al procesar coordenada
     
-    n = len(polygon_coordinates)
+    # Asegurarse de que el polígono esté cerrado
+    if normalized_coords[0] != normalized_coords[-1]:
+        normalized_coords = normalized_coords + [normalized_coords[0]]
+    
+    n = len(normalized_coords)
     inside = False
     
     j = n - 1
     for i in range(n):
-        xi, yi = polygon_coordinates[i]
-        xj, yj = polygon_coordinates[j]
+        xi, yi = normalized_coords[i]
+        xj, yj = normalized_coords[j]
         
         # Verificar si el rayo cruza el borde
         if ((yi > lat) != (yj > lat)) and (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi):
@@ -55,13 +86,17 @@ def find_locality_by_coordinates(lon, lat):
     """
     Encuentra la localidad basada en coordenadas geográficas.
     Busca en todas las zonas de entrega y verifica si el punto está dentro de algún polígono.
+    Si el punto está dentro de múltiples zonas y alguna empieza con "TERCERIZADO",
+    usa esa zona solo para envío y la otra para todo lo demás.
     
     Args:
         lon: Longitud
         lat: Latitud
     
     Returns:
-        Locality object o None si no se encuentra
+        Tuple (Locality object, shipping_zone_locality) o (None, None) si no se encuentra.
+        shipping_zone_locality es el CrmZoneLocality de la zona TERCERIZADO si existe,
+        None en caso contrario.
     """
     print(f"[DEBUG] find_locality_by_coordinates: Buscando para lon={lon}, lat={lat}")
     
@@ -72,16 +107,24 @@ def find_locality_by_coordinates(lon, lat):
     
     print(f"[DEBUG] Zonas de entrega encontradas: {len(zones)}")
     
+    # Lista para almacenar todas las zonas que contienen el punto
+    matching_zones = []
+    
     for idx, zone in enumerate(zones):
+        # Mostrar todas las zonas para debug (comentado para no saturar logs en producción)
+        # print(f"[DEBUG] Procesando zona {idx + 1}/{len(zones)}: {zone.name} (crm_zone_id: {zone.crm_zone_id})")
+        
         # Solo mostrar progreso cada 5 zonas para no saturar los logs
         if idx % 5 == 0 or idx == len(zones) - 1:
             print(f"[DEBUG] Procesando zona {idx + 1}/{len(zones)}: {zone.name} (crm_zone_id: {zone.crm_zone_id})")
         
         if not zone.surface_geojson:
+            # print(f"[DEBUG] Zona {zone.name} no tiene surface_geojson, saltando")
             continue
         
         # El surface_geojson puede ser una lista de Features o un Feature único
         geojson_data = zone.surface_geojson
+        point_in_zone = False
         
         # Si es una lista, iterar sobre cada Feature
         if isinstance(geojson_data, list):
@@ -94,15 +137,18 @@ def find_locality_by_coordinates(lon, lat):
                             # coordinates[0] es el anillo exterior del polígono
                             polygon_coords = coordinates[0]
                             if point_in_polygon(lon, lat, polygon_coords):
-                                print(f"[DEBUG] ✅ Punto está dentro del polígono de la zona {zone.name}")
-                                # Encontrar la localidad asociada a esta zona
-                                zone_locality = CrmZoneLocality.query.filter_by(
-                                    crm_zone_id=zone.crm_zone_id
-                                ).first()
-                                
-                                if zone_locality and zone_locality.locality:
-                                    print(f"[DEBUG] ✅ Localidad encontrada: {zone_locality.locality.name}")
-                                    return zone_locality.locality
+                                point_in_zone = True
+                                break
+                    elif geometry.get('type') == 'MultiPolygon':
+                        # Manejar MultiPolygon: iterar sobre cada polígono
+                        for polygon_coords_list in geometry.get('coordinates', []):
+                            if polygon_coords_list and len(polygon_coords_list) > 0:
+                                polygon_coords = polygon_coords_list[0]
+                                if point_in_polygon(lon, lat, polygon_coords):
+                                    point_in_zone = True
+                                    break
+                        if point_in_zone:
+                            break
         # Si es un Feature único
         elif isinstance(geojson_data, dict):
             if geojson_data.get('type') == 'Feature' and geojson_data.get('geometry'):
@@ -112,17 +158,88 @@ def find_locality_by_coordinates(lon, lat):
                     if coordinates and len(coordinates) > 0:
                         polygon_coords = coordinates[0]
                         if point_in_polygon(lon, lat, polygon_coords):
-                            print(f"[DEBUG] ✅ Punto está dentro del polígono de la zona {zone.name}")
-                            zone_locality = CrmZoneLocality.query.filter_by(
-                                crm_zone_id=zone.crm_zone_id
-                            ).first()
-                            
-                            if zone_locality and zone_locality.locality:
-                                print(f"[DEBUG] ✅ Localidad encontrada: {zone_locality.locality.name}")
-                                return zone_locality.locality
+                            point_in_zone = True
+                elif geometry.get('type') == 'MultiPolygon':
+                    # Manejar MultiPolygon: iterar sobre cada polígono
+                    for polygon_coords_list in geometry.get('coordinates', []):
+                        if polygon_coords_list and len(polygon_coords_list) > 0:
+                            polygon_coords = polygon_coords_list[0]
+                            if point_in_polygon(lon, lat, polygon_coords):
+                                point_in_zone = True
+                                break
+        
+        if point_in_zone:
+            print(f"[DEBUG] ✅ Punto está dentro del polígono de la zona {zone.name} (crm_zone_id: {zone.crm_zone_id})")
+            # Encontrar la localidad asociada a esta zona
+            zone_locality = CrmZoneLocality.query.filter_by(
+                crm_zone_id=zone.crm_zone_id
+            ).first()
+            
+            if zone_locality and zone_locality.locality:
+                print(f"[DEBUG] ✅ Zona encontrada: {zone.name} con localidad: {zone_locality.locality.name}")
+                matching_zones.append({
+                    'zone': zone,
+                    'zone_locality': zone_locality,
+                    'locality': zone_locality.locality
+                })
+            else:
+                print(f"[DEBUG] ⚠️ Zona {zone.name} contiene el punto pero no tiene localidad asociada")
     
-    print(f"[DEBUG] ❌ No se encontró ninguna localidad para las coordenadas proporcionadas")
-    return None
+    print(f"[DEBUG] Total de zonas que contienen el punto: {len(matching_zones)}")
+    if len(matching_zones) > 0:
+        for i, match in enumerate(matching_zones):
+            print(f"[DEBUG]   Zona {i+1}: {match['zone'].name} (crm_zone_id: {match['zone'].crm_zone_id})")
+    
+    if not matching_zones:
+        print(f"[DEBUG] ❌ No se encontró ninguna localidad para las coordenadas proporcionadas")
+        return (None, None)
+    
+    # Si hay múltiples zonas, verificar si alguna empieza con "TERCERIZADO"
+    if len(matching_zones) > 1:
+        print(f"[DEBUG] ⚠️ Punto está dentro de {len(matching_zones)} zonas - Verificando si alguna es TERCERIZADO")
+        
+        # Buscar zona que empiece con "TERCERIZADO"
+        tercerizado_zone = None
+        other_zones = []
+        
+        for match in matching_zones:
+            zone_name = match['zone'].name
+            zone_name_upper = zone_name.upper().strip()
+            print(f"[DEBUG] Verificando zona: '{zone_name}' (upper: '{zone_name_upper}')")
+            
+            # Verificar si empieza con "TERCERIZADO" (sin importar espacios, acentos, etc.)
+            if zone_name_upper.startswith('TERCERIZADO'):
+                tercerizado_zone = match
+                print(f"[DEBUG] ✅ Zona TERCERIZADO encontrada: {zone_name} (crm_zone_id: {match['zone'].crm_zone_id})")
+            else:
+                # Agregar todas las zonas no-TERCERIZADO
+                other_zones.append(match)
+                print(f"[DEBUG] ✅ Zona normal encontrada: {zone_name} (crm_zone_id: {match['zone'].crm_zone_id})")
+        
+        print(f"[DEBUG] Resumen: {len(other_zones)} zona(s) normal(es), {'1 zona TERCERIZADO' if tercerizado_zone else '0 zonas TERCERIZADO'}")
+        
+        # Si hay una zona TERCERIZADO y al menos una normal
+        if tercerizado_zone and len(other_zones) > 0:
+            # Usar la primera zona no-TERCERIZADO para todo lo demás
+            other_zone = other_zones[0]
+            print(f"[DEBUG] ========================================")
+            print(f"[DEBUG] DECISIÓN: Usando zona TERCERIZADO ({tercerizado_zone['zone'].name}) SOLO para envío")
+            print(f"[DEBUG] DECISIÓN: Usando zona normal ({other_zone['zone'].name}) para todo lo demás")
+            print(f"[DEBUG] ========================================")
+            # Retornar la localidad de la zona normal, pero también la zona_locality de TERCERIZADO para envío
+            return (other_zone['locality'], tercerizado_zone['zone_locality'])
+        elif tercerizado_zone:
+            # Solo hay zona TERCERIZADO, usarla normalmente
+            print(f"[DEBUG] Solo se encontró zona TERCERIZADO, usándola normalmente")
+            return (tercerizado_zone['locality'], None)
+        else:
+            # Hay múltiples zonas pero ninguna es TERCERIZADO, usar la primera
+            print(f"[DEBUG] Múltiples zonas encontradas pero ninguna es TERCERIZADO, usando la primera: {matching_zones[0]['zone'].name}")
+            return (matching_zones[0]['locality'], None)
+    else:
+        # Solo hay una zona
+        print(f"[DEBUG] ✅ Una sola zona encontrada: {matching_zones[0]['zone'].name}")
+        return (matching_zones[0]['locality'], None)
 
 
 def is_local_ip(ip_address):
@@ -583,7 +700,7 @@ def detect_locality():
         
         # Buscar localidad por coordenadas
         print(f"[DEBUG] Buscando localidad para coordenadas: lon={lon}, lat={lat}")
-        locality = find_locality_by_coordinates(lon, lat)
+        locality, shipping_zone_locality = find_locality_by_coordinates(lon, lat)
         
         if not locality:
             print(f"❌ No se encontró localidad para coordenadas: lon={lon}, lat={lat}")
@@ -662,19 +779,28 @@ def detect_locality():
         
         print(f"✅ Localidad encontrada: {locality.name} (ID: {locality.id})")
         
-        # Obtener la zona de entrega asociada a esta localidad
+        # Obtener la zona de entrega asociada a esta localidad (para todo lo demás, no envío)
         crm_zone_id = None
         is_third_party_transport = False
         shipping_price = None
+        
+        # Si hay una zona TERCERIZADO para envío, usar esa para calcular envío
+        if shipping_zone_locality:
+            print(f"[DEBUG] Usando zona TERCERIZADO solo para cálculo de envío")
+            is_third_party_transport = shipping_zone_locality.is_third_party_transport or False
+            shipping_price = float(shipping_zone_locality.shipping_price) if shipping_zone_locality.shipping_price else None
+            print(f"[DEBUG] Envío (zona TERCERIZADO): is_third_party={is_third_party_transport}, shipping_price={shipping_price}")
+        
+        # Obtener la zona de entrega de la localidad principal (para todo lo demás)
         zone_locality = CrmZoneLocality.query.filter_by(locality_id=locality.id).first()
-        is_third_party_transport = False
-        shipping_price = None
         
         if zone_locality:
             crm_zone_id = zone_locality.crm_zone_id
-            is_third_party_transport = zone_locality.is_third_party_transport or False
-            shipping_price = float(zone_locality.shipping_price) if zone_locality.shipping_price else None
-            print(f"[DEBUG] Zona de entrega encontrada: crm_zone_id={crm_zone_id}, is_third_party={is_third_party_transport}, shipping_price={shipping_price}")
+            # Solo usar is_third_party_transport y shipping_price de la zona principal si no hay zona TERCERIZADO
+            if not shipping_zone_locality:
+                is_third_party_transport = zone_locality.is_third_party_transport or False
+                shipping_price = float(zone_locality.shipping_price) if zone_locality.shipping_price else None
+            print(f"[DEBUG] Zona de entrega principal: crm_zone_id={crm_zone_id}")
         else:
             print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad: {locality.name} (id: {locality.id})")
             # Intentar buscar por nombre de localidad en crm_delivery_zones
@@ -701,6 +827,7 @@ def detect_locality():
             print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad: {locality.name} (id: {locality.id})")
         
         # Agregar información de transporte tercerizado - SIEMPRE incluir estos campos
+        # Si hay zona TERCERIZADO, estos valores vienen de esa zona (solo para envío)
         response_data['is_third_party_transport'] = is_third_party_transport
         if shipping_price is not None:
             response_data['shipping_price'] = shipping_price

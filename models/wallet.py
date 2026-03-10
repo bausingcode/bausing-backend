@@ -40,7 +40,7 @@ class WalletMovement(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     wallet_id = db.Column(UUID(as_uuid=True), db.ForeignKey('wallets.id'), nullable=False)
-    type = db.Column(db.String(50), nullable=False)  # 'credit', 'debit', 'payment', 'cashback', 'refund', 'manual_credit', 'manual_debit'
+    type = db.Column(db.String(50), nullable=False)  # 'credit', 'debit', 'payment', 'cashback', 'refund', 'manual_credit', 'manual_debit', 'referral_credit'
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     description = db.Column(db.Text)
     order_id = db.Column(UUID(as_uuid=True), db.ForeignKey('orders.id'), nullable=True)

@@ -72,7 +72,7 @@ def calculate_wallet_balance(wallet_id, include_expired=False):
     # Tipos que son débitos (restan dinero)
     debit_types = ['manual_debit', 'order_payment', 'purchase', 'payment', 'transfer_out']
     # Tipos que son créditos (suman dinero)
-    credit_types = ['manual_credit', 'cashback', 'refund', 'transfer_in', 'accreditation', 'credit']
+    credit_types = ['manual_credit', 'cashback', 'refund', 'transfer_in', 'accreditation', 'credit', 'referral_credit']
     
     if include_expired:
         # Sumar TODOS los créditos (incluidos vencidos)

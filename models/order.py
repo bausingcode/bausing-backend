@@ -22,6 +22,7 @@ class Order(db.Model):
     payment_method = db.Column(db.String(200), nullable=True)  # Puede ser múltiples métodos separados por coma
     payment_processed = db.Column(db.Boolean, default=False, nullable=False)
     used_wallet_amount = db.Column(db.Numeric(10, 2), nullable=True)
+    referral_code_used = db.Column(db.String(20), nullable=True)  # Código de referido usado en esta orden
     # Usar lambda para asegurar que se llame la función cada vez
     created_at = db.Column(db.DateTime, default=lambda: get_argentina_time(), nullable=False)
     finalized_at = db.Column(db.DateTime, nullable=True)  # Timestamp cuando la orden fue finalizada
@@ -42,6 +43,7 @@ class Order(db.Model):
             'payment_method': self.payment_method,
             'payment_processed': self.payment_processed,
             'used_wallet_amount': float(self.used_wallet_amount) if self.used_wallet_amount else 0.0,
+            'referral_code_used': self.referral_code_used,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'finalized_at': self.finalized_at.isoformat() if self.finalized_at else None
         }

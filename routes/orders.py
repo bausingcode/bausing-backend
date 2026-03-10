@@ -868,6 +868,7 @@ def create_order():
         total = float(data['total'])  # Este total ya viene con el descuento de billetera aplicado desde el frontend
         formData = data.get('customer', {})  # Datos del cliente para el pago
         payment_method = data.get('payment_method', 'card')
+        referral_code = data.get('referral_code', '').strip().upper() if data.get('referral_code') else None
         
         # Obtener payment_methods del frontend (para multi-payment)
         # IMPORTANTE: Definir esto ANTES de cualquier uso
@@ -930,6 +931,18 @@ def create_order():
         print(f"[DEBUG] wallet_amount recibido: {data.get('wallet_amount')}")
         print(f"[DEBUG] used_wallet_amount recibido: {data.get('used_wallet_amount')}")
         print(f"[DEBUG] used_wallet_amount calculado: {used_wallet_amount}")
+        print(f"[DEBUG] referral_code recibido: {referral_code}")
+        
+        # Validar código de referido si se proporcionó
+        if referral_code:
+            from routes.referrals import validate_referral_code_logic
+            validation_result = validate_referral_code_logic(referral_code, user.id)
+            if not validation_result['valid']:
+                return jsonify({
+                    'success': False,
+                    'error': validation_result.get('message', 'Código de referido inválido')
+                }), 400
+            print(f"[DEBUG] ✅ Código de referido válido: {referral_code}")
         
         # Preparar datos para llamar a /api/ventas/crear
         # Primero necesitamos obtener los datos del usuario y dirección
@@ -1011,7 +1024,7 @@ def create_order():
             if not crm_zone_id:
                 return jsonify({
                     'success': False,
-                    'error': f'No se pudo obtener crm_zone_id para la localidad: {city}'
+                    'error': f'La localidad "{city}" no se encontró. Por favor, verifica que la localidad sea correcta.'
                 }), 400
         
         # Preparar items para la orden (guardaremos los precios ajustados después de calcular el descuento)
@@ -1353,7 +1366,8 @@ def create_order():
             "payment_method": payment_method,
             "payment_processed": any(fp.get('procesado', False) for fp in forma_pagos_array),  # True si al menos un pago fue procesado
             "used_wallet_amount": used_wallet_amount,
-            "order_items": order_items_for_payload
+            "order_items": order_items_for_payload,
+            "referral_code_used": referral_code  # Código de referido usado en esta orden
         }
         
         # Llamar a /api/ventas/crear
@@ -2344,6 +2358,17 @@ def mercadopago_webhook():
             order.status = 'pending'  # Cambiar a 'pending' para que se procese
             db.session.commit()
             print(f"[MP-WH] ✅ Orden {order_id} marcada como pagada")
+            
+            # Procesar crédito de referido si la orden tiene código de referido
+            if order.referral_code_used:
+                try:
+                    from routes.referrals import process_referral_credit
+                    process_referral_credit(order)
+                    print(f"[MP-WH] ✅ Procesado crédito de referido para orden {order_id}")
+                except Exception as referral_error:
+                    import traceback
+                    print(f"[MP-WH] ⚠️ Error al procesar crédito de referido: {str(referral_error)}")
+                    print(traceback.format_exc())
             
         except Exception as e:
             db.session.rollback()

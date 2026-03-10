@@ -2,6 +2,8 @@ from database import db
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
 import uuid
+import secrets
+import string
 from werkzeug.security import generate_password_hash, check_password_hash
 
 class User(db.Model):
@@ -21,6 +23,8 @@ class User(db.Model):
     # Columnas de verificación de email
     email_verification_token = db.Column(db.String(255), nullable=True)
     email_verification_token_expires = db.Column(db.DateTime, nullable=True)
+    # Código de referido
+    referral_code = db.Column(db.String(20), unique=True, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     
     def __init__(self, **kwargs):
@@ -44,6 +48,19 @@ class User(db.Model):
         """Verifica la contraseña"""
         return check_password_hash(self.password_hash, password)
 
+    @staticmethod
+    def generate_referral_code():
+        """Genera un código único de referido en formato BAUSING-XXXXXX"""
+        while True:
+            # Generar 6 caracteres alfanuméricos aleatorios
+            random_part = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
+            code = f"BAUSING-{random_part}"
+            
+            # Verificar que no exista
+            existing = User.query.filter_by(referral_code=code).first()
+            if not existing:
+                return code
+
     def to_dict(self, include_sensitive=False):
         """Convierte el usuario a diccionario"""
         data = {
@@ -57,6 +74,7 @@ class User(db.Model):
             'is_suspended': getattr(self, 'is_suspended', False),
             'gender': getattr(self, 'gender', None),
             'birth_date': self.birth_date.isoformat() if self.birth_date else None,
+            'referral_code': self.referral_code,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
         return data

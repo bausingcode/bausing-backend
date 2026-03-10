@@ -253,7 +253,8 @@ def register():
             dni=dni,
             email_verified=False,
             email_verification_token=verification_token,
-            email_verification_token_expires=verification_expires
+            email_verification_token_expires=verification_expires,
+            referral_code=User.generate_referral_code()  # Generar código automáticamente
         )
         user.set_password(password)
         
@@ -592,6 +593,34 @@ def get_current_user():
         'success': True,
         'data': request.user.to_dict()
     }), 200
+
+@auth_bp.route('/referral-code', methods=['GET'])
+@user_required
+def get_referral_code():
+    """
+    Obtener o generar código de referido del usuario autenticado
+    """
+    try:
+        user = request.user
+        
+        # Si no tiene código, generarlo
+        if not user.referral_code:
+            user.referral_code = User.generate_referral_code()
+            db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'referral_code': user.referral_code
+            }
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener código de referido: {str(e)}'
+        }), 500
 
 @auth_bp.route('/profile', methods=['PUT'])
 @user_required

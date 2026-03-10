@@ -629,6 +629,17 @@ def sync_data_new():
                                     order.payment_processed = True
                                     orders_to_update.append(order)
                                     print(f"✅ Marcado payment_processed=True para orden con crm_order_id={crm_order_id} (estado: {nuevo_estado})")
+                                    
+                                    # Procesar crédito de referido si la orden tiene código de referido
+                                    if order.referral_code_used:
+                                        try:
+                                            from routes.referrals import process_referral_credit
+                                            process_referral_credit(order)
+                                            print(f"✅ Procesado crédito de referido para orden {order.id} desde sincronización CRM")
+                                        except Exception as referral_error:
+                                            import traceback
+                                            print(f"⚠️ Error al procesar crédito de referido desde sincronización: {str(referral_error)}")
+                                            print(traceback.format_exc())
                                 else:
                                     print(f"ℹ️  Orden con crm_order_id={crm_order_id} ya tenía payment_processed=True")
                             else:
@@ -2805,9 +2816,14 @@ def crear_venta():
                         existing_order.user_id = user_id
                         existing_order.total = total_venta
                         existing_order.payment_method = payment_method
-                        existing_order.payment_processed = payment_processed
                         existing_order.crm_sale_type_id = data.get('tipo_venta')
                         existing_order.used_wallet_amount = float(used_wallet_amount) if used_wallet_amount else None
+                        # Actualizar referral_code_used si viene en el payload
+                        if data.get('referral_code_used'):
+                            existing_order.referral_code_used = data.get('referral_code_used', '').strip().upper()
+                        # Actualizar payment_processed (importante: hacerlo al final para procesar referido)
+                        was_paid = existing_order.payment_processed
+                        existing_order.payment_processed = payment_processed
                         
                         # Si la orden tiene un created_at muy antiguo o parece estar en UTC (diferencia > 2 horas),
                         # actualizarlo a la hora de Argentina
@@ -2828,8 +2844,20 @@ def crear_venta():
                         order = existing_order
                         order_id = str(order.id)
                         print(f"[DEBUG crear_venta] ✅ Orden existente actualizada con id={order_id}")
+                        
+                        # Procesar crédito de referido si la orden se marcó como pagada y tiene código de referido
+                        if payment_processed and not was_paid and order.referral_code_used:
+                            try:
+                                from routes.referrals import process_referral_credit
+                                process_referral_credit(order)
+                                print(f"[DEBUG crear_venta] ✅ Procesado crédito de referido para orden existente {order_id}")
+                            except Exception as referral_error:
+                                import traceback
+                                print(f"[DEBUG crear_venta] ⚠️ Error al procesar crédito de referido: {str(referral_error)}")
+                                print(traceback.format_exc())
                     else:
                         # Crear la orden
+                        referral_code_used = data.get('referral_code_used', '').strip().upper() if data.get('referral_code_used') else None
                         order = Order(
                             user_id=user_id,
                             crm_order_id=crm_order_id,
@@ -2838,7 +2866,8 @@ def crear_venta():
                             status='pending',
                             payment_method=payment_method,
                             payment_processed=payment_processed,
-                            used_wallet_amount=float(used_wallet_amount) if used_wallet_amount else None
+                            used_wallet_amount=float(used_wallet_amount) if used_wallet_amount else None,
+                            referral_code_used=referral_code_used
                         )
                         db.session.add(order)
                         db.session.flush()
@@ -2874,6 +2903,18 @@ def crear_venta():
                     db.session.refresh(order)
                     order_id = str(order.id)  # Asegurar que tenemos el ID correcto después del commit
                     print(f"[DEBUG crear_venta] ✅ Orden guardada en BD con id={order_id}, total={order.total}, status={order.status}")
+                    
+                    # Procesar crédito de referido si la orden está pagada y tiene código de referido
+                    if order.payment_processed and order.referral_code_used:
+                        try:
+                            from routes.referrals import process_referral_credit
+                            process_referral_credit(order)
+                            print(f"[DEBUG crear_venta] ✅ Procesado crédito de referido para orden {order_id}")
+                        except Exception as referral_error:
+                            # No fallar la creación de orden si falla el procesamiento de referido
+                            import traceback
+                            print(f"[DEBUG crear_venta] ⚠️ Error al procesar crédito de referido: {str(referral_error)}")
+                            print(traceback.format_exc())
                 except IntegrityError as integrity_error:
                     db.session.rollback()
                     # Si es un error de duplicado, intentar obtener la orden existente

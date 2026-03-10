@@ -27,6 +27,7 @@ def register_routes(app):
     from .reviews import reviews_bp
     from .card_banks import card_banks_bp
     from .delivery_zones import delivery_zones_bp
+    from .referrals import referrals_bp
 
     app.register_blueprint(categories_bp, url_prefix='/categories')
     app.register_blueprint(products_bp, url_prefix='/products')
@@ -55,4 +56,5 @@ def register_routes(app):
     app.register_blueprint(reviews_bp, url_prefix='/api')
     app.register_blueprint(card_banks_bp, url_prefix='')
     app.register_blueprint(delivery_zones_bp, url_prefix='/admin/delivery-zones')
+    app.register_blueprint(referrals_bp, url_prefix='/api')
 

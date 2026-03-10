@@ -14,6 +14,7 @@ from .blog import BlogPost, BlogPostKeyword, BlogPostImage
 from .wallet import Wallet, WalletMovement, AuditLog
 from .order import Order
 from .order_item import OrderItem
+from .referral import Referral
 from .cart import Cart
 from .test_table import TestTable
 from .homepage_distribution import HomepageProductDistribution
@@ -60,6 +61,7 @@ __all__ = [
     'AuditLog',
     'Order',
     'OrderItem',
+    'Referral',
     'Cart',
     'TestTable',
     'HomepageProductDistribution',

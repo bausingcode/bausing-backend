@@ -78,9 +78,55 @@ def get_products():
             )
             query = query.filter(search_filter)
         
-        # Filtro por categoría única
+        # Filtro por categoría única (incluyendo subcategorías)
         if category_id:
-            query = query.filter_by(category_id=category_id)
+            # Obtener todas las subcategorías (hijas) de esta categoría
+            try:
+                import uuid as uuid_lib
+                category_uuid = uuid_lib.UUID(category_id) if isinstance(category_id, str) else category_id
+                
+                # Verificar que la categoría existe
+                main_category = Category.query.get(category_uuid)
+                if not main_category:
+                    print(f"[WARNING] Categoría {category_id} no encontrada")
+                    query = query.filter_by(category_id=category_id)  # Filtrar por ID inexistente (devolverá 0)
+                else:
+                    print(f"[DEBUG] Categoría principal: {main_category.name} (ID: {category_id})")
+                    
+                    # Obtener la categoría y todas sus subcategorías recursivamente
+                    def get_all_subcategory_ids(cat_id):
+                        """Obtiene todos los IDs de subcategorías (hijas) de una categoría"""
+                        subcategory_ids = [cat_id]
+                        # Buscar todas las categorías hijas directas
+                        children = Category.query.filter_by(parent_id=cat_id).all()
+                        print(f"[DEBUG] Categoría {cat_id} tiene {len(children)} hijos directos")
+                        for child in children:
+                            print(f"[DEBUG] Subcategoría encontrada: {child.name} (ID: {child.id})")
+                            # Agregar el hijo y recursivamente sus hijos
+                            subcategory_ids.extend(get_all_subcategory_ids(child.id))
+                        return subcategory_ids
+                    
+                    # Obtener todos los IDs de categorías a incluir (la categoría principal + todas sus subcategorías)
+                    all_category_ids = get_all_subcategory_ids(category_uuid)
+                    
+                    print(f"[DEBUG] Total de categorías a incluir: {len(all_category_ids)} (1 principal + {len(all_category_ids) - 1} subcategorías)")
+                    print(f"[DEBUG] IDs de categorías: {[str(cid) for cid in all_category_ids]}")
+                    
+                    # Verificar cuántos productos hay en estas categorías (antes de otros filtros)
+                    product_count_before = Product.query.filter(
+                        Product.category_id.in_(all_category_ids),
+                        Product.is_active == True
+                    ).count()
+                    print(f"[DEBUG] Productos activos en estas categorías (antes de otros filtros): {product_count_before}")
+                    
+                    # Filtrar productos que estén en cualquiera de estas categorías
+                    query = query.filter(Product.category_id.in_(all_category_ids))
+            except Exception as e:
+                import traceback
+                print(f"[WARNING] Error obteniendo subcategorías para {category_id}: {e}")
+                traceback.print_exc()
+                # Fallback: filtrar solo por la categoría exacta
+                query = query.filter_by(category_id=category_id)
         
         # Filtro por múltiples categorías
         if category_ids:
@@ -121,16 +167,12 @@ def get_products():
             # Solo productos que tienen al menos una option con stock > 0
             query = query.join(ProductVariant).join(ProductVariantOption).filter(ProductVariantOption.stock > 0).distinct()
         
-        # Filtro por precio
-        if min_price is not None or max_price is not None or locality_id:
-            print(f"[DEBUG] Aplicando filtro de precio - min_price: {min_price}, max_price: {max_price}, locality_id: {locality_id}")
-            # Necesitamos hacer join con variantes, options y precios
-            # ProductPrice.product_variant_id apunta a ProductVariantOption.id, no a ProductVariant.id
+        # Filtro por precio (min/max) — solo aplica INNER JOIN cuando se filtra por rango de precios
+        # El locality_id NO excluye productos: se usa solo para serializar los precios correctos
+        if min_price is not None or max_price is not None:
+            print(f"[DEBUG] Aplicando filtro de precio - min_price: {min_price}, max_price: {max_price}")
             try:
                 # Join correcto: Product -> ProductVariant -> ProductVariantOption -> ProductPrice
-                # ProductVariant.product_id -> Product.id
-                # ProductVariantOption.product_variant_id -> ProductVariant.id
-                # ProductPrice.product_variant_id -> ProductVariantOption.id
                 query = query.join(
                     ProductVariant, ProductVariant.product_id == Product.id
                 ).join(
@@ -138,49 +180,38 @@ def get_products():
                 ).join(
                     ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
                 )
-                
-                # Si hay locality_id, filtrar por su catálogo; si no, usar "Cordoba capital" por defecto
+
+                # Determinar catálogo para filtrar precios
                 try:
                     import uuid as uuid_lib
-                    from models.catalog import LocalityCatalog, Catalog
-                    
+                    from models.catalog import LocalityCatalog
+
                     if locality_id:
                         locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                        print(f"[DEBUG] Filtrando por locality_id (UUID): {locality_uuid}")
-                        # Buscar el catálogo de esta localidad
                         locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
                         if locality_catalog:
-                            # Filtrar por catalog_id (nuevo sistema)
-                            print(f"[DEBUG] Filtrando por catalog_id: {locality_catalog.catalog_id}")
                             query = query.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
                         else:
-                            # Compatibilidad hacia atrás: filtrar por locality_id
-                            print(f"[DEBUG] No se encontró catálogo para localidad, usando locality_id (compatibilidad)")
                             query = query.filter(ProductPrice.locality_id == locality_uuid)
                     else:
-                        # Si no hay localidad, usar el catálogo "Cordoba capital" por defecto
                         from models.product import get_cordoba_capital_catalog_id
                         cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
                         if cordoba_capital_catalog_id:
-                            print(f"[DEBUG] No hay localidad, usando catálogo por defecto 'Cordoba capital': {cordoba_capital_catalog_id}")
                             query = query.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
                 except (ValueError, TypeError) as e:
                     print(f"[ERROR] Invalid locality_id format: {locality_id}, error: {e}")
-                    import traceback
-                    traceback.print_exc()
                     return jsonify({
                         'success': False,
                         'error': f'Formato de locality_id inválido: {locality_id}'
                     }), 400
-                
+
                 if min_price is not None:
                     query = query.filter(ProductPrice.price >= min_price)
-                
                 if max_price is not None:
                     query = query.filter(ProductPrice.price <= max_price)
-                
+
                 query = query.distinct()
-                print(f"[DEBUG] Query después de filtros de precio aplicados")
+                print(f"[DEBUG] Query con filtro de rango de precio aplicado")
             except Exception as e:
                 print(f"[ERROR] Error en join de precios: {str(e)}")
                 import traceback
