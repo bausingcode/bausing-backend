@@ -439,6 +439,15 @@ def sync_data_new():
             print("[DEBUG] Error: El body es requerido")
             return validation_error("El body es requerido")
         
+        # Debug completo: ayuda a detectar mismatches de shape/keys en payload
+        try:
+            import json
+            print("[DEBUG] Body completo recibido (JSON):")
+            print(json.dumps(body_data, ensure_ascii=True, default=str))
+        except Exception as debug_json_error:
+            print(f"[DEBUG] No se pudo imprimir JSON completo: {str(debug_json_error)}")
+            print(f"[DEBUG] Body (repr): {repr(body_data)}")
+        
         print(f"[DEBUG] Body recibido - Tipo: {body_data.get('tipo', 'N/A')}")
         print(f"[DEBUG] Body recibido - Cantidad de datos: {len(body_data.get('datos', [])) if isinstance(body_data.get('datos'), list) else 'N/A'}")
         print(f"[DEBUG] Body recibido - Sincronizar: {body_data.get('sincronizar', {})}")
@@ -565,14 +574,20 @@ def sync_data_new():
         else:
             return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, provincias, tipos_documento, tipos_venta, ventas, medios_pago, stock")
         
+        print(f"[DEBUG] SQL function a ejecutar: {function_name}")
+        
         # Llamar a la función correspondiente
         try:
             from sqlalchemy import text, bindparam
             from sqlalchemy.dialects.postgresql import JSONB
+            import time
             
             # Para ventas, necesitamos obtener estados anteriores ANTES de sincronizar
             # Hacerlo en una transacción separada para evitar conflictos
             estados_anteriores = {}
+            # En otros tipos (ej: productos/zonas) no existe orders_to_update,
+            # pero más abajo se chequea igualmente. Evitamos NameError.
+            orders_to_update = []
             if tipo == 'ventas':
                 try:
                     # Asegurarse de que no hay transacción abortada antes de consultar
@@ -599,12 +614,14 @@ def sync_data_new():
             # SQLAlchemy JSONB acepta dict directamente o string JSON
             if tipo == 'ventas':
                 # sync_crm_ventas retorna resultados, usar SELECT * FROM
+                sql_start = time.time()
                 result = db.session.execute(
                     text(f"SELECT * FROM {function_name}(:json_data)").bindparams(
                         bindparam('json_data', type_=JSONB)
                     ),
                     {"json_data": body_data}
                 )
+                print(f"[DEBUG] SQL ejecutado (ventas) - elapsed={time.time() - sql_start:.3f}s")
                 
                 # Procesar resultados y detectar cambios de estado
                 rows = result.fetchall()
@@ -694,12 +711,14 @@ def sync_data_new():
                             print(f"❌ Error al enviar email de notificación: {str(email_error)}")
             else:
                 # Otras funciones retornan void o un valor simple
+                sql_start = time.time()
                 result = db.session.execute(
                     text(f"SELECT {function_name}(:json_data)").bindparams(
                         bindparam('json_data', type_=JSONB)
                     ),
                     {"json_data": body_data}
                 )
+                print(f"[DEBUG] SQL ejecutado ({tipo}) - elapsed={time.time() - sql_start:.3f}s")
             
             # Hacer flush antes del commit para asegurar que los cambios de payment_processed se persistan
             if orders_to_update:
@@ -734,9 +753,15 @@ def sync_data_new():
             
         except Exception as e:
             db.session.rollback()
+            import traceback
+            print(f"[DEBUG] Excepcion en /public/sincronizar: {str(e)}")
+            print(traceback.format_exc())
             return processing_error(f"Error al sincronizar datos: {str(e)}")
             
     except Exception as e:
+        import traceback
+        print(f"[DEBUG] Excepcion (server) en /public/sincronizar: {str(e)}")
+        print(traceback.format_exc())
         return server_error(f"Error del servidor: {str(e)}")
 
 
