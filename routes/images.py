@@ -212,7 +212,9 @@ def get_hero_images():
         if active_only:
             query = query.filter_by(is_active=True)
         
-        hero_images = query.order_by(HeroImage.position).all()
+        hero_images = query.order_by(
+            HeroImage.position, HeroImage.created_at.asc()
+        ).all()
         
         return jsonify({
             'success': True,
