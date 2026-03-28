@@ -9,6 +9,66 @@ import uuid
 
 homepage_distribution_bp = Blueprint('homepage_distribution', __name__)
 
+HOMEPAGE_SECTION_LEN = {
+    'featured': 4,
+    'discounts': 3,
+    'mattresses': 4,
+    'complete_purchase': 4,
+}
+
+
+def _homepage_dist_load_options():
+    from sqlalchemy.orm import joinedload
+    from models.product import ProductSubcategory
+    return (
+        joinedload(HomepageProductDistribution.product).joinedload(Product.images),
+        joinedload(HomepageProductDistribution.product).joinedload(Product.category),
+        joinedload(HomepageProductDistribution.product).joinedload(Product.category_option),
+        joinedload(HomepageProductDistribution.product).joinedload(
+            Product.subcategory_associations
+        ).joinedload(ProductSubcategory.subcategory),
+    )
+
+
+def _empty_homepage_grid():
+    return {s: [None] * n for s, n in HOMEPAGE_SECTION_LEN.items()}
+
+
+def _distributions_to_grid(distributions, include_product):
+    grid = _empty_homepage_grid()
+    for dist in distributions:
+        if dist.section in grid and 0 <= dist.position < len(grid[dist.section]):
+            if dist.product_id is None:
+                grid[dist.section][dist.position] = None
+            else:
+                grid[dist.section][dist.position] = dist.to_dict(include_product=include_product)
+    return grid
+
+
+def _merge_draft_over_published(published_distributions, draft_distributions, include_product):
+    pub_grid = _distributions_to_grid(published_distributions, include_product)
+    draft_by_key = {(d.section, d.position): d for d in draft_distributions}
+    merged = {k: list(v) for k, v in pub_grid.items()}
+    for section in merged:
+        for pos in range(len(merged[section])):
+            key = (section, pos)
+            if key not in draft_by_key:
+                continue
+            d = draft_by_key[key]
+            if d.product_id is None:
+                merged[section][pos] = None
+            elif d.product:
+                merged[section][pos] = d.to_dict(include_product=include_product)
+            else:
+                merged[section][pos] = {
+                    'id': str(d.id),
+                    'section': d.section,
+                    'position': d.position,
+                    'product_id': str(d.product_id) if d.product_id else None,
+                }
+    return merged
+
+
 def get_available_replacement_product(exclude_product_ids, section_products=None):
     """Una query SQL con filtro de stock; reemplaza el bucle N×check_crm_stock."""
     try:
@@ -20,28 +80,35 @@ def get_available_replacement_product(exclude_product_ids, section_products=None
 @homepage_distribution_bp.route('/admin/homepage-distribution', methods=['GET'])
 @admin_required
 def get_homepage_distribution():
-    """Obtener toda la distribución de productos en el inicio"""
+    """Publicado + borrador mezclado (draft sobre escribe slots editados)."""
     try:
-        distributions = HomepageProductDistribution.query.order_by(
-            HomepageProductDistribution.section,
-            HomepageProductDistribution.position
-        ).all()
-        
-        # Organizar por sección
-        result = {
-            'featured': [None] * 4,  # 4 productos destacados
-            'discounts': [None] * 3,  # 3 productos en descuentazos
-            'mattresses': [None] * 4,  # 4 productos "Nuestros Colchones"
-            'complete_purchase': [None] * 4  # 4 productos "Completa tu compra"
-        }
-        
-        for dist in distributions:
-            if dist.section in result and dist.position < len(result[dist.section]):
-                result[dist.section][dist.position] = dist.to_dict(include_product=True)
-        
+        pub = (
+            HomepageProductDistribution.query.filter_by(is_draft=False)
+            .options(*_homepage_dist_load_options())
+            .order_by(
+                HomepageProductDistribution.section,
+                HomepageProductDistribution.position,
+            )
+            .all()
+        )
+        draft = (
+            HomepageProductDistribution.query.filter_by(is_draft=True)
+            .options(*_homepage_dist_load_options())
+            .order_by(
+                HomepageProductDistribution.section,
+                HomepageProductDistribution.position,
+            )
+            .all()
+        )
+        published_grid = _distributions_to_grid(pub, True)
+        draft_grid = _merge_draft_over_published(pub, draft, True)
         return jsonify({
             'success': True,
-            'data': result
+            'data': {
+                'published': published_grid,
+                'draft': draft_grid,
+                'has_unpublished_changes': len(draft) > 0,
+            },
         }), 200
     except Exception as e:
         return jsonify({
@@ -88,20 +155,30 @@ def set_homepage_distribution():
                 'error': f'Posición inválida. Debe estar entre 0 y {max_positions[section] - 1}'
             }), 400
         
-        # Si product_id es None, eliminar la distribución en esa posición
+        # Borrador: product_id None = hueco en el inicio al publicar (fila borrador en NULL)
         if product_id is None:
             existing = HomepageProductDistribution.query.filter_by(
                 section=section,
-                position=position
+                position=position,
+                is_draft=True,
             ).first()
-            
+
             if existing:
-                db.session.delete(existing)
+                existing.product_id = None
                 db.session.commit()
-            
+            else:
+                empty_draft = HomepageProductDistribution(
+                    section=section,
+                    position=position,
+                    product_id=None,
+                    is_draft=True,
+                )
+                db.session.add(empty_draft)
+                db.session.commit()
+
             return jsonify({
                 'success': True,
-                'message': 'Producto eliminado de la distribución'
+                'message': 'Borrador actualizado (hueco en esta posición)',
             }), 200
         
         # Validar que el producto existe
@@ -120,37 +197,35 @@ def set_homepage_distribution():
                 'error': 'Producto no encontrado'
             }), 404
         
-        # Buscar si ya existe una distribución en esta posición
         existing = HomepageProductDistribution.query.filter_by(
             section=section,
-            position=position
+            position=position,
+            is_draft=True,
         ).first()
-        
+
         if existing:
-            # Actualizar
             existing.product_id = product_uuid
             db.session.commit()
-            
+
             return jsonify({
                 'success': True,
                 'data': existing.to_dict(include_product=True),
-                'message': 'Distribución actualizada'
+                'message': 'Borrador actualizado',
             }), 200
-        else:
-            # Crear nueva
-            new_distribution = HomepageProductDistribution(
-                section=section,
-                position=position,
-                product_id=product_uuid
-            )
-            db.session.add(new_distribution)
-            db.session.commit()
-            
-            return jsonify({
-                'success': True,
-                'data': new_distribution.to_dict(include_product=True),
-                'message': 'Distribución creada'
-            }), 201
+        new_distribution = HomepageProductDistribution(
+            section=section,
+            position=position,
+            product_id=product_uuid,
+            is_draft=True,
+        )
+        db.session.add(new_distribution)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'data': new_distribution.to_dict(include_product=True),
+            'message': 'Borrador creado',
+        }), 201
             
     except IntegrityError as e:
         db.session.rollback()
@@ -165,6 +240,62 @@ def set_homepage_distribution():
             'error': str(e)
         }), 500
 
+
+@homepage_distribution_bp.route('/admin/homepage-distribution/publish', methods=['POST'])
+@admin_required
+def publish_homepage_distribution():
+    """Aplica el borrador como distribución publicada y limpia borradores."""
+    try:
+        pub = HomepageProductDistribution.query.filter_by(is_draft=False).all()
+        draft = HomepageProductDistribution.query.filter_by(is_draft=True).all()
+        merged = _merge_draft_over_published(pub, draft, include_product=False)
+        HomepageProductDistribution.query.filter_by(is_draft=False).delete(synchronize_session=False)
+        HomepageProductDistribution.query.filter_by(is_draft=True).delete(synchronize_session=False)
+        for section, n in HOMEPAGE_SECTION_LEN.items():
+            for pos in range(n):
+                cell = merged[section][pos]
+                pid = None
+                if cell is not None:
+                    raw = cell.get('product_id')
+                    if raw:
+                        pid = uuid.UUID(str(raw))
+                if pid:
+                    db.session.add(
+                        HomepageProductDistribution(
+                            section=section,
+                            position=pos,
+                            product_id=pid,
+                            is_draft=False,
+                        )
+                    )
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Distribución publicada',
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+        }), 500
+
+
+@homepage_distribution_bp.route('/admin/homepage-distribution/draft', methods=['DELETE'])
+@admin_required
+def discard_homepage_draft():
+    """Elimina todas las filas de borrador (vuelve a mostrar solo lo publicado)."""
+    try:
+        HomepageProductDistribution.query.filter_by(is_draft=True).delete(
+            synchronize_session=False
+        )
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Borrador descartado'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @homepage_distribution_bp.route('/homepage-distribution/quick', methods=['GET'])
 def get_public_homepage_distribution_quick():
     """Obtener la distribución de productos rápidamente (sin precios ni promociones)"""
@@ -172,7 +303,8 @@ def get_public_homepage_distribution_quick():
         # Usar eager loading solo para imágenes y categorías básicas
         from sqlalchemy.orm import joinedload
         distributions = HomepageProductDistribution.query.filter(
-            HomepageProductDistribution.product_id.isnot(None)
+            HomepageProductDistribution.product_id.isnot(None),
+            HomepageProductDistribution.is_draft.is_(False),
         ).options(
             joinedload(HomepageProductDistribution.product).joinedload(Product.images),
             joinedload(HomepageProductDistribution.product).joinedload(Product.category),
@@ -435,7 +567,8 @@ def get_public_homepage_distribution():
         from sqlalchemy.orm import joinedload
         from models.product import ProductVariant, ProductVariantOption
         distributions = HomepageProductDistribution.query.filter(
-            HomepageProductDistribution.product_id.isnot(None)
+            HomepageProductDistribution.product_id.isnot(None),
+            HomepageProductDistribution.is_draft.is_(False),
         ).options(
             joinedload(HomepageProductDistribution.product).joinedload(Product.images),
             joinedload(HomepageProductDistribution.product).joinedload(Product.variants).joinedload(ProductVariant.options),

@@ -10,8 +10,14 @@ class HomepageProductDistribution(db.Model):
     section = db.Column(db.String(50), nullable=False)  # 'featured', 'discounts', 'mattresses', 'complete_purchase'
     position = db.Column(db.Integer, nullable=False)  # 0-3 para featured, 0-2 para discounts, 0-3 para los otros
     product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=True)
+    # False = publicado (sitio); True = borrador hasta publicar
+    is_draft = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('false'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('section', 'position', 'is_draft', name='uq_homepage_distribution_slot'),
+    )
 
     # Relaciones
     product = db.relationship('Product', backref='homepage_distributions', lazy=True)
@@ -30,7 +36,8 @@ class HomepageProductDistribution(db.Model):
             data['product'] = self.product.to_dict(
                 include_variants=False,
                 include_images=True,
-                include_promos=True
+                include_promos=False,
+                include_inventory=False,
             )
         
         return data
