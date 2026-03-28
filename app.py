@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from config import Config
 from database import db
 from routes import register_routes
+from utils.request_logging import configure_app_logging, init_request_logging
 import os
 
 # Importar todos los modelos para que SQLAlchemy pueda resolver las foreign keys
@@ -10,6 +11,7 @@ import models  # noqa: F401
 
 app = Flask(__name__)
 app.config.from_object(Config)
+configure_app_logging(app)
 
 # Manejar CORS manualmente
 @app.after_request
@@ -48,6 +50,8 @@ def close_db(error):
 
 # Registrar todas las rutas
 register_routes(app)
+
+init_request_logging(app)
 
 @app.route('/')
 def index():
