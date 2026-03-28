@@ -40,7 +40,6 @@ def get_products():
             # Pre-cargar el cache del catálogo por defecto
             get_cordoba_capital_catalog_id()
         
-        print(f"[DEBUG] get_products - Parámetros recibidos: {dict(request.args)}")
         # Parámetros de búsqueda
         search = request.args.get('search', '').strip()
         category_id = request.args.get('category_id')
@@ -88,10 +87,8 @@ def get_products():
                 # Verificar que la categoría existe
                 main_category = Category.query.get(category_uuid)
                 if not main_category:
-                    print(f"[WARNING] Categoría {category_id} no encontrada")
                     query = query.filter_by(category_id=category_id)  # Filtrar por ID inexistente (devolverá 0)
                 else:
-                    print(f"[DEBUG] Categoría principal: {main_category.name} (ID: {category_id})")
                     
                     # Obtener la categoría y todas sus subcategorías recursivamente
                     def get_all_subcategory_ids(cat_id):
@@ -99,9 +96,7 @@ def get_products():
                         subcategory_ids = [cat_id]
                         # Buscar todas las categorías hijas directas
                         children = Category.query.filter_by(parent_id=cat_id).all()
-                        print(f"[DEBUG] Categoría {cat_id} tiene {len(children)} hijos directos")
                         for child in children:
-                            print(f"[DEBUG] Subcategoría encontrada: {child.name} (ID: {child.id})")
                             # Agregar el hijo y recursivamente sus hijos
                             subcategory_ids.extend(get_all_subcategory_ids(child.id))
                         return subcategory_ids
@@ -109,22 +104,17 @@ def get_products():
                     # Obtener todos los IDs de categorías a incluir (la categoría principal + todas sus subcategorías)
                     all_category_ids = get_all_subcategory_ids(category_uuid)
                     
-                    print(f"[DEBUG] Total de categorías a incluir: {len(all_category_ids)} (1 principal + {len(all_category_ids) - 1} subcategorías)")
-                    print(f"[DEBUG] IDs de categorías: {[str(cid) for cid in all_category_ids]}")
                     
                     # Verificar cuántos productos hay en estas categorías (antes de otros filtros)
                     product_count_before = Product.query.filter(
                         Product.category_id.in_(all_category_ids),
                         Product.is_active == True
                     ).count()
-                    print(f"[DEBUG] Productos activos en estas categorías (antes de otros filtros): {product_count_before}")
                     
                     # Filtrar productos que estén en cualquiera de estas categorías
                     query = query.filter(Product.category_id.in_(all_category_ids))
             except Exception as e:
                 import traceback
-                print(f"[WARNING] Error obteniendo subcategorías para {category_id}: {e}")
-                traceback.print_exc()
                 # Fallback: filtrar solo por la categoría exacta
                 query = query.filter_by(category_id=category_id)
         
@@ -158,9 +148,9 @@ def get_products():
             # Excluir productos sin stock
             if no_stock_ids:
                 query = query.filter(~Product.id.in_(no_stock_ids))
-        except Exception as e:
-            print(f"[WARNING] Error filtrando productos sin stock de crm_products: {e}")
+        except Exception:
             # Si hay error, continuar sin filtrar
+            pass
         
         # Filtro por stock (stock en ProductVariantOption)
         if in_stock is not None and in_stock.lower() == 'true':
@@ -170,7 +160,6 @@ def get_products():
         # Filtro por precio (min/max) — solo aplica INNER JOIN cuando se filtra por rango de precios
         # El locality_id NO excluye productos: se usa solo para serializar los precios correctos
         if min_price is not None or max_price is not None:
-            print(f"[DEBUG] Aplicando filtro de precio - min_price: {min_price}, max_price: {max_price}")
             try:
                 # Join correcto: Product -> ProductVariant -> ProductVariantOption -> ProductPrice
                 query = query.join(
@@ -199,7 +188,6 @@ def get_products():
                         if cordoba_capital_catalog_id:
                             query = query.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
                 except (ValueError, TypeError) as e:
-                    print(f"[ERROR] Invalid locality_id format: {locality_id}, error: {e}")
                     return jsonify({
                         'success': False,
                         'error': f'Formato de locality_id inválido: {locality_id}'
@@ -211,11 +199,8 @@ def get_products():
                     query = query.filter(ProductPrice.price <= max_price)
 
                 query = query.distinct()
-                print(f"[DEBUG] Query con filtro de rango de precio aplicado")
             except Exception as e:
-                print(f"[ERROR] Error en join de precios: {str(e)}")
                 import traceback
-                traceback.print_exc()
                 return jsonify({
                     'success': False,
                     'error': f'Error al filtrar por precio: {str(e)}'
@@ -257,7 +242,6 @@ def get_products():
                         subquery, ProductVariant.id == subquery.c.product_variant_id
                     ).order_by(subquery.c.min_price.asc()).distinct()
                 except (ValueError, TypeError) as e:
-                    print(f"[ERROR] Invalid locality_id format for sorting: {locality_id}, error: {e}")
                     # Continuar sin ordenar por precio si hay error
                     query = query.order_by(Product.created_at.desc())
             else:
@@ -312,7 +296,6 @@ def get_products():
                         subquery, ProductVariant.id == subquery.c.product_variant_id
                     ).order_by(subquery.c.max_price.desc()).distinct()
                 except (ValueError, TypeError) as e:
-                    print(f"[ERROR] Invalid locality_id format for sorting: {locality_id}, error: {e}")
                     # Continuar sin ordenar por precio si hay error
                     query = query.order_by(Product.created_at.desc())
             else:
@@ -343,15 +326,10 @@ def get_products():
         
         # Paginación
         try:
-            print(f"[DEBUG] Ejecutando query de productos - page: {page}, per_page: {per_page}")
-            print(f"[DEBUG] Query SQL (aproximado): {str(query)}")
             pagination = query.paginate(page=page, per_page=per_page, error_out=False)
             products = pagination.items
-            print(f"[DEBUG] Productos obtenidos: {len(products)}")
         except Exception as e:
-            print(f"[ERROR] Error en paginación: {str(e)}")
             import traceback
-            traceback.print_exc()
             return jsonify({
                 'success': False,
                 'error': f'Error al paginar productos: {str(e)}'
@@ -492,7 +470,6 @@ def get_products():
                     try:
                         locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
                     except (ValueError, TypeError) as e:
-                        print(f"[ERROR] Invalid locality_id format in to_dict: {locality_id}, error: {e}")
                         locality_uuid = None
                 
                 # Obtener precios pre-calculados si están disponibles
@@ -522,14 +499,8 @@ def get_products():
                 products_data.append(product_dict)
             except Exception as e:
                 # Log error but continue with other products
-                print(f"[ERROR] Error serializing product {product.id}: {str(e)}")
                 import traceback
-                traceback.print_exc()
                 continue
-        
-        print(f"[DEBUG] Productos serializados: {len(products_data)}")
-        if len(products_data) > 0:
-            print(f"[DEBUG] Primer producto serializado - ID: {products_data[0].get('id')}, min_price: {products_data[0].get('min_price')}, max_price: {products_data[0].get('max_price')}")
         
         return jsonify({
             'success': True,
@@ -542,9 +513,7 @@ def get_products():
             }
         }), 200
     except Exception as e:
-        print(f"[ERROR] Error general en get_products: {str(e)}")
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -568,7 +537,6 @@ def get_product(product_id):
         pass
     
     try:
-        print(f"[DEBUG] get_product llamado con product_id: {product_id}")
         include_variants = request.args.get('include_variants', 'true').lower() == 'true'
         include_images = request.args.get('include_images', 'true').lower() == 'true'
         include_promos = request.args.get('include_promos', 'true').lower() == 'true'
@@ -604,26 +572,10 @@ def get_product(product_id):
         ).get(product_id)
         
         if not product:
-            print(f"[DEBUG] Producto {product_id} no encontrado")
             return jsonify({
                 'success': False,
                 'error': f'Producto con ID {product_id} no encontrado'
             }), 404
-        
-        # Debug: Log de subcategorías
-        print(f"[DEBUG] Product {product_id} - Subcategorías encontradas: {len(product.subcategory_associations)}")
-        for assoc in product.subcategory_associations:
-            print(f"[DEBUG]   - Subcategoría ID: {assoc.subcategory_id}, Nombre: {assoc.subcategory.name if assoc.subcategory else 'N/A'}")
-        
-        # Debug: Log de variantes y precios
-        print(f"[DEBUG] Product {product_id} - Variantes encontradas: {len(product.variants)}")
-        for variant in product.variants:
-            total_prices = sum(len(option.prices) for option in variant.options)
-            print(f"[DEBUG]   - Variant ID: {variant.id}, SKU: {variant.sku}, Options: {len(variant.options)}, Total Precios: {total_prices}")
-            for option in variant.options:
-                print(f"[DEBUG]     - Option: {option.name}, Precios: {len(option.prices)}")
-                for price in option.prices:
-                    print(f"[DEBUG]       - Precio: locality_id={price.locality_id}, price={price.price}")
         
         # Verificar que el producto esté activo (para ecommerce público)
         # Si es admin, puede ver productos inactivos también
@@ -642,11 +594,6 @@ def get_product(product_id):
         has_crm_stock = check_crm_stock(product.crm_product_id)
         product_dict['has_crm_stock'] = has_crm_stock
         
-        # Debug: Log del dict final
-        print(f"[DEBUG] Product {product_id} - Subcategorías en dict: {len(product_dict.get('subcategories', []))}")
-        print(f"[DEBUG] Product {product_id} - Variantes en dict: {len(product_dict.get('variants', []))}")
-        print(f"[DEBUG] Product {product_id} - CRM Stock: {has_crm_stock}")
-        
         return jsonify({
             'success': True,
             'data': product_dict
@@ -655,7 +602,6 @@ def get_product(product_id):
         import traceback
         from flask import current_app
         error_trace = traceback.format_exc()
-        print(f"[ERROR] Error al obtener producto {product_id}: {error_trace}")
         # Hacer rollback para limpiar cualquier transacción abortada
         try:
             db.session.rollback()
@@ -997,7 +943,6 @@ def create_complete_product():
     except IntegrityError as e:
         db.session.rollback()
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': 'Error de integridad: ' + str(e)
@@ -1005,7 +950,6 @@ def create_complete_product():
     except Exception as e:
         db.session.rollback()
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)

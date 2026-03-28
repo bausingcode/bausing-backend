@@ -73,17 +73,14 @@ def process_referral_credit(order):
     # Buscar el referidor por código
     referrer = User.query.filter_by(referral_code=order.referral_code_used).first()
     if not referrer:
-        print(f"[REFERRAL] Código de referido no encontrado: {order.referral_code_used}")
         return None
     
     # Verificar que el referidor no esté suspendido
     if referrer.is_suspended:
-        print(f"[REFERRAL] Referidor suspendido: {referrer.id}")
         return None
     
     # Verificar que no sea auto-referido
     if referrer.id == order.user_id:
-        print(f"[REFERRAL] Intento de auto-referido detectado: {order.user_id}")
         return None
     
     # Obtener configuración
@@ -100,7 +97,6 @@ def process_referral_credit(order):
     )
     
     if credit_amount <= 0:
-        print(f"[REFERRAL] Monto de crédito inválido: {credit_amount}")
         return None
     
     # Crear registro de referido
@@ -139,7 +135,6 @@ def process_referral_credit(order):
     
     db.session.commit()
     
-    print(f"[REFERRAL] ✅ Crédito acreditado: ${credit_amount} a usuario {referrer.id} por orden {order.id}")
     
     return referral
 

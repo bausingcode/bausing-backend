@@ -68,7 +68,6 @@ def get_lat_lon_from_address(street, number, city, postal_code, province_name=No
         return None
     except Exception as e:
         # Si falla la geocodificación, no fallar la creación de la dirección
-        print(f"Error al obtener lat/lon: {str(e)}")
         return None
 
 def generate_token(user):
@@ -274,9 +273,9 @@ def register():
         # Enviar email de verificación
         try:
             send_verification_email(user, verification_token)
-        except Exception as e:
+        except Exception:
             # No fallar el registro si falla el envío de email
-            print(f"Error al enviar email de verificación: {str(e)}")
+            pass
         
         # Generar token JWT
         token = generate_token(user)
@@ -339,7 +338,6 @@ def login():
             user = User.query.filter_by(email=email).first()
         except (ProgrammingError, OperationalError) as db_error:
             # Si hay un error de base de datos (como columnas faltantes), intentar consulta directa
-            print(f"Error de base de datos (columnas faltantes): {str(db_error)}")
             try:
                 # Consulta directa solo con columnas básicas
                 result = db.session.execute(
@@ -395,13 +393,11 @@ def login():
                 }), 200
                 
             except Exception as e:
-                print(f"Error en consulta alternativa: {str(e)}")
                 return jsonify({
                     'success': False,
                     'error': 'No existe una cuenta con este email'
                 }), 401
         except Exception as e:
-            print(f"Error inesperado al buscar usuario: {str(e)}")
             return jsonify({
                 'success': False,
                 'error': 'No existe una cuenta con este email'
@@ -429,7 +425,6 @@ def login():
                     'error': 'La contraseña es incorrecta'
                 }), 401
         except Exception as e:
-            print(f"Error al verificar contraseña: {str(e)}")
             return jsonify({
                 'success': False,
                 'error': 'Error al verificar las credenciales'
@@ -451,7 +446,6 @@ def login():
         }), 200
         
     except Exception as e:
-        print(f"Error en login: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Error al iniciar sesión. Por favor, intenta nuevamente.'
@@ -565,7 +559,6 @@ def resend_verification():
         try:
             send_verification_email(user, verification_token)
         except Exception as e:
-            print(f"Error al enviar email de verificación: {str(e)}")
             return jsonify({
                 'success': False,
                 'error': 'Error al enviar el email de verificación'
@@ -1094,11 +1087,9 @@ def forgot_password():
                     reset_url=reset_url,
                     expires_in="1 hora"
                 )
-            except Exception as e:
+            except Exception:
                 # Log el error pero no lo expongas al usuario
-                print(f"Error al enviar email de recuperación: {str(e)}")
-                # En producción, podrías querer retornar un error aquí
-                # pero por seguridad es mejor no revelar si el email existe
+                pass
         
         # Siempre retornar éxito (por seguridad)
         return jsonify({
@@ -1107,7 +1098,6 @@ def forgot_password():
         }), 200
         
     except Exception as e:
-        print(f"Error en forgot-password: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Error al procesar la solicitud'
@@ -1216,7 +1206,6 @@ def reset_password():
         
     except Exception as e:
         db.session.rollback()
-        print(f"Error en reset-password: {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Error al restablecer la contraseña'

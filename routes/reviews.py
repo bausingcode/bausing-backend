@@ -406,7 +406,6 @@ def send_review_reminders():
         
     except Exception as e:
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': f'Error al enviar recordatorios: {str(e)}'

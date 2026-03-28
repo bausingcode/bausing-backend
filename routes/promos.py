@@ -39,13 +39,6 @@ def get_promos():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print("=" * 50)
-        print("ERROR in get_promos:")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        print("Traceback:")
-        print(error_trace)
-        print("=" * 50)
         return jsonify({
             'success': False,
             'error': str(e),

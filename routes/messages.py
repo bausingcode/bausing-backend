@@ -127,7 +127,6 @@ def send_promotional_emails():
                     failed_count += 1
                     
             except Exception as e:
-                print(f"Error al enviar email a {user.email}: {str(e)}")
                 failed_count += 1
         
         return jsonify({
@@ -139,7 +138,6 @@ def send_promotional_emails():
         }), 200
         
     except Exception as e:
-        print(f"Error en send_promotional_emails: {str(e)}")
         return jsonify({
             'success': False,
             'error': f'Error al enviar los mensajes: {str(e)}'
@@ -267,7 +265,6 @@ def send_wallet_reminders():
                     failed_count += 1
                     
             except Exception as e:
-                print(f"Error al enviar recordatorio a {email}: {str(e)}")
                 failed_count += 1
         
         return jsonify({
@@ -279,9 +276,7 @@ def send_wallet_reminders():
         }), 200
         
     except Exception as e:
-        print(f"Error en send_wallet_reminders: {str(e)}")
         import traceback
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': f'Error al enviar los recordatorios: {str(e)}'

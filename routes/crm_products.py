@@ -156,7 +156,6 @@ def list_crm_products():
         
     except Exception as e:
         error_trace = traceback.format_exc()
-        print(f"Error en list_crm_products: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -410,7 +409,6 @@ def complete_crm_product(product_id):
                     
                     if ref_count and ref_count > 0:
                         # Esta variante está referenciada, no la eliminamos
-                        print(f"[WARNING] No se puede eliminar la variante {v.id} porque está referenciada en {ref_count} order_items")
                         continue
                 
                 # Eliminar opciones (los precios se eliminan automáticamente por cascade desde las opciones)
@@ -426,7 +424,6 @@ def complete_crm_product(product_id):
                 # Eliminar subcategorías existentes PRIMERO para evitar conflictos
                 from models.product import ProductSubcategory
                 existing_assocs = ProductSubcategory.query.filter_by(product_id=product.id).all()
-                print(f"[DEBUG] Eliminando {len(existing_assocs)} asociaciones existentes de subcategorías")
                 for assoc in existing_assocs:
                     db.session.delete(assoc)
                 db.session.flush()
@@ -473,9 +470,6 @@ def complete_crm_product(product_id):
                                             category_option_id=option_obj.id
                                         )
                                         db.session.add(subcategory_assoc)
-                                        print(f"[DEBUG] Creada asociación: producto={product.id}, subcategoría={subcat_id_uuid}, opción={option_obj.value} (id={option_obj.id})")
-                                    else:
-                                        print(f"[DEBUG] No se encontró opción con valor '{opt_value}' para subcategoría {subcat_id_uuid}")
                         else:
                             # Si no hay opciones, crear un registro sin opción (solo uno por subcategoría)
                             if subcat_id_uuid:
@@ -486,7 +480,6 @@ def complete_crm_product(product_id):
                                     category_option_id=None
                                 )
                                 db.session.add(subcategory_assoc)
-                                print(f"[DEBUG] Creada asociación sin opción: producto={product.id}, subcategoría={subcat_id_uuid}")
                 db.session.flush()
             
             # Si hay category_id que es una categoría padre, actualizarla
@@ -773,8 +766,6 @@ def complete_crm_product(product_id):
             else:
                 error_msg = f'Error de integridad: {error_str}'
         
-        print(f"[ERROR] IntegrityError en complete_crm_product: {error_str}")
-        print(f"[ERROR] Traceback completo: {traceback.format_exc()}")
         
         return jsonify({
             'success': False,
@@ -784,7 +775,6 @@ def complete_crm_product(product_id):
     except Exception as e:
         db.session.rollback()
         error_trace = traceback.format_exc()
-        print(f"Error en complete_crm_product: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -918,7 +908,6 @@ def list_crm_combos():
         
     except Exception as e:
         error_trace = traceback.format_exc()
-        print(f"Error en list_crm_combos: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),

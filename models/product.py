@@ -38,7 +38,6 @@ def check_crm_stock(crm_product_id):
             return bool(row.stock) if row.stock is not None else True
         return True  # Si no existe en crm_products, asumir que tiene stock
     except Exception as e:
-        print(f"[ERROR] Error verificando stock de crm_product_id {crm_product_id}: {e}")
         return True  # En caso de error, asumir que tiene stock
 
 class Product(db.Model):
@@ -101,7 +100,6 @@ class Product(db.Model):
                     # Compatibilidad hacia atrás: filtrar por locality_id
                     query = query.filter(ProductPrice.locality_id == locality_uuid)
             except (ValueError, TypeError) as e:
-                print(f"[ERROR] Invalid locality_id format in get_min_price: {locality_id}, error: {e}")
                 return 0.0
         else:
             # Si no hay localidad, usar el catálogo "Cordoba capital" por defecto
@@ -138,7 +136,6 @@ class Product(db.Model):
                     # Compatibilidad hacia atrás: filtrar por locality_id
                     query = query.filter(ProductPrice.locality_id == locality_uuid)
             except (ValueError, TypeError) as e:
-                print(f"[ERROR] Invalid locality_id format in get_max_price: {locality_id}, error: {e}")
                 return 0.0
         else:
             # Si no hay localidad, usar el catálogo "Cordoba capital" por defecto
@@ -271,7 +268,6 @@ class Product(db.Model):
             except:
                 pass
             
-            print(f"[DEBUG] Buscando promos para producto {self.id}, category_id: {self.category_id}")
             
             promo_applicabilities = PromoApplicability.query.filter(
                 db.or_(
@@ -287,22 +283,14 @@ class Product(db.Model):
                 )
             ).all()
             
-            print(f"[DEBUG] Encontradas {len(promo_applicabilities)} promo_applicabilities para producto {self.id}")
             
             for app in promo_applicabilities:
                 promo = Promo.query.get(app.promo_id)
                 if promo:
                     is_valid = promo.is_valid()
-                    print(f"[DEBUG] Promo {promo.id} ({promo.type}): is_active={promo.is_active}, is_valid={is_valid}, start_at={promo.start_at}, end_at={promo.end_at}, now={now}")
                     if is_valid:
                         applicable_promos.append(promo.to_dict())
-                        print(f"[DEBUG] Promo {promo.id} agregada a applicable_promos")
-                    else:
-                        print(f"[DEBUG] Promo {promo.id} NO es válida (is_active={promo.is_active}, start_at={promo.start_at}, end_at={promo.end_at})")
-                else:
-                    print(f"[DEBUG] Promo con ID {app.promo_id} no encontrada")
             
-            print(f"[DEBUG] Total promos aplicables para producto {self.id}: {len(applicable_promos)}")
             data['promos'] = applicable_promos
         
         return data
@@ -387,7 +375,6 @@ class ProductVariant(db.Model):
                                 'price': 0.0
                             }])
                     except (ValueError, TypeError) as e:
-                        print(f"[ERROR] Invalid locality_id format in ProductVariant.to_dict: {locality_id}, error: {e}")
                         all_prices.extend(option_prices)
                 else:
                     # Sin filtro de localidad, mostrar todos los precios por catálogo
@@ -527,7 +514,6 @@ class ProductVariantOption(db.Model):
                         price_for_locality = next((p for p in self.prices if p.locality_id == locality_uuid), None)
                         data['price'] = float(price_for_locality.price) if price_for_locality else 0.0
                 except (ValueError, TypeError) as e:
-                    print(f"[ERROR] Invalid locality_id format in ProductVariantOption.to_dict: {locality_id}, error: {e}")
                     # Mostrar todos los precios por catálogo, o por localidad si no hay catálogos
                     data['prices'] = catalog_prices if catalog_prices else locality_prices
                     data['price'] = 0.0

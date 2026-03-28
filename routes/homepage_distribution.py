@@ -37,7 +37,6 @@ def get_available_replacement_product(exclude_product_ids, section_products=None
         
         return available_products[0] if available_products else None
     except Exception as e:
-        print(f"[ERROR] Error obteniendo producto de reemplazo: {e}")
         return None
 
 @homepage_distribution_bp.route('/admin/homepage-distribution', methods=['GET'])
@@ -227,7 +226,6 @@ def get_public_homepage_distribution_quick():
                 
                 # Si no tiene stock, buscar un reemplazo
                 if not has_stock:
-                    print(f"[DEBUG] Producto {product.id} (crm_product_id: {product.crm_product_id}) sin stock, buscando reemplazo...")
                     # Obtener productos ya usados en esta sección
                     section_used_ids = [item['product']['id'] for item in result[dist.section] if 'product' in item and 'id' in item['product']]
                     all_used_ids = list(used_product_ids) + section_used_ids
@@ -235,10 +233,8 @@ def get_public_homepage_distribution_quick():
                     replacement = get_available_replacement_product(all_used_ids, [p.product for p in distributions if p.section == dist.section and p.product])
                     
                     if replacement:
-                        print(f"[DEBUG] Reemplazando producto {product.id} con {replacement.id}")
                         product = replacement
                     else:
-                        print(f"[DEBUG] No se encontró reemplazo para producto {product.id}, omitiendo...")
                         continue  # Omitir este producto si no hay reemplazo
                 
                 # Agregar a productos usados
@@ -275,7 +271,6 @@ def get_public_homepage_distribution_quick():
         }), 200
     except Exception as e:
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -427,7 +422,6 @@ def get_products_prices():
         }), 200
     except Exception as e:
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -585,7 +579,6 @@ def get_public_homepage_distribution():
                 
                 # Si no tiene stock, buscar un reemplazo
                 if not has_stock:
-                    print(f"[DEBUG] Producto {product.id} (crm_product_id: {product.crm_product_id}) sin stock, buscando reemplazo...")
                     # Obtener productos ya usados en esta sección
                     section_used_ids = [item['product']['id'] for item in result[dist.section] if 'product' in item and 'id' in item['product']]
                     all_used_ids = list(used_product_ids) + section_used_ids
@@ -593,7 +586,6 @@ def get_public_homepage_distribution():
                     replacement = get_available_replacement_product(all_used_ids, [p.product for p in distributions if p.section == dist.section and p.product])
                     
                     if replacement:
-                        print(f"[DEBUG] Reemplazando producto {product.id} con {replacement.id}")
                         product = replacement
                         # Recalcular precios para el producto de reemplazo
                         if replacement.id in price_map:
@@ -603,7 +595,6 @@ def get_public_homepage_distribution():
                             precalc_min_price = None
                             precalc_max_price = None
                     else:
-                        print(f"[DEBUG] No se encontró reemplazo para producto {product.id}, omitiendo...")
                         continue  # Omitir este producto si no hay reemplazo
                 else:
                     # Obtener precios pre-calculados si están disponibles
@@ -649,7 +640,6 @@ def get_public_homepage_distribution():
         }), 200
     except Exception as e:
         import traceback
-        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)

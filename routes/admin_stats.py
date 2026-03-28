@@ -124,8 +124,6 @@ def get_dashboard_stats():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_dashboard_stats: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -219,8 +217,6 @@ def get_logistica_pedidos():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_logistica_pedidos: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -248,7 +244,6 @@ def get_dashboard_alerts():
         fecha_limite = hoy - timedelta(days=dias_estimados)
         
         # Debug: imprimir valores para troubleshooting
-        print(f"DEBUG alerts - hoy: {hoy}, dias_estimados: {dias_estimados}, fecha_limite: {fecha_limite}")
         
         # 1. Retrasos en entregas (de logística)
         # Lógica exactamente igual al frontend:
@@ -281,31 +276,6 @@ def get_dashboard_alerts():
         result_retrasos = db.session.execute(query_retrasos, {'fecha_limite': fecha_limite})
         retrasos_count = result_retrasos.scalar() or 0
         
-        print(f"DEBUG alerts - retrasos_count: {retrasos_count}")
-        
-        # Debug adicional: contar pedidos por tipo de retraso
-        if retrasos_count > 0:
-            query_debug = text("""
-                SELECT 
-                    COUNT(CASE WHEN co.delivery_date IS NOT NULL THEN 1 END) as retrasos_reales,
-                    COUNT(CASE WHEN co.delivery_date IS NULL THEN 1 END) as retrasos_estimados
-                FROM crm_orders co
-                WHERE co.is_cancelled = false
-                    AND LOWER(co.status) NOT LIKE '%entregado%'
-                    AND LOWER(co.status) NOT LIKE '%finalizado%'
-                    AND LOWER(co.status) NOT LIKE '%cancelado%'
-                    AND (
-                        (co.delivery_date IS NOT NULL AND co.delivery_date::date < CURRENT_DATE)
-                        OR
-                        (co.delivery_date IS NULL 
-                         AND co.crm_created_at IS NOT NULL 
-                         AND co.crm_created_at::date < :fecha_limite)
-                    )
-            """)
-            result_debug = db.session.execute(query_debug, {'fecha_limite': fecha_limite})
-            row_debug = result_debug.fetchone()
-            if row_debug:
-                print(f"DEBUG alerts - retrasos_reales: {row_debug[0]}, retrasos_estimados: {row_debug[1]}")
         
         # 2. Movimientos inusuales en billetera
         from models.wallet import WalletMovement, Wallet
@@ -364,8 +334,6 @@ def get_dashboard_alerts():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_dashboard_alerts: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -436,8 +404,6 @@ def get_wallet_usage():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_wallet_usage: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -559,8 +525,6 @@ def get_user_metrics(user_id):
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_user_metrics: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -709,8 +673,6 @@ def get_users_metrics():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_users_metrics: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -926,8 +888,6 @@ def get_general_metrics():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_general_metrics: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)

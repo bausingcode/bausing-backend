@@ -101,9 +101,7 @@ class WalletMovement(db.Model):
                             data['internal_comment'] = audit_log.details.get('internal_comment')
             except Exception as e:
                 # Si hay error obteniendo el admin, simplemente no incluirlo
-                print(f"DEBUG: Error obteniendo admin para movimiento {self.id}: {str(e)}")
                 import traceback
-                print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
                 pass
         
         return data

@@ -58,7 +58,6 @@ def point_in_polygon(lon, lat, polygon_coordinates):
             else:
                 return False  # Coordenada no es lista/tupla
         except (ValueError, TypeError, IndexError) as e:
-            print(f"[DEBUG] Error normalizando coordenada {coord}: {e}")
             return False  # Error al procesar coordenada
     
     # Asegurarse de que el polígono esté cerrado
@@ -98,26 +97,17 @@ def find_locality_by_coordinates(lon, lat):
         shipping_zone_locality es el CrmZoneLocality de la zona TERCERIZADO si existe,
         None en caso contrario.
     """
-    print(f"[DEBUG] find_locality_by_coordinates: Buscando para lon={lon}, lat={lat}")
     
     # Obtener todas las zonas de entrega activas (no eliminadas)
     zones = CrmDeliveryZone.query.filter(
         CrmDeliveryZone.crm_deleted_at.is_(None)
     ).all()
     
-    print(f"[DEBUG] Zonas de entrega encontradas: {len(zones)}")
     
     # Lista para almacenar todas las zonas que contienen el punto
     matching_zones = []
     
     for idx, zone in enumerate(zones):
-        # Mostrar todas las zonas para debug (comentado para no saturar logs en producción)
-        # print(f"[DEBUG] Procesando zona {idx + 1}/{len(zones)}: {zone.name} (crm_zone_id: {zone.crm_zone_id})")
-        
-        # Solo mostrar progreso cada 5 zonas para no saturar los logs
-        if idx % 5 == 0 or idx == len(zones) - 1:
-            print(f"[DEBUG] Procesando zona {idx + 1}/{len(zones)}: {zone.name} (crm_zone_id: {zone.crm_zone_id})")
-        
         if not zone.surface_geojson:
             # print(f"[DEBUG] Zona {zone.name} no tiene surface_geojson, saltando")
             continue
@@ -169,34 +159,23 @@ def find_locality_by_coordinates(lon, lat):
                                 break
         
         if point_in_zone:
-            print(f"[DEBUG] ✅ Punto está dentro del polígono de la zona {zone.name} (crm_zone_id: {zone.crm_zone_id})")
             # Encontrar la localidad asociada a esta zona
             zone_locality = CrmZoneLocality.query.filter_by(
                 crm_zone_id=zone.crm_zone_id
             ).first()
             
             if zone_locality and zone_locality.locality:
-                print(f"[DEBUG] ✅ Zona encontrada: {zone.name} con localidad: {zone_locality.locality.name}")
                 matching_zones.append({
                     'zone': zone,
                     'zone_locality': zone_locality,
                     'locality': zone_locality.locality
                 })
-            else:
-                print(f"[DEBUG] ⚠️ Zona {zone.name} contiene el punto pero no tiene localidad asociada")
-    
-    print(f"[DEBUG] Total de zonas que contienen el punto: {len(matching_zones)}")
-    if len(matching_zones) > 0:
-        for i, match in enumerate(matching_zones):
-            print(f"[DEBUG]   Zona {i+1}: {match['zone'].name} (crm_zone_id: {match['zone'].crm_zone_id})")
     
     if not matching_zones:
-        print(f"[DEBUG] ❌ No se encontró ninguna localidad para las coordenadas proporcionadas")
         return (None, None)
     
     # Si hay múltiples zonas, verificar si alguna empieza con "TERCERIZADO"
     if len(matching_zones) > 1:
-        print(f"[DEBUG] ⚠️ Punto está dentro de {len(matching_zones)} zonas - Verificando si alguna es TERCERIZADO")
         
         # Buscar zona que empiece con "TERCERIZADO"
         tercerizado_zone = None
@@ -205,40 +184,29 @@ def find_locality_by_coordinates(lon, lat):
         for match in matching_zones:
             zone_name = match['zone'].name
             zone_name_upper = zone_name.upper().strip()
-            print(f"[DEBUG] Verificando zona: '{zone_name}' (upper: '{zone_name_upper}')")
             
             # Verificar si empieza con "TERCERIZADO" (sin importar espacios, acentos, etc.)
             if zone_name_upper.startswith('TERCERIZADO'):
                 tercerizado_zone = match
-                print(f"[DEBUG] ✅ Zona TERCERIZADO encontrada: {zone_name} (crm_zone_id: {match['zone'].crm_zone_id})")
             else:
                 # Agregar todas las zonas no-TERCERIZADO
                 other_zones.append(match)
-                print(f"[DEBUG] ✅ Zona normal encontrada: {zone_name} (crm_zone_id: {match['zone'].crm_zone_id})")
         
-        print(f"[DEBUG] Resumen: {len(other_zones)} zona(s) normal(es), {'1 zona TERCERIZADO' if tercerizado_zone else '0 zonas TERCERIZADO'}")
         
         # Si hay una zona TERCERIZADO y al menos una normal
         if tercerizado_zone and len(other_zones) > 0:
             # Usar la primera zona no-TERCERIZADO para todo lo demás
             other_zone = other_zones[0]
-            print(f"[DEBUG] ========================================")
-            print(f"[DEBUG] DECISIÓN: Usando zona TERCERIZADO ({tercerizado_zone['zone'].name}) SOLO para envío")
-            print(f"[DEBUG] DECISIÓN: Usando zona normal ({other_zone['zone'].name}) para todo lo demás")
-            print(f"[DEBUG] ========================================")
             # Retornar la localidad de la zona normal, pero también la zona_locality de TERCERIZADO para envío
             return (other_zone['locality'], tercerizado_zone['zone_locality'])
         elif tercerizado_zone:
             # Solo hay zona TERCERIZADO, usarla normalmente
-            print(f"[DEBUG] Solo se encontró zona TERCERIZADO, usándola normalmente")
             return (tercerizado_zone['locality'], None)
         else:
             # Hay múltiples zonas pero ninguna es TERCERIZADO, usar la primera
-            print(f"[DEBUG] Múltiples zonas encontradas pero ninguna es TERCERIZADO, usando la primera: {matching_zones[0]['zone'].name}")
             return (matching_zones[0]['locality'], None)
     else:
         # Solo hay una zona
-        print(f"[DEBUG] ✅ Una sola zona encontrada: {matching_zones[0]['zone'].name}")
         return (matching_zones[0]['locality'], None)
 
 
@@ -292,77 +260,28 @@ def get_coordinates_from_ip(ip_address, force_geolocation=False):
     Returns:
         Tuple (lon, lat) o None si no se puede obtener
     """
-    print(f"[DEBUG] get_coordinates_from_ip: Iniciando para IP: {ip_address}, force_geolocation: {force_geolocation}")
     
     if is_local_ip(ip_address) and not force_geolocation:
-        print(f"⚠️  IP local detectada ({ip_address}). No se puede geolocalizar.")
-        print(f"[DEBUG] Para desarrollo local, considera usar coordenadas directamente o configurar una IP pública")
         return None
-    elif is_local_ip(ip_address) and force_geolocation:
-        print(f"⚠️  IP local detectada ({ip_address}), pero force_geolocation=True. Intentando geolocalización de todas formas.")
-    
+
     try:
-        # Construir URL para ip-api.com
-        # Formato: http://ip-api.com/json/{query}
-        # No requiere API key para el plan gratuito
         url = f'http://ip-api.com/json/{ip_address}'
-        headers = {}
-        
-        print(f"[DEBUG] Usando ip-api.com (plan gratuito: 45 requests/minuto)")
-        print(f"[DEBUG] URL de request: {url}")
-        
-        response = requests.get(url, headers=headers, timeout=5)
-        
-        print(f"[DEBUG] Response status code: {response.status_code}")
-        
-        # Verificar headers de rate limiting
-        x_rl = response.headers.get('X-Rl', 'N/A')
-        x_ttl = response.headers.get('X-Ttl', 'N/A')
-        print(f"[DEBUG] Rate limit - Requests remaining: {x_rl}, Seconds until reset: {x_ttl}")
-        
+        response = requests.get(url, headers={}, timeout=5)
+
         if response.status_code == 200:
             data = response.json()
-            print(f"[DEBUG] Response data keys: {list(data.keys())}")
-            
             if data.get('status') == 'fail':
-                error_message = data.get('message', 'Unknown error')
-                print(f"❌ Error de ip-api.com: {error_message}")
-                print(f"[DEBUG] Error completo: {data}")
                 return None
-            
             if data.get('status') == 'success' and 'lon' in data and 'lat' in data:
-                lon = data['lon']
-                lat = data['lat']
-                print(f"[DEBUG] ✅ Coordenadas obtenidas: lon={lon}, lat={lat}")
-                print(f"[DEBUG] Ciudad: {data.get('city', 'N/A')}, País: {data.get('country', 'N/A')}, Región: {data.get('regionName', 'N/A')}")
-                return (lon, lat)
-            else:
-                print(f"❌ No se encontraron coordenadas en la respuesta o status no es 'success'")
-                print(f"[DEBUG] Datos recibidos: {data}")
-        elif response.status_code == 429:
-            error_data = response.json() if response.text else {}
-            print("⚠️  Límite de requests alcanzado en ip-api.com (plan gratuito: 45 requests/minuto)")
-            print(f"   Requests restantes: {x_rl}, Segundos hasta reset: {x_ttl}")
-            print(f"[DEBUG] Response body: {error_data}")
-            # Retornar None para que el sistema pueda usar fallback
-        elif response.status_code == 403:
-            print("❌ Acceso denegado por ip-api.com")
-            print(f"[DEBUG] Response body: {response.text[:200]}")
-        else:
-            print(f"❌ Error obteniendo coordenadas desde IP: HTTP {response.status_code}")
-            print(f"[DEBUG] Response body: {response.text[:200]}")
+                return (data['lon'], data['lat'])
+            return None
     except requests.exceptions.Timeout:
-        print(f"❌ Timeout al obtener coordenadas desde IP: {ip_address}")
-        print(f"[DEBUG] El servicio ip-api.com no respondió en 5 segundos")
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error de red al obtener coordenadas desde IP: {e}")
-        print(f"[DEBUG] Tipo de error: {type(e).__name__}")
-    except Exception as e:
-        print(f"❌ Error inesperado obteniendo coordenadas desde IP: {e}")
-        print(f"[DEBUG] Tipo de error: {type(e).__name__}")
-        import traceback
-        print(f"[DEBUG] Traceback: {traceback.format_exc()}")
-    
+        pass
+    except requests.exceptions.RequestException:
+        pass
+    except Exception:
+        pass
+
     return None
 
 
@@ -394,7 +313,6 @@ def get_user_from_token():
             user = User.query.get(user_id)
             return user
     except Exception as e:
-        print(f"[DEBUG] Error al obtener usuario desde token: {str(e)}")
         return None
     
     return None
@@ -414,7 +332,6 @@ def detect_locality():
     
     Si no se proporcionan coordenadas ni IP, intenta obtener la IP del request.
     """
-    print(f"[DEBUG] detect_locality: Iniciando - Method: {request.method}")
     
     try:
         # Intentar obtener usuario autenticado
@@ -427,18 +344,15 @@ def detect_locality():
             lon = data.get('lon')
             ip = data.get('ip')
             address_id = data.get('address_id')
-            print(f"[DEBUG] POST data recibida: lat={lat}, lon={lon}, ip={ip}, address_id={address_id}")
         else:
             lat = request.args.get('lat', type=float)
             lon = request.args.get('lon', type=float)
             ip = request.args.get('ip')
             address_id = request.args.get('address_id')
-            print(f"[DEBUG] GET params: lat={lat}, lon={lon}, ip={ip}, address_id={address_id}")
         
         # Si el usuario está autenticado y no se proporcionaron coordenadas explícitamente,
         # verificar si tiene direcciones con lat_lon
         if user and lat is None and lon is None:
-            print(f"[DEBUG] Usuario autenticado detectado, verificando direcciones con lat_lon")
             addresses_with_coords = Address.query.filter_by(
                 user_id=user.id
             ).filter(
@@ -447,7 +361,6 @@ def detect_locality():
             ).all()
             
             if addresses_with_coords:
-                print(f"[DEBUG] Usuario tiene {len(addresses_with_coords)} direcciones con coordenadas")
                 
                 # Si se especificó un address_id, usar esa dirección
                 if address_id:
@@ -455,19 +368,14 @@ def detect_locality():
                         address_uuid = uuid.UUID(address_id)
                         selected_address = next((a for a in addresses_with_coords if a.id == address_uuid), None)
                         if selected_address:
-                            print(f"[DEBUG] Usando dirección especificada: {selected_address.id}")
                             lat_str, lon_str = selected_address.lat_lon.split(',')
                             lat = float(lat_str.strip())
                             lon = float(lon_str.strip())
-                            print(f"[DEBUG] Coordenadas de dirección: lat={lat}, lon={lon}")
-                        else:
-                            print(f"[DEBUG] Dirección especificada no encontrada o sin coordenadas")
-                    except (ValueError, AttributeError) as e:
-                        print(f"[DEBUG] Error al procesar address_id: {str(e)}")
+                    except (ValueError, AttributeError):
+                        pass
                 
                 # Si no se especificó address_id y hay múltiples direcciones, pedir selección
                 elif len(addresses_with_coords) > 1:
-                    print(f"[DEBUG] Usuario tiene múltiples direcciones, solicitando selección")
                     addresses_data = []
                     for addr in addresses_with_coords:
                         addr_dict = addr.to_dict()
@@ -495,15 +403,12 @@ def detect_locality():
                 # Si hay una sola dirección, usarla automáticamente
                 elif len(addresses_with_coords) == 1:
                     selected_address = addresses_with_coords[0]
-                    print(f"[DEBUG] Usando única dirección disponible: {selected_address.id}")
                     lat_str, lon_str = selected_address.lat_lon.split(',')
                     lat = float(lat_str.strip())
                     lon = float(lon_str.strip())
-                    print(f"[DEBUG] Coordenadas de dirección: lat={lat}, lon={lon}")
         
         # Si no se proporcionan coordenadas, intentar obtenerlas desde IP
         if lat is None or lon is None:
-            print(f"[DEBUG] Coordenadas no proporcionadas, intentando obtener desde IP")
             
             if not ip:
                 # Obtener IP del request
@@ -512,27 +417,21 @@ def detect_locality():
                     ip_header = request.headers.getlist("X-Forwarded-For")[0]
                     # Tomar solo la primera IP (la del cliente original)
                     ip = ip_header.split(',')[0].strip()
-                    print(f"[DEBUG] IP obtenida de X-Forwarded-For: {ip} (header completo: {ip_header})")
                 elif request.headers.getlist("X-Real-Ip"):
                     ip_header = request.headers.getlist("X-Real-Ip")[0]
                     # Por si acaso también tiene múltiples IPs
                     ip = ip_header.split(',')[0].strip()
-                    print(f"[DEBUG] IP obtenida de X-Real-Ip: {ip} (header completo: {ip_header})")
                 else:
                     ip = request.remote_addr
-                    print(f"[DEBUG] IP obtenida de request.remote_addr: {ip}")
             
             if not ip:
-                print(f"❌ No se pudo obtener la IP del request")
                 # Intentar usar localidad por defecto
                 if Config.DEFAULT_LOCALITY_ID:
-                    print(f"[DEBUG] Usando localidad por defecto: {Config.DEFAULT_LOCALITY_ID}")
                     try:
                         import uuid as uuid_lib
                         default_locality_uuid = uuid_lib.UUID(Config.DEFAULT_LOCALITY_ID)
                         locality = Locality.query.get(default_locality_uuid)
                         if locality:
-                            print(f"✅ Usando localidad por defecto: {locality.name}")
                             return jsonify({
                                 'success': True,
                                 'data': {
@@ -541,18 +440,16 @@ def detect_locality():
                                     'fallback': 'default_locality'
                                 }
                             }), 200
-                    except (ValueError, TypeError) as e:
-                        print(f"⚠️  DEFAULT_LOCALITY_ID no es un UUID válido: {e}")
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Si no hay localidad por defecto configurada, usar el catalog de fallback
                 fallback_catalog_id = '8335e521-f25a-4f92-8f59-c4439671ef26'
-                print(f"[DEBUG] Intentando usar catalog de fallback: {fallback_catalog_id}")
                 try:
                     import uuid as uuid_lib
                     fallback_catalog_uuid = uuid_lib.UUID(fallback_catalog_id)
                     fallback_catalog = Catalog.query.get(fallback_catalog_uuid)
                     if fallback_catalog:
-                        print(f"✅ Usando catalog de fallback: {fallback_catalog.name}")
                         
                         # Buscar la primera localidad asociada a este catalog
                         locality_assoc = LocalityCatalog.query.filter_by(catalog_id=fallback_catalog.id).first()
@@ -568,16 +465,13 @@ def detect_locality():
                         # Incluir localidad si existe (para compatibilidad con frontend)
                         if fallback_locality:
                             response_data['locality'] = fallback_locality.to_dict()
-                            print(f"[DEBUG] Localidad asociada al catalog de fallback: {fallback_locality.name}")
-                        else:
-                            print(f"[DEBUG] ⚠️  El catalog de fallback no tiene localidades asociadas")
                         
                         return jsonify({
                             'success': True,
                             'data': response_data
                         }), 200
-                except (ValueError, TypeError) as e:
-                    print(f"⚠️  ID de catalog de fallback no es un UUID válido: {e}")
+                except (ValueError, TypeError):
+                    pass
                 
                 return jsonify({
                     'success': False,
@@ -585,7 +479,6 @@ def detect_locality():
                     'hint': 'Para desarrollo local, puedes usar coordenadas directamente: /api/detect-locality?lat=-31.4201&lon=-64.1888'
                 }), 400
             
-            print(f"[DEBUG] Obteniendo coordenadas para IP: {ip}")
             
             # Verificar si es IP local
             # Si la IP fue proporcionada explícitamente como parámetro (simulación), intentar geolocalizarla
@@ -593,23 +486,14 @@ def detect_locality():
             ip_was_provided = bool(request.args.get('ip') or (request.method == 'POST' and request.get_json() and request.get_json().get('ip')))
             
             if is_local_ip(ip) and not ip_was_provided:
-                print(f"[DEBUG] IP local detectada ({ip}) y no fue proporcionada explícitamente, usando fallback directamente")
                 coords = None
             else:
-                # Obtener coordenadas desde IP (solo si no es local o si fue proporcionada explícitamente)
-                if ip_was_provided:
-                    print(f"[DEBUG] IP proporcionada explícitamente ({ip}), intentando geolocalización a través de ip-api.com")
-                else:
-                    print(f"[DEBUG] IP pública detectada ({ip}), intentando geolocalización a través de ip-api.com")
                 coords = get_coordinates_from_ip(ip, force_geolocation=ip_was_provided)
             
             if not coords:
-                print(f"❌ No se pudieron obtener coordenadas desde IP: {ip}")
-                print(f"[DEBUG] Esto puede deberse a: 1) Límite de requests alcanzado en ip-api.com (45/minuto), 2) IP inválida, 3) Error de red")
                 
                 # Intentar usar localidad por defecto si está configurada
                 if Config.DEFAULT_LOCALITY_ID:
-                    print(f"[DEBUG] Intentando usar localidad por defecto: {Config.DEFAULT_LOCALITY_ID}")
                     try:
                         from sqlalchemy.dialects.postgresql import UUID as PG_UUID
                         import uuid as uuid_lib
@@ -617,7 +501,6 @@ def detect_locality():
                         default_locality_uuid = uuid_lib.UUID(Config.DEFAULT_LOCALITY_ID)
                         locality = Locality.query.get(default_locality_uuid)
                         if locality:
-                            print(f"✅ Usando localidad por defecto: {locality.name}")
                             return jsonify({
                                 'success': True,
                                 'data': {
@@ -627,22 +510,16 @@ def detect_locality():
                                     'reason': 'IP local o no se pudieron obtener coordenadas desde IP'
                                 }
                             }), 200
-                        else:
-                            print(f"⚠️  Localidad por defecto no encontrada: {Config.DEFAULT_LOCALITY_ID}")
-                    except (ValueError, TypeError) as e:
-                        print(f"⚠️  DEFAULT_LOCALITY_ID no es un UUID válido: {e}")
-                else:
-                    print(f"[DEBUG] DEFAULT_LOCALITY_ID no está configurada en .env")
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Si no hay localidad por defecto, usar el catalog de fallback
                 fallback_catalog_id = '8335e521-f25a-4f92-8f59-c4439671ef26'
-                print(f"[DEBUG] Intentando usar catalog de fallback: {fallback_catalog_id}")
                 try:
                     import uuid as uuid_lib
                     fallback_catalog_uuid = uuid_lib.UUID(fallback_catalog_id)
                     fallback_catalog = Catalog.query.get(fallback_catalog_uuid)
                     if fallback_catalog:
-                        print(f"✅ Usando catalog de fallback: {fallback_catalog.name}")
                         
                         # Buscar la primera localidad asociada a este catalog
                         locality_assoc = LocalityCatalog.query.filter_by(catalog_id=fallback_catalog.id).first()
@@ -658,24 +535,17 @@ def detect_locality():
                         # Incluir localidad si existe (para compatibilidad con frontend)
                         if fallback_locality:
                             response_data['locality'] = fallback_locality.to_dict()
-                            print(f"[DEBUG] Localidad asociada al catalog de fallback: {fallback_locality.name}")
-                        else:
-                            print(f"[DEBUG] ⚠️  El catalog de fallback no tiene localidades asociadas")
                         
                         return jsonify({
                             'success': True,
                             'data': response_data
                         }), 200
-                    else:
-                        print(f"⚠️  Catalog de fallback no encontrado: {fallback_catalog_id}")
-                except (ValueError, TypeError) as e:
-                    print(f"⚠️  ID de catalog de fallback no es un UUID válido: {e}")
+                except (ValueError, TypeError):
+                    pass
                 
                 # Si el fallback específico no funciona, intentar obtener la primera localidad disponible
-                print(f"[DEBUG] Intentando usar la primera localidad disponible como último recurso")
                 first_locality = Locality.query.first()
                 if first_locality:
-                    print(f"✅ Usando primera localidad disponible como último recurso: {first_locality.name}")
                     return jsonify({
                         'success': True,
                         'data': {
@@ -694,31 +564,18 @@ def detect_locality():
                 }), 400
             
             lon, lat = coords
-            print(f"[DEBUG] Coordenadas obtenidas: lon={lon}, lat={lat}")
-        else:
-            print(f"[DEBUG] Usando coordenadas proporcionadas: lon={lon}, lat={lat}")
         
         # Buscar localidad por coordenadas
-        print(f"[DEBUG] Buscando localidad para coordenadas: lon={lon}, lat={lat}")
         locality, shipping_zone_locality = find_locality_by_coordinates(lon, lat)
         
         if not locality:
-            print(f"❌ No se encontró localidad para coordenadas: lon={lon}, lat={lat}")
-            # Contar cuántas zonas hay
-            zone_count = CrmDeliveryZone.query.filter(
-                CrmDeliveryZone.crm_deleted_at.is_(None)
-            ).count()
-            print(f"[DEBUG] Zonas de entrega disponibles: {zone_count}")
-            
             # Intentar usar localidad por defecto si está configurada
             if Config.DEFAULT_LOCALITY_ID:
-                print(f"[DEBUG] Intentando usar localidad por defecto: {Config.DEFAULT_LOCALITY_ID}")
                 try:
                     import uuid as uuid_lib
                     default_locality_uuid = uuid_lib.UUID(Config.DEFAULT_LOCALITY_ID)
                     default_locality = Locality.query.get(default_locality_uuid)
                     if default_locality:
-                        print(f"✅ Usando localidad por defecto: {default_locality.name}")
                         return jsonify({
                             'success': True,
                             'data': {
@@ -728,18 +585,16 @@ def detect_locality():
                                 'reason': 'No se encontró localidad para las coordenadas proporcionadas'
                             }
                         }), 200
-                except (ValueError, TypeError) as e:
-                    print(f"⚠️  DEFAULT_LOCALITY_ID no es un UUID válido: {e}")
+                except (ValueError, TypeError):
+                    pass
             
             # Si no hay localidad por defecto configurada, usar el catalog de fallback
             fallback_catalog_id = '8335e521-f25a-4f92-8f59-c4439671ef26'
-            print(f"[DEBUG] Intentando usar catalog de fallback: {fallback_catalog_id}")
             try:
                 import uuid as uuid_lib
                 fallback_catalog_uuid = uuid_lib.UUID(fallback_catalog_id)
                 fallback_catalog = Catalog.query.get(fallback_catalog_uuid)
                 if fallback_catalog:
-                    print(f"✅ Usando catalog de fallback: {fallback_catalog.name}")
                     
                     # Buscar la primera localidad asociada a este catalog
                     locality_assoc = LocalityCatalog.query.filter_by(catalog_id=fallback_catalog.id).first()
@@ -755,20 +610,13 @@ def detect_locality():
                     # Incluir localidad si existe (para compatibilidad con frontend)
                     if fallback_locality:
                         response_data['locality'] = fallback_locality.to_dict()
-                        print(f"[DEBUG] Localidad asociada al catalog de fallback: {fallback_locality.name}")
-                    else:
-                        print(f"[DEBUG] ⚠️  El catalog de fallback no tiene localidades asociadas")
-                    
-                    print(f"[DEBUG] Respuesta de fallback: {json.dumps(response_data, indent=2, default=str)}")
                     
                     return jsonify({
                         'success': True,
                         'data': response_data
                     }), 200
-                else:
-                    print(f"⚠️  Catalog de fallback no encontrado: {fallback_catalog_id}")
-            except (ValueError, TypeError) as e:
-                print(f"⚠️  ID de catalog de fallback no es un UUID válido: {e}")
+            except (ValueError, TypeError):
+                pass
             
             return jsonify({
                 'success': False,
@@ -777,7 +625,6 @@ def detect_locality():
                 'hint': 'Verifica que las zonas de entrega estén configuradas correctamente en la base de datos'
             }), 404
         
-        print(f"✅ Localidad encontrada: {locality.name} (ID: {locality.id})")
         
         # Obtener la zona de entrega asociada a esta localidad (para todo lo demás, no envío)
         crm_zone_id = None
@@ -786,10 +633,8 @@ def detect_locality():
         
         # Si hay una zona TERCERIZADO para envío, usar esa para calcular envío
         if shipping_zone_locality:
-            print(f"[DEBUG] Usando zona TERCERIZADO solo para cálculo de envío")
             is_third_party_transport = shipping_zone_locality.is_third_party_transport or False
             shipping_price = float(shipping_zone_locality.shipping_price) if shipping_zone_locality.shipping_price else None
-            print(f"[DEBUG] Envío (zona TERCERIZADO): is_third_party={is_third_party_transport}, shipping_price={shipping_price}")
         
         # Obtener la zona de entrega de la localidad principal (para todo lo demás)
         zone_locality = CrmZoneLocality.query.filter_by(locality_id=locality.id).first()
@@ -800,9 +645,7 @@ def detect_locality():
             if not shipping_zone_locality:
                 is_third_party_transport = zone_locality.is_third_party_transport or False
                 shipping_price = float(zone_locality.shipping_price) if zone_locality.shipping_price else None
-            print(f"[DEBUG] Zona de entrega principal: crm_zone_id={crm_zone_id}")
         else:
-            print(f"[DEBUG] ⚠️ No se encontró zona de entrega para localidad: {locality.name} (id: {locality.id})")
             # Intentar buscar por nombre de localidad en crm_delivery_zones
             try:
                 crm_zone = CrmDeliveryZone.query.filter(
@@ -811,9 +654,8 @@ def detect_locality():
                 ).first()
                 if crm_zone:
                     crm_zone_id = crm_zone.crm_zone_id
-                    print(f"[DEBUG] Zona encontrada por nombre: {crm_zone.name} (crm_zone_id: {crm_zone_id})")
-            except Exception as e:
-                print(f"[DEBUG] Error al buscar zona por nombre: {str(e)}")
+            except Exception:
+                pass
         
         response_data = {
             'locality': locality.to_dict(),
@@ -822,9 +664,6 @@ def detect_locality():
         
         if crm_zone_id:
             response_data['crm_zone_id'] = crm_zone_id
-            print(f"[DEBUG] crm_zone_id agregado a respuesta: {crm_zone_id}")
-        else:
-            print(f"[DEBUG] ⚠️ No se encontró crm_zone_id para localidad: {locality.name} (id: {locality.id})")
         
         # Agregar información de transporte tercerizado - SIEMPRE incluir estos campos
         # Si hay zona TERCERIZADO, estos valores vienen de esa zona (solo para envío)
@@ -833,7 +672,6 @@ def detect_locality():
             response_data['shipping_price'] = shipping_price
         # Si shipping_price es None, no lo agregamos (el frontend lo manejará como null)
         
-        print(f"[DEBUG] Respuesta final de detect_locality: {json.dumps(response_data, indent=2, default=str)}")
         
         return jsonify({
             'success': True,
@@ -843,8 +681,6 @@ def detect_locality():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"❌ Error en detect_locality: {str(e)}")
-        print(f"[DEBUG] Traceback completo:\n{error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),

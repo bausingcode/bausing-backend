@@ -224,8 +224,6 @@ def get_hero_images():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"Error in get_hero_images: {str(e)}")
-        print(f"Traceback: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -338,14 +336,13 @@ def delete_hero_image(image_id):
                     try:
                         with urlopen(req, context=ssl_context) as response:
                             if response.status not in [200, 204]:
-                                print(f"Warning: No se pudo eliminar el archivo de Supabase Storage. Status: {response.status}")
+                                pass
                     except HTTPError as e:
                         if e.code not in [200, 204]:
-                            print(f"Warning: No se pudo eliminar el archivo de Supabase Storage. Status: {e.code}")
-        except Exception as storage_error:
-            # Si falla la eliminación del storage, registrar el error pero continuar
-            # para eliminar el registro de la base de datos
-            print(f"Warning: No se pudo eliminar el archivo de Supabase Storage: {str(storage_error)}")
+                            pass
+        except Exception:
+            # Si falla la eliminación del storage, continuar para eliminar el registro de la base de datos
+            pass
         
         # Eliminar el registro de la base de datos
         db.session.delete(hero_image)

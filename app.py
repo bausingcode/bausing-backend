@@ -33,12 +33,6 @@ def handle_preflight():
 database_url = os.getenv('DATABASE_URL')
 if database_url:
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
-    # Verificar que esté usando el puerto 6543 (Transaction mode)
-    if ':6543/' in database_url:
-        print(f"✅ Usando Transaction mode (puerto 6543)")
-    elif ':5432/' in database_url:
-        print(f"⚠️  ADVERTENCIA: Aún usando Session mode (puerto 5432)")
-
 # Configurar opciones del engine de SQLAlchemy
 if hasattr(Config, 'SQLALCHEMY_ENGINE_OPTIONS'):
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = Config.SQLALCHEMY_ENGINE_OPTIONS

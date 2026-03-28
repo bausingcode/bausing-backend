@@ -87,7 +87,6 @@ def admin_required(f):
             # Intentar buscar por string también
             admin_user_str = AdminUser.query.filter_by(id=str(admin_id)).first()
             if admin_user_str:
-                print(f"DEBUG - Usuario encontrado buscando por string")
                 admin_user = admin_user_str
             else:
                 return jsonify({

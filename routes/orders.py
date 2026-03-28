@@ -36,7 +36,6 @@ def get_crm_zone_id_from_locality(locality_name):
     Si no encuentra mapeo, busca en crm_delivery_zones por nombre y crea el mapeo automáticamente
     """
     try:
-        print(f"[DEBUG] get_crm_zone_id_from_locality: Buscando localidad con nombre: '{locality_name}'")
         
         # Hacer rollback de cualquier transacción abortada
         try:
@@ -45,31 +44,19 @@ def get_crm_zone_id_from_locality(locality_name):
             pass
         
         # Buscar la localidad por nombre exacto
-        print(f"[DEBUG] Buscando localidad con nombre exacto: '{locality_name}'")
         locality = Locality.query.filter_by(name=locality_name).first()
         
         if not locality:
             # Intentar búsqueda case-insensitive
-            print(f"[DEBUG] No se encontró con nombre exacto, intentando búsqueda case-insensitive...")
             locality = Locality.query.filter(Locality.name.ilike(locality_name)).first()
         
         if not locality:
             # Intentar búsqueda parcial
-            print(f"[DEBUG] No se encontró con búsqueda case-insensitive, intentando búsqueda parcial...")
             locality = Locality.query.filter(Locality.name.ilike(f'%{locality_name}%')).first()
         
         if not locality:
-            # Listar todas las localidades disponibles para debug
-            print(f"[DEBUG] No se encontró localidad. Listando todas las localidades disponibles:")
-            all_localities = Locality.query.all()
-            for loc in all_localities[:10]:  # Mostrar solo las primeras 10
-                print(f"  - {loc.name} (id: {loc.id})")
-            if len(all_localities) > 10:
-                print(f"  ... y {len(all_localities) - 10} más")
-            print(f"❌ No se encontró localidad con nombre: '{locality_name}'")
             return None
         
-        print(f"[DEBUG] ✅ Localidad encontrada: {locality.name} (id: {locality.id})")
         
         # Primero intentar buscar en crm_zone_localities
         try:
@@ -77,7 +64,6 @@ def get_crm_zone_id_from_locality(locality_name):
             if zone_locality:
                 return zone_locality.crm_zone_id
         except Exception as e:
-            print(f"Error al buscar en crm_zone_localities: {str(e)}")
             db.session.rollback()
         
         # Si no hay mapeo, intentar buscar en crm_delivery_zones por nombre
@@ -97,24 +83,17 @@ def get_crm_zone_id_from_locality(locality_name):
                     )
                     db.session.add(new_mapping)
                     db.session.commit()
-                    print(f"✅ Creado mapeo automático en crm_zone_localities: localidad {locality_name} (id: {locality.id}) -> crm_zone_id {crm_zone.crm_zone_id}")
                 except Exception as mapping_error:
                     # Si falla la creación del mapeo (por ejemplo, ya existe), hacer rollback y continuar
                     db.session.rollback()
-                    print(f"⚠️  No se pudo crear mapeo automático (puede que ya exista): {str(mapping_error)}")
                 
                 return crm_zone.crm_zone_id
-            else:
-                print(f"❌ No se encontró zona de entrega para localidad {locality_name} en crm_delivery_zones")
         except Exception as e:
-            print(f"Error al buscar zona de entrega: {str(e)}")
             db.session.rollback()
         
         return None
     except Exception as e:
-        print(f"Error al obtener crm_zone_id desde localidad: {str(e)}")
         import traceback
-        print(traceback.format_exc())
         try:
             db.session.rollback()
         except:
@@ -141,7 +120,6 @@ def get_crm_province_id_from_province(province_id):
             if province_map:
                 return province_map.crm_province_id
         except Exception as e:
-            print(f"Error al buscar en crm_province_map: {str(e)}")
             db.session.rollback()
         
         # Si no hay mapeo, intentar buscar por nombre de provincia
@@ -159,26 +137,17 @@ def get_crm_province_id_from_province(province_id):
                         )
                         db.session.add(new_mapping)
                         db.session.commit()
-                        print(f"✅ Creado mapeo automático en crm_province_map: provincia {province.name} (id: {province_uuid}) -> crm_province_id {crm_province.crm_province_id}")
                     except Exception as mapping_error:
                         # Si falla la creación del mapeo (por ejemplo, ya existe), hacer rollback y continuar
                         db.session.rollback()
-                        print(f"⚠️  No se pudo crear mapeo automático (puede que ya exista): {str(mapping_error)}")
                     
                     return crm_province.crm_province_id
-                else:
-                    print(f"❌ No se encontró provincia {province.name} en crm_provinces")
-            else:
-                print(f"❌ No se encontró provincia con id {province_id}")
         except Exception as e:
-            print(f"Error al buscar provincia: {str(e)}")
             db.session.rollback()
         
         return None
     except Exception as e:
-        print(f"Error al obtener crm_province_id desde province_id: {str(e)}")
         import traceback
-        print(traceback.format_exc())
         try:
             db.session.rollback()
         except:
@@ -200,7 +169,6 @@ def get_crm_doc_type_id_from_doc_type(doc_type_id):
             return None
         return None
     except Exception as e:
-        print(f"Error al obtener crm_doc_type_id desde doc_type_id: {str(e)}")
         return None
 
 def create_crm_order_from_order(order):
@@ -210,10 +178,8 @@ def create_crm_order_from_order(order):
     """
     try:
         if order.crm_order_id:
-            print(f"[DEBUG] Orden {order.id} ya tiene crm_order_id={order.crm_order_id}, saltando creación")
             return order.crm_order_id
         
-        print(f"[DEBUG] Creando orden en CRM para orden {order.id}...")
         
         from models.order_item import OrderItem
         from models.product import Product, ProductVariant, ProductVariantOption
@@ -227,7 +193,6 @@ def create_crm_order_from_order(order):
         # Obtener usuario y dirección
         user = User.query.get(order.user_id)
         if not user:
-            print(f"[DEBUG] ⚠️ Usuario {order.user_id} no encontrado")
             return None
         
         # Obtener dirección de entrega
@@ -236,13 +201,11 @@ def create_crm_order_from_order(order):
             address = Address.query.filter_by(user_id=user.id).first()
         
         if not address:
-            print(f"[DEBUG] ⚠️ No se encontró dirección para usuario {user.id}")
             return None
         
         # Obtener items de la orden
         order_items = OrderItem.query.filter_by(order_id=order.id).all()
         if not order_items:
-            print(f"[DEBUG] ⚠️ Orden {order.id} no tiene items")
             return None
         
         # Obtener datos del cliente
@@ -258,7 +221,6 @@ def create_crm_order_from_order(order):
             doc_type = DocType.query.first()
         
         if not doc_type:
-            print(f"[DEBUG] ⚠️ No se encontró ningún tipo de documento en la base de datos")
             return None
         
         # Obtener crm_doc_type_id
@@ -273,12 +235,10 @@ def create_crm_order_from_order(order):
         # Obtener provincia y zona
         crm_province_id = get_crm_province_id_from_province(address.province_id)
         if not crm_province_id:
-            print(f"[DEBUG] ⚠️ No se pudo obtener crm_province_id")
             return None
         
         crm_zone_id = get_crm_zone_id_from_locality(address.city)
         if not crm_zone_id:
-            print(f"[DEBUG] ⚠️ No se pudo obtener crm_zone_id")
             return None
         
         # Preparar items para el CRM
@@ -321,7 +281,6 @@ def create_crm_order_from_order(order):
             })
         
         if not js_items:
-            print(f"[DEBUG] ⚠️ No se pudieron mapear items al CRM")
             return None
         
         # Preparar payload para crear_venta
@@ -359,8 +318,8 @@ def create_crm_order_from_order(order):
                 if len(lat_lon_parts) == 2:
                     latitud = float(lat_lon_parts[0].strip())
                     longitud = float(lat_lon_parts[1].strip())
-            except (ValueError, AttributeError) as e:
-                print(f"[DEBUG] ⚠️ Error al parsear lat_lon '{address.lat_lon}': {str(e)}")
+            except (ValueError, AttributeError):
+                pass
         
         # Construir formaPagos según payment_method almacenado (puede ser múltiple, separado por coma)
         payment_methods_list = (order.payment_method or 'card').split(',')
@@ -449,19 +408,14 @@ def create_crm_order_from_order(order):
                 if crm_order_id:
                     order.crm_order_id = crm_order_id
                     db.session.commit()
-                    print(f"[DEBUG] ✅ Orden {order.id} creada en CRM con crm_order_id={crm_order_id}")
                     return crm_order_id
                 else:
-                    print(f"[DEBUG] ⚠️ No se pudo obtener crm_order_id de la respuesta")
                     return None
             else:
-                print(f"[DEBUG] ⚠️ Error al crear venta en CRM: {response_data.get('message', 'Error desconocido')}")
                 return None
                 
     except Exception as crm_error:
         import traceback
-        print(f"[DEBUG] ⚠️ Error al crear venta en CRM: {str(crm_error)}")
-        print(traceback.format_exc())
         return None
 
 
@@ -542,7 +496,6 @@ def get_user_orders():
                     if row[1]:  # receipt_number
                         receipt_numbers_map[row[0]] = row[1]
             except Exception as e:
-                print(f"[DEBUG] Error al cargar receipt_numbers: {str(e)}")
                 pass
         
         # Cargar items de todas las órdenes en una sola query
@@ -607,11 +560,9 @@ def get_user_orders():
                         'unit_price': float(item.unit_price) if item.unit_price else 0.0,
                         'total_price': float(item.unit_price * item.quantity) if item.unit_price else 0.0,
                     })
-            except Exception as e:
-                print(f"[DEBUG] Error al cargar items: {str(e)}")
-                import traceback
-                traceback.print_exc()
+            except Exception:
                 # Si falla, items_map quedará vacío y se usarán arrays vacíos
+                pass
         
         # Convertir órdenes a formato esperado por el frontend usando datos pre-cargados
         orders_data = []
@@ -842,9 +793,6 @@ def create_order():
         user = request.user
         data = request.get_json()
         
-        print(f"[DEBUG] ========== CREAR ORDEN ==========")
-        print(f"[DEBUG] User ID: {user.id}")
-        print(f"[DEBUG] Data recibida: {json.dumps(data, indent=2, default=str)}")
         
         if not data:
             return jsonify({
@@ -892,7 +840,6 @@ def create_order():
                 total_original = sum(float(item.get('price', 0)) * item.get('quantity', 1) for item in items)
                 if total_original > 0:
                     used_wallet_amount = total_original
-                    print(f"[DEBUG] Método de pago wallet: usando total original como used_wallet_amount: {used_wallet_amount}")
                 else:
                     return jsonify({
                         'success': False,
@@ -917,21 +864,11 @@ def create_order():
         if payment_method == 'card' and not pay_on_delivery:
             mp_access_token = Config.MP_ACCESS_TOKEN or os.getenv('MP_ACCESS_TOKEN')
             if not mp_access_token:
-                print("[DEBUG] ⚠️ MP_ACCESS_TOKEN no configurado - abortando creación de orden")
                 return jsonify({
                     'success': False,
                     'error': 'Configuración de pago no disponible. Por favor, contacta al soporte.'
                 }), 500
         
-        print(f"[DEBUG] pay_on_delivery: {pay_on_delivery}")
-        print(f"[DEBUG] crm_sale_type_id: {crm_sale_type_id}")
-        print(f"[DEBUG] total: {total}")
-        print(f"[DEBUG] payment_method: {data.get('payment_method')}")
-        print(f"[DEBUG] crm_zone_id recibido: {data.get('crm_zone_id')}")
-        print(f"[DEBUG] wallet_amount recibido: {data.get('wallet_amount')}")
-        print(f"[DEBUG] used_wallet_amount recibido: {data.get('used_wallet_amount')}")
-        print(f"[DEBUG] used_wallet_amount calculado: {used_wallet_amount}")
-        print(f"[DEBUG] referral_code recibido: {referral_code}")
         
         # Validar código de referido si se proporcionó
         if referral_code:
@@ -942,7 +879,6 @@ def create_order():
                     'success': False,
                     'error': validation_result.get('message', 'Código de referido inválido')
                 }), 400
-            print(f"[DEBUG] ✅ Código de referido válido: {referral_code}")
         
         # Preparar datos para llamar a /api/ventas/crear
         # Primero necesitamos obtener los datos del usuario y dirección
@@ -985,7 +921,6 @@ def create_order():
                         else:
                             crm_doc_type_id_int = 1
             except Exception as e:
-                print(f"[DEBUG] Error al obtener tipo de documento: {str(e)}")
                 # Usar DNI por defecto si hay error
                 crm_doc_type_id_int = 1
         
@@ -1152,7 +1087,6 @@ def create_order():
             if es_pago_wallet_completo:
                 precio_total_ajustado = precio_total_original
                 precio_unitario_ajustado = precio_unitario_original
-                print(f"[DEBUG] Producto '{product.name}': pago completo con wallet, usando precio original={precio_total_original}")
             # Si hay descuento de billetera (pero no es pago completo), calcular descuento proporcional
             elif descuento_total > 0 and total_productos_original > 0:
                 # Porcentaje que representa este producto del total
@@ -1163,7 +1097,6 @@ def create_order():
                 precio_total_ajustado = precio_total_original - descuento_producto
                 precio_unitario_ajustado = precio_total_ajustado / cantidad if cantidad > 0 else 0
                 
-                print(f"[DEBUG] Producto '{product.name}': precio_original={precio_total_original}, descuento={descuento_producto:.2f}, precio_ajustado={precio_total_ajustado:.2f}")
             else:
                 # No hay descuento, usar precios originales
                 precio_total_ajustado = precio_total_original
@@ -1250,12 +1183,9 @@ def create_order():
                 wallet.updated_at = datetime.utcnow()
                 
                 nuevo_balance = float(wallet.balance)
-                print(f"[DEBUG] ✅ Movimiento de billetera creado. Descontando ${used_wallet_amount:.2f}. Balance antes: ${current_balance:.2f}, Balance después: ${nuevo_balance:.2f}")
             except Exception as wallet_error:
                 db.session.rollback()
                 import traceback
-                print(f"[DEBUG] ⚠️ Error al verificar/descontar saldo de billetera: {str(wallet_error)}")
-                print(traceback.format_exc())
                 return jsonify({
                     'success': False,
                     'error': f'Error al procesar el descuento de billetera: {str(wallet_error)}'
@@ -1294,10 +1224,6 @@ def create_order():
                         "monto_total": pm_amount,
                         "procesado": pm_processed
                     })
-            
-            print(f"[DEBUG] Multi-payment: {len(forma_pagos_array)} medios de pago")
-            for fp in forma_pagos_array:
-                print(f"[DEBUG]   - medios_pago_id={fp['medios_pago_id']}, monto={fp['monto_total']}, procesado={fp['procesado']}")
             
             # Guardar los métodos combinados en payment_method (separados por coma)
             combined_methods = ','.join([pm.get('method', 'card') for pm in frontend_payment_methods if float(pm.get('amount', 0)) > 0])
@@ -1338,8 +1264,8 @@ def create_order():
                 if len(lat_lon_parts) == 2:
                     latitud = float(lat_lon_parts[0].strip())
                     longitud = float(lat_lon_parts[1].strip())
-            except (ValueError, AttributeError) as e:
-                print(f"[DEBUG] ⚠️ Error al parsear lat_lon '{lat_lon_str}': {str(e)}")
+            except (ValueError, AttributeError):
+                pass
         
         # Preparar payload para /api/ventas/crear
         venta_payload = {
@@ -1371,8 +1297,6 @@ def create_order():
         }
         
         # Llamar a /api/ventas/crear
-        print(f"[DEBUG] Llamando a /api/ventas/crear para crear orden y venta en CRM...")
-        print(f"[DEBUG] Payload completo: {json.dumps(venta_payload, indent=2, default=str)}")
         try:
             from flask import current_app
             from routes.public_api import crear_venta
@@ -1398,7 +1322,6 @@ def create_order():
                 else:
                     response_data = response_obj if isinstance(response_obj, dict) else {}
                 
-                print(f"[DEBUG] Respuesta de crear_venta: status_code={status_code}, response_data={json.dumps(response_data, indent=2, default=str)}")
                 
                 if status_code == 200 and response_data.get('status', False):
                     order_id = response_data.get('data', {}).get('order_id')
@@ -1410,8 +1333,6 @@ def create_order():
                         if order:
                             # Refrescar para asegurar que tenemos todos los datos actualizados
                             db.session.refresh(order)
-                            print(f"[DEBUG] ✅ Orden y venta creadas exitosamente - order_id={order_id}, crm_order_id={crm_order_id}")
-                            print(f"[DEBUG] ✅ Orden recuperada - total={order.total}, status={order.status}, payment_method={order.payment_method}")
                         else:
                             return jsonify({
                                 'success': False,
@@ -1498,12 +1419,9 @@ def create_order():
                             )
                             db.session.add(retry_record)
                             db.session.commit()
-                            print(f"[DEBUG] ✅ Venta guardada en sale_retry_queue con id={retry_record.id} debido a fallo en endpoint externo")
                         except Exception as retry_error:
                             db.session.rollback()
                             import traceback
-                            print(f"[DEBUG] ⚠️ Error al guardar en sale_retry_queue: {str(retry_error)}")
-                            print(traceback.format_exc())
                             # No fallar si no se puede guardar en la cola de reintentos
                     
                     # Si hay error y se creó un movimiento de billetera, revertirlo
@@ -1515,10 +1433,8 @@ def create_order():
                                 wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
                                 wallet.updated_at = datetime.utcnow()
                             db.session.commit()
-                            print(f"[DEBUG] ✅ Movimiento de billetera revertido debido a error al crear la orden: {error_msg}")
                         except Exception as revert_error:
                             db.session.rollback()
-                            print(f"[DEBUG] ⚠️ Error al revertir movimiento de billetera: {str(revert_error)}")
                     
                     return jsonify({
                         'success': False,
@@ -1526,8 +1442,6 @@ def create_order():
                     }), status_code
         except Exception as venta_error:
             import traceback
-            print(f"[DEBUG] ⚠️ Error al llamar a /api/ventas/crear: {str(venta_error)}")
-            print(traceback.format_exc())
             
             # Si hay error y se creó un movimiento de billetera, revertirlo
             if wallet_movement:
@@ -1538,10 +1452,8 @@ def create_order():
                         wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
                         wallet.updated_at = datetime.utcnow()
                     db.session.commit()
-                    print(f"[DEBUG] ✅ Movimiento de billetera revertido debido a excepción al crear la orden")
                 except Exception as revert_error:
                     db.session.rollback()
-                    print(f"[DEBUG] ⚠️ Error al revertir movimiento de billetera: {str(revert_error)}")
             
             return jsonify({
                 'success': False,
@@ -1577,13 +1489,7 @@ def create_order():
                             db.session.commit()
                             
                             balance_final = float(wallet.balance)
-                            print(f"[DEBUG] ✅ Movimiento de billetera registrado y balance actualizado para orden {order.id}")
-                            print(f"[DEBUG]    - Tipo: order_payment")
-                            print(f"[DEBUG]    - Monto descontado: ${used_wallet_amount:.2f}")
-                            print(f"[DEBUG]    - Balance final: ${balance_final:.2f}")
-                            print(f"[DEBUG]    - Order ID: {order.id}")
                         else:
-                            print(f"[DEBUG] ⚠️ No se encontró movimiento de billetera pendiente para actualizar")
                             # Si no se encontró el movimiento, intentar crearlo de nuevo
                             try:
                                 movement = WalletMovement(
@@ -1597,15 +1503,11 @@ def create_order():
                                 wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
                                 wallet.updated_at = datetime.utcnow()
                                 db.session.commit()
-                                print(f"[DEBUG] ✅ Movimiento de billetera creado después de crear la orden. Balance: ${wallet.balance}")
                             except Exception as fallback_error:
                                 db.session.rollback()
-                                print(f"[DEBUG] ⚠️ Error al crear movimiento de billetera como fallback: {str(fallback_error)}")
                 except Exception as wallet_error:
                     db.session.rollback()
                     import traceback
-                    print(f"[DEBUG] ⚠️ Error al actualizar movimiento de billetera: {str(wallet_error)}")
-                    print(traceback.format_exc())
                     # No fallar la orden si falla la actualización del movimiento, pero loguear el error
             
             # Enviar email de confirmación de compra
@@ -1627,8 +1529,8 @@ def create_order():
                         receipt_row = receipt_result.fetchone()
                         if receipt_row and receipt_row[0]:
                             order_number = receipt_row[0]
-                    except Exception as receipt_error:
-                        print(f"[DEBUG] Error al obtener receipt_number: {str(receipt_error)}")
+                    except Exception:
+                        pass
                 
                 # Si no se encontró receipt_number, usar UUID de la orden
                 if not order_number:
@@ -1654,16 +1556,9 @@ def create_order():
                     order_url=order_url
                 )
                 
-                if email_sent:
-                    print(f"[DEBUG] ✅ Email de confirmación enviado a {user_email} para orden {order_number}")
-                else:
-                    print(f"[DEBUG] ⚠️ No se pudo enviar email de confirmación a {user_email}")
-                    
-            except Exception as email_error:
+            except Exception:
                 # No fallar la creación de la orden si falla el envío del email
-                import traceback
-                print(f"[DEBUG] ❌ Error al enviar email de confirmación: {str(email_error)}")
-                print(traceback.format_exc())
+                pass
                 
         except IntegrityError as e:
             db.session.rollback()
@@ -1687,12 +1582,10 @@ def create_order():
                         # Si la diferencia es mayor a 2 horas, probablemente está en UTC, actualizar
                         if time_diff > 2:
                             existing_order.created_at = get_argentina_time()
-                            print(f"[DEBUG] ⚠️ Actualizado created_at de orden existente (parecía estar en UTC)")
                     
                     try:
                         db.session.commit()
                         db.session.refresh(existing_order)
-                        print(f"[DEBUG] Orden duplicada actualizada - user_id={existing_order.user_id}, total={existing_order.total}, payment_method={existing_order.payment_method}")
                         
                         # Enviar email de confirmación de compra (solo si no se había enviado antes)
                         try:
@@ -1713,8 +1606,8 @@ def create_order():
                                     receipt_row = receipt_result.fetchone()
                                     if receipt_row and receipt_row[0]:
                                         order_number = receipt_row[0]
-                                except Exception as receipt_error:
-                                    print(f"[DEBUG] Error al obtener receipt_number: {str(receipt_error)}")
+                                except Exception:
+                                    pass
                             
                             # Si no se encontró receipt_number, usar UUID de la orden
                             if not order_number:
@@ -1740,16 +1633,9 @@ def create_order():
                                 order_url=order_url
                             )
                             
-                            if email_sent:
-                                print(f"[DEBUG] ✅ Email de confirmación enviado a {user_email} para orden {order_number}")
-                            else:
-                                print(f"[DEBUG] ⚠️ No se pudo enviar email de confirmación a {user_email}")
-                                
-                        except Exception as email_error:
+                        except Exception:
                             # No fallar la actualización de la orden si falla el envío del email
-                            import traceback
-                            print(f"[DEBUG] ❌ Error al enviar email de confirmación: {str(email_error)}")
-                            print(traceback.format_exc())
+                            pass
                         
                         return jsonify({
                             'success': True,
@@ -1758,13 +1644,11 @@ def create_order():
                         }), 200
                     except Exception as update_error:
                         db.session.rollback()
-                        print(f"[DEBUG] Error al actualizar orden duplicada: {str(update_error)}")
                         raise
             # Si no se encontró la orden existente, re-lanzar el error
             raise
         
         order_dict = order.to_dict()
-        print(f"[DEBUG] Orden creada exitosamente: {json.dumps(order_dict, indent=2, default=str)}")
         
         # Si es pago con tarjeta sin "abonar al recibir", procesar pago con MercadoPago Checkout API (vía Payments)
         response_data = {
@@ -1797,12 +1681,6 @@ def create_order():
             mp_cardholder_identification_number = data.get('mercadopago_cardholder_identification_number')
             
             # ========== DEBUG: Lo que llega del frontend ==========
-            print(f"[DEBUG] ========== DATOS DEL FRONTEND ==========")
-            print(f"[DEBUG] mercadopago_payment_method_id: {mp_payment_method_id} (tipo: {type(mp_payment_method_id).__name__})")
-            print(f"[DEBUG] mercadopago_issuer_id: {mp_issuer_id} (tipo: {type(mp_issuer_id).__name__})")
-            print(f"[DEBUG] mercadopago_token: {mp_token[:6] if mp_token and len(mp_token) >= 6 else mp_token}... (longitud: {len(mp_token) if mp_token else 0})")
-            print(f"[DEBUG] amount (total): {total} (tipo: {type(total).__name__})")
-            print(f"[DEBUG] ========================================")
             
             if not mp_token:
                 return jsonify({
@@ -1827,7 +1705,6 @@ def create_order():
                 # El token ya fue verificado antes de crear la orden, pero lo verificamos de nuevo por seguridad
                 mp_access_token = Config.MP_ACCESS_TOKEN or os.getenv('MP_ACCESS_TOKEN')
                 if not mp_access_token:
-                    print("[DEBUG] ⚠️ MP_ACCESS_TOKEN no configurado - esto no debería pasar")
                     # Esto no debería pasar porque ya lo verificamos antes, pero por seguridad:
                     order.payment_processed = False
                     order.status = 'pending'
@@ -1860,8 +1737,6 @@ def create_order():
                 # Limpiar el token (eliminar espacios en blanco)
                 mp_token_clean = mp_token.strip()
                 
-                print(f"[DEBUG] Token limpio a usar: {mp_token_clean[:20]}... (longitud: {len(mp_token_clean)})")
-                print(f"[DEBUG] Total a pagar: {total_to_pay}")
                 
                 # Construir el objeto payer con toda la información disponible
                 # PRIORIDAD: Usar datos del cardholder del Brick si están disponibles (son más confiables)
@@ -1871,7 +1746,6 @@ def create_order():
                 customer_email = mp_cardholder_email or (formData.get('email', '') if formData else '') or user.email or ''
                 if not customer_email or customer_email.strip() == "":
                     customer_email = "test@example.com"
-                    print(f"[DEBUG] ⚠️ No se encontró email válido, usando email por defecto")
                 
                 # Nombre: Prioridad 1) Cardholder del Brick, 2) Formulario
                 if mp_cardholder_name:
@@ -1926,12 +1800,7 @@ def create_order():
                             "number": phone_clean
                         }
                 
-                print(f"[DEBUG] 🔍 Datos del payer (prioridad: Brick > Formulario > Usuario):")
-                print(f"[DEBUG]   - Email: {payer_data.get('email')} (fuente: {'Brick' if mp_cardholder_email else 'Formulario/Usuario'})")
-                print(f"[DEBUG]   - Nombre: {payer_data.get('first_name')} {payer_data.get('last_name')} (fuente: {'Brick' if mp_cardholder_name else 'Formulario'})")
-                print(f"[DEBUG]   - Identificación: {payer_data.get('identification')} (fuente: {'Brick' if mp_cardholder_identification_number else 'Formulario/Address'})")
                 
-                print(f"[DEBUG] Payer data construido: {json.dumps(payer_data, indent=2, default=str)}")
                 
                 # Asegurarse de que payer_data no tenga valores None o vacíos
                 payer_data_clean = {}
@@ -1952,7 +1821,6 @@ def create_order():
                 if "email" not in payer_data_clean or not payer_data_clean["email"]:
                     payer_data_clean["email"] = customer_email.strip() if customer_email else "test@example.com"
                 
-                print(f"[DEBUG] Datos del cliente obtenidos: email={customer_email}, first_name={customer_first_name}, last_name={customer_last_name}, dni={customer_dni}, phone={customer_phone}")
                 
                 payment_payload = {
                     "token": mp_token_clean,
@@ -1965,7 +1833,6 @@ def create_order():
                     "statement_descriptor": "BAUSING"
                 }
                 
-                print(f"[DEBUG] Payment payload payer (limpio): {json.dumps(payer_data_clean, indent=2, default=str)}")
                 
                 # Agregar notification_url solo si BACKEND_URL está configurado y es válido
                 backend_url = Config.BACKEND_URL or os.getenv('BACKEND_URL', 'http://localhost:5000')
@@ -1973,19 +1840,9 @@ def create_order():
                 # Construir la URL del webhook
                 notification_url = f"{backend_url.rstrip('/')}/api/orders/webhooks/mercadopago"
                 
-                # Validar que la URL sea válida (debe empezar con http:// o https://)
-                if notification_url.startswith(('http://', 'https://')):
-                    # En desarrollo, localhost puede funcionar, pero MercadoPago puede rechazarlo
-                    # En producción, debe ser una URL pública accesible
-                    if 'localhost' in notification_url:
-                        print(f"[DEBUG] ⚠️ notification_url es localhost: {notification_url}")
-                        print("[DEBUG] ⚠️ MercadoPago puede rechazar localhost. Omitiendo notification_url.")
-                        # No agregar notification_url si es localhost
-                    else:
-                        payment_payload["notification_url"] = notification_url
-                        print(f"[DEBUG] ✅ notification_url configurada: {notification_url}")
-                else:
-                    print(f"[DEBUG] ⚠️ notification_url no es válida: {notification_url}")
+                # Validar que la URL sea válida; no usar localhost (MP lo rechaza)
+                if notification_url.startswith(('http://', 'https://')) and 'localhost' not in notification_url:
+                    payment_payload["notification_url"] = notification_url
                 
                 # Agregar issuer_id si está disponible
                 issuer_id_final = None
@@ -1993,39 +1850,8 @@ def create_order():
                     try:
                         issuer_id_final = int(mp_issuer_id)
                         payment_payload["issuer_id"] = issuer_id_final
-                    except (ValueError, TypeError) as e:
-                        print(f"[DEBUG] ⚠️ ERROR: No se pudo convertir issuer_id a int: {mp_issuer_id} (tipo: {type(mp_issuer_id).__name__})")
-                        print(f"[DEBUG] ⚠️ ERROR: Exception: {e}")
-                
-                # ========== DEBUG: Lo que se envía a MercadoPago ==========
-                print(f"[DEBUG] ========== DATOS ENVIADOS A MERCADOPAGO ==========")
-                print(f"[DEBUG] payment_method_id: {payment_payload.get('payment_method_id')} (tipo: {type(payment_payload.get('payment_method_id')).__name__})")
-                print(f"[DEBUG] issuer_id: {issuer_id_final} (tipo: {type(issuer_id_final).__name__ if issuer_id_final is not None else 'None'})")
-                print(f"[DEBUG] payer.email: {payer_data_clean.get('email')} (tipo: {type(payer_data_clean.get('email')).__name__ if payer_data_clean.get('email') else 'None'})")
-                print(f"[DEBUG] transaction_amount: {payment_payload.get('transaction_amount')} (tipo: {type(payment_payload.get('transaction_amount')).__name__})")
-                print(f"[DEBUG] ===================================================")
-                
-                # ========== VERIFICACIÓN DE COINCIDENCIA ==========
-                if mp_payment_method_id != payment_payload.get('payment_method_id'):
-                    print(f"[DEBUG] ⚠️ ERROR: payment_method_id NO COINCIDE!")
-                    print(f"[DEBUG]   Frontend: {mp_payment_method_id}")
-                    print(f"[DEBUG]   Backend: {payment_payload.get('payment_method_id')}")
-                else:
-                    print(f"[DEBUG] ✅ payment_method_id coincide: {mp_payment_method_id}")
-                
-                if mp_issuer_id is None and issuer_id_final is not None:
-                    print(f"[DEBUG] ⚠️ ADVERTENCIA: issuer_id viene undefined del frontend pero se está enviando: {issuer_id_final}")
-                elif mp_issuer_id is not None and issuer_id_final is None:
-                    print(f"[DEBUG] ⚠️ ERROR: issuer_id viene del frontend ({mp_issuer_id}) pero NO se está enviando!")
-                elif mp_issuer_id is not None and issuer_id_final is not None:
-                    if int(mp_issuer_id) != issuer_id_final:
-                        print(f"[DEBUG] ⚠️ ERROR: issuer_id NO COINCIDE!")
-                        print(f"[DEBUG]   Frontend: {mp_issuer_id} (int: {int(mp_issuer_id)})")
-                        print(f"[DEBUG]   Backend: {issuer_id_final}")
-                    else:
-                        print(f"[DEBUG] ✅ issuer_id coincide: {issuer_id_final}")
-                else:
-                    print(f"[DEBUG] ℹ️ issuer_id no está presente (es opcional)")
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Generar idempotency key único para este pago (usar el ID de la orden)
                 idempotency_key = str(order.id)
@@ -2045,66 +1871,10 @@ def create_order():
                         campos_faltantes.append(campo)
                 
                 if campos_faltantes:
-                    print(f"[DEBUG] ❌ ERROR: Faltan campos mínimos requeridos por MercadoPago: {', '.join(campos_faltantes)}")
                     return jsonify({
                         'success': False,
                         'error': f'Faltan campos requeridos para el pago: {", ".join(campos_faltantes)}'
                     }), 400
-                else:
-                    print(f"[DEBUG] ✅ Todos los campos mínimos requeridos están presentes:")
-                    print(f"[DEBUG]   - token: {'✅' if mp_token_clean else '❌'}")
-                    print(f"[DEBUG]   - transaction_amount: {'✅' if float(total_to_pay) > 0 else '❌'} ({total_to_pay})")
-                    print(f"[DEBUG]   - installments: {'✅' if int(mp_installments) > 0 else '❌'} ({mp_installments})")
-                    print(f"[DEBUG]   - payment_method_id: {'✅' if mp_payment_method_id else '❌'} ({mp_payment_method_id})")
-                    print(f"[DEBUG]   - payer.email: {'✅' if payer_data_clean.get('email') else '❌'} ({payer_data_clean.get('email')})")
-                
-                # Log del payload completo (sin mostrar el token completo por seguridad)
-                payload_log = payment_payload.copy()
-                if 'token' in payload_log:
-                    payload_log['token'] = f"{payload_log['token'][:20]}... (oculto)"
-                print(f"[DEBUG] Payload completo a enviar a MercadoPago: {json.dumps(payload_log, indent=2, default=str)}")
-                print(f"[DEBUG] Payer completo en payload (verificación): {json.dumps(payment_payload.get('payer', {}), indent=2, default=str)}")
-                print(f"[DEBUG] Email en payer: {payment_payload.get('payer', {}).get('email', 'NO ENCONTRADO')}")
-                print(f"[DEBUG] Identification en payer: {payment_payload.get('payer', {}).get('identification', 'NO ENCONTRADO')}")
-                print(f"[DEBUG] First name en payer: {payment_payload.get('payer', {}).get('first_name', 'NO ENCONTRADO')}")
-                print(f"[DEBUG] Last name en payer: {payment_payload.get('payer', {}).get('last_name', 'NO ENCONTRADO')}")
-                
-                # Verificar que el objeto payer esté correctamente formateado antes de enviar
-                payer_in_payload = payment_payload.get('payer', {})
-                print(f"[DEBUG] 🔍 Verificación final del payer antes de enviar:")
-                print(f"[DEBUG]   - Email: {payer_in_payload.get('email', 'NO ENCONTRADO')}")
-                print(f"[DEBUG]   - Identification: {payer_in_payload.get('identification', 'NO ENCONTRADO')}")
-                print(f"[DEBUG]   - First name: {payer_in_payload.get('first_name', 'NO ENCONTRADO')}")
-                print(f"[DEBUG]   - Last name: {payer_in_payload.get('last_name', 'NO ENCONTRADO')}")
-                print(f"[DEBUG]   - Phone: {payer_in_payload.get('phone', 'NO ENCONTRADO')}")
-                
-                # Serializar el payload a JSON para verificar que se serializa correctamente
-                payload_json = json.dumps(payment_payload, default=str)
-                print(f"[DEBUG] Payload JSON serializado (primeros 500 caracteres): {payload_json[:500]}")
-                
-                # Verificar que el objeto payer esté presente y correcto antes de enviar
-                payer_in_payload = payment_payload.get('payer', {})
-                if not payer_in_payload or not payer_in_payload.get('email'):
-                    print(f"[DEBUG] ⚠️ ERROR: El objeto payer no tiene email o está vacío!")
-                    print(f"[DEBUG] Payer en payload: {payer_in_payload}")
-                else:
-                    print(f"[DEBUG] ✅ Payer verificado antes de enviar: email={payer_in_payload.get('email')}")
-                
-                # Serializar manualmente para verificar el JSON
-                try:
-                    payload_json_str = json.dumps(payment_payload, default=str, ensure_ascii=False)
-                    # Verificar que el payer esté en el JSON serializado
-                    if '"payer"' in payload_json_str and '"email"' in payload_json_str:
-                        print(f"[DEBUG] ✅ Payer encontrado en JSON serializado")
-                        # Mostrar solo la parte del payer en el JSON
-                        import re
-                        payer_match = re.search(r'"payer"\s*:\s*\{[^}]*\}', payload_json_str)
-                        if payer_match:
-                            print(f"[DEBUG] Payer en JSON: {payer_match.group(0)[:200]}...")
-                    else:
-                        print(f"[DEBUG] ⚠️ ERROR: Payer NO encontrado en JSON serializado!")
-                except Exception as e:
-                    print(f"[DEBUG] ⚠️ Error al serializar JSON: {e}")
                 
                 mp_response = requests.post(
                     "https://api.mercadopago.com/v1/payments",
@@ -2117,25 +1887,11 @@ def create_order():
                     timeout=30
                 )
                 
-                print(f"[DEBUG] Respuesta de MercadoPago: Status {mp_response.status_code}")
-                if mp_response.status_code != 201:
-                    print(f"[DEBUG] Respuesta completa: {mp_response.text}")
-                else:
-                    # Incluso si es 201, verificar el payer en la respuesta
-                    response_data = mp_response.json()
-                    payer_in_response = response_data.get('payer', {})
-                    print(f"[DEBUG] 🔍 Payer en la respuesta de MercadoPago:")
-                    print(f"[DEBUG]   - Email: {payer_in_response.get('email', 'NULL')}")
-                    print(f"[DEBUG]   - Identification: {payer_in_response.get('identification', 'NULL')}")
-                    print(f"[DEBUG]   - First name: {payer_in_response.get('first_name', 'NULL')}")
-                    print(f"[DEBUG]   - Last name: {payer_in_response.get('last_name', 'NULL')}")
-                
                 if mp_response.status_code == 201:
                     mp_payment = mp_response.json()
                     payment_status = mp_payment.get('status')
                     payment_id = mp_payment.get('id')
                     
-                    print(f"[DEBUG] ✅ Pago de MercadoPago procesado: {payment_id}, status: {payment_status}")
                     
                     # Obtener detalles adicionales del pago
                     status_detail = mp_payment.get('status_detail', '')
@@ -2146,7 +1902,6 @@ def create_order():
                         order.payment_processed = True
                         order.status = 'pending'
                         db.session.commit()
-                        print(f"[DEBUG] ✅ Orden {order.id} marcada como pagada")
                         
                         # Retornar la orden con la estructura estándar
                         return jsonify({
@@ -2157,12 +1912,6 @@ def create_order():
                     elif payment_status == 'pending' or payment_status == 'in_process':
                         # El pago está pendiente o en proceso, se procesará vía webhook
                         status_detail = mp_payment.get('status_detail', '')
-                        if status_detail == 'pending_contingency':
-                            print(f"[DEBUG] ⚠️ Pago en proceso (pending_contingency) - MercadoPago está revisando el pago")
-                            print(f"[DEBUG] ⚠️ Este estado es común en pagos de prueba. El pago puede ser aprobado o rechazado más tarde.")
-                            print(f"[DEBUG] ⚠️ El webhook notificará cuando el estado cambie.")
-                        else:
-                            print(f"[DEBUG] ⚠️ Pago pendiente (status: {payment_status}, detail: {status_detail}), esperando webhook")
                         
                         # Marcar la orden como pendiente de pago
                         order.payment_processed = False
@@ -2203,10 +1952,6 @@ def create_order():
                             else:
                                 error_msg += '. Por favor, intenta con otra tarjeta o verifica los datos de la tarjeta.'
                         
-                        print(f"[DEBUG] ❌ Pago rechazado: {error_msg}")
-                        print(f"[DEBUG] Detalles completos del pago: {json.dumps(mp_payment, indent=2, default=str)}")
-                        print(f"[DEBUG] Monto enviado: {total_to_pay} ARS")
-                        print(f"[DEBUG] ⚠️ NOTA: El objeto payer en la respuesta aparece como null porque MercadoPago usa la información del token del Card Payment Brick")
                         
                         # Marcar la orden como no pagada
                         order.payment_processed = False
@@ -2227,10 +1972,8 @@ def create_order():
                                     wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
                                     wallet.updated_at = datetime.utcnow()
                                     db.session.commit()
-                                    print(f"[DEBUG] ✅ Movimiento de billetera revertido debido a pago rechazado con tarjeta para orden {order.id}")
                             except Exception as revert_error:
                                 db.session.rollback()
-                                print(f"[DEBUG] ⚠️ Error al revertir movimiento de billetera por pago rechazado: {str(revert_error)}")
                         
                         return jsonify({
                             'success': False,
@@ -2240,15 +1983,9 @@ def create_order():
                             'status_detail': status_detail,
                             'amount': total_to_pay
                         }), 400
-                    
-                    response_data['payment'] = {
-                        'id': payment_id,
-                        'status': payment_status
-                    }
                 else:
                     error_data = mp_response.json() if mp_response.text else {}
                     error_message = error_data.get('message', 'Error al procesar el pago')
-                    print(f"[DEBUG] ❌ Error al procesar pago: {mp_response.status_code} - {error_message}")
                     return jsonify({
                         'success': False,
                         'error': error_message,
@@ -2257,8 +1994,6 @@ def create_order():
                     
             except Exception as mp_error:
                 import traceback
-                print(f"[DEBUG] ❌ Error al procesar pago de MercadoPago: {str(mp_error)}")
-                print(traceback.format_exc())
                 return jsonify({
                     'success': False,
                     'error': f'Error al procesar el pago: {str(mp_error)}'
@@ -2269,8 +2004,6 @@ def create_order():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error al crear orden: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': f'Error al crear orden: {str(e)}'
@@ -2298,18 +2031,15 @@ def mercadopago_webhook():
         payment_id = payment_id or (body.get('data') or {}).get('id')
         
         if not topic or not payment_id:
-            print("[MP-WH] Webhook sin topic o payment_id, ignorando")
             return '', 200
         
         # Solo procesar notificaciones de payment
         if topic not in ('payment', 'mp_payment'):
-            print(f"[MP-WH] Topic '{topic}' no es payment, ignorando")
             return '', 200
         
         # Obtener el pago de MercadoPago
         mp_access_token = Config.MP_ACCESS_TOKEN or os.getenv('MP_ACCESS_TOKEN')
         if not mp_access_token:
-            print("[MP-WH] ⚠️ MP_ACCESS_TOKEN no configurado")
             return '', 500
         
         mp_response = requests.get(
@@ -2319,37 +2049,31 @@ def mercadopago_webhook():
         )
         
         if mp_response.status_code != 200:
-            print(f"[MP-WH] ❌ Error al obtener pago {payment_id}: {mp_response.status_code}")
             return '', 400
         
         payment = mp_response.json()
         
         # Solo procesar pagos aprobados
         if payment.get('status') != 'approved':
-            print(f"[MP-WH] Pago {payment_id} no está approved (status: {payment.get('status')}), ignorando")
             return '', 200
         
         # Obtener order_id desde external_reference
         external_reference = payment.get('external_reference') or (payment.get('metadata') or {}).get('order_id')
         if not external_reference:
-            print(f"[MP-WH] ⚠️ Pago {payment_id} sin external_reference")
             return '', 200
         
         try:
             order_id = uuid.UUID(external_reference)
         except ValueError:
-            print(f"[MP-WH] ⚠️ external_reference '{external_reference}' no es un UUID válido")
             return '', 200
         
         # Buscar la orden
         order = Order.query.get(order_id)
         if not order:
-            print(f"[MP-WH] ⚠️ Orden {order_id} no encontrada")
             return '', 200
         
         # Si la orden ya está pagada, no hacer nada
         if order.payment_processed:
-            print(f"[MP-WH] Orden {order_id} ya está pagada, ignorando")
             return '', 200
         
         # Marcar la orden como pagada
@@ -2357,32 +2081,24 @@ def mercadopago_webhook():
             order.payment_processed = True
             order.status = 'pending'  # Cambiar a 'pending' para que se procese
             db.session.commit()
-            print(f"[MP-WH] ✅ Orden {order_id} marcada como pagada")
             
             # Procesar crédito de referido si la orden tiene código de referido
             if order.referral_code_used:
                 try:
                     from routes.referrals import process_referral_credit
                     process_referral_credit(order)
-                    print(f"[MP-WH] ✅ Procesado crédito de referido para orden {order_id}")
                 except Exception as referral_error:
                     import traceback
-                    print(f"[MP-WH] ⚠️ Error al procesar crédito de referido: {str(referral_error)}")
-                    print(traceback.format_exc())
             
         except Exception as e:
             db.session.rollback()
-            print(f"[MP-WH] ❌ Error al actualizar orden {order_id}: {str(e)}")
             import traceback
-            print(traceback.format_exc())
             return '', 500
         
         return '', 200
         
     except Exception as e:
         import traceback
-        print(f"[MP-WH] ❌ Error en webhook: {str(e)}")
-        print(traceback.format_exc())
         return '', 500
 
 
@@ -2424,8 +2140,6 @@ def get_failed_retries():
         
     except Exception as e:
         import traceback
-        print(f"[ERROR] Error al obtener failed retries: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': f'Error al obtener órdenes fallidas: {str(e)}'

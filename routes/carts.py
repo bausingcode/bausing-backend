@@ -50,8 +50,6 @@ def create_cart():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en create_cart: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -83,8 +81,6 @@ def get_user_cart():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en get_user_cart: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
@@ -118,8 +114,6 @@ def delete_cart():
     except Exception as e:
         db.session.rollback()
         import traceback
-        print(f"Error en delete_cart: {str(e)}")
-        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)

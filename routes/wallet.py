@@ -135,25 +135,12 @@ def calculate_wallet_balance(wallet_id, include_expired=False):
 def create_audit_log(admin_user_id, action, entity, entity_id, details=None):
     """Crea un log de auditoría"""
     try:
-        import traceback
-        print(f"DEBUG: create_audit_log - admin_user_id: {admin_user_id}, type: {type(admin_user_id)}")
-        
         # Verificar que el admin_user existe
         admin_user = AdminUser.query.get(admin_user_id)
         if not admin_user:
-            print(f"DEBUG ERROR: Admin user {admin_user_id} no encontrado")
-            # Intentar buscar en admin_users directamente
-            all_admin_users = AdminUser.query.all()
-            print(f"DEBUG: Total admin users en BD: {len(all_admin_users)}")
-            for au in all_admin_users:
-                print(f"DEBUG: Admin user en BD: {au.id} (tipo: {type(au.id)})")
             raise ValueError(f"Admin user {admin_user_id} no encontrado")
         
-        print(f"DEBUG: Admin user encontrado: {admin_user.email}, ID: {admin_user.id}, tipo ID: {type(admin_user.id)}")
-        print(f"DEBUG: Admin user ID matches? {admin_user.id == admin_user_id}")
-        
         # Verificar la estructura del modelo AuditLog
-        print(f"DEBUG: AuditLog model - user_id column foreign key: {AuditLog.__table__.columns['user_id'].foreign_keys}")
         
         audit_log = AuditLog(
             user_id=admin_user_id,
@@ -162,24 +149,16 @@ def create_audit_log(admin_user_id, action, entity, entity_id, details=None):
             entity_id=entity_id,
             details=details or {}
         )
-        print(f"DEBUG: AuditLog object created with user_id: {audit_log.user_id}, type: {type(audit_log.user_id)}")
         
         db.session.add(audit_log)
-        print(f"DEBUG: Audit log agregado a la sesión para action: {action}")
         
         # Intentar flush para ver si hay error inmediatamente
-        print("DEBUG: Flushing session to check for immediate errors")
         db.session.flush()
-        print("DEBUG: Flush successful")
         
         return audit_log
     except IntegrityError as e:
-        print(f"DEBUG ERROR IntegrityError en create_audit_log: {str(e)}")
-        print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
         raise
     except Exception as e:
-        print(f"DEBUG ERROR Exception en create_audit_log: {str(e)}")
-        print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
         raise
 
 
@@ -196,20 +175,16 @@ def search_customers():
     """
     try:
         import traceback
-        print("DEBUG: search_customers called")
         
         search_query = request.args.get('q', '').strip()
         limit = min(request.args.get('limit', 20, type=int), 100)
-        print(f"DEBUG: search_query={search_query}, limit={limit}")
 
         if not search_query:
-            print("DEBUG: No search query provided")
             return jsonify({
                 'success': False,
                 'error': 'Término de búsqueda requerido'
             }), 400
 
-        print("DEBUG: Starting user query")
         # Buscar por nombre, teléfono, email o DNI
         try:
             users = User.query.filter(
@@ -221,19 +196,13 @@ def search_customers():
                     User.dni.ilike(f'%{search_query}%')
                 )
             ).limit(limit).all()
-            print(f"DEBUG: Found {len(users)} users")
         except Exception as query_error:
-            print(f"DEBUG ERROR in user query: {str(query_error)}")
-            print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
             raise
 
-        print("DEBUG: Processing results")
         results = []
         for idx, user in enumerate(users):
             try:
-                print(f"DEBUG: Processing user {idx+1}/{len(users)}: {user.email}")
                 wallet = Wallet.query.filter_by(user_id=user.id).first()
-                print(f"DEBUG: Wallet found: {wallet is not None}")
                 
                 wallet_balance = 0.0
                 wallet_blocked = False
@@ -242,8 +211,9 @@ def search_customers():
                         # Usar el balance guardado en la DB (ya excluye créditos vencidos)
                         wallet_balance = float(wallet.balance) if wallet.balance else 0.0
                         wallet_blocked = wallet.is_blocked if hasattr(wallet, 'is_blocked') else False
-                    except Exception as wallet_error:
-                        print(f"DEBUG ERROR processing wallet for user {user.id}: {str(wallet_error)}")
+                    except Exception:
+                        wallet_balance = 0.0
+                        wallet_blocked = False
                 
                 results.append({
                     'id': str(user.id),
@@ -256,14 +226,10 @@ def search_customers():
                     'wallet_balance': wallet_balance,
                     'wallet_blocked': wallet_blocked
                 })
-                print(f"DEBUG: User {user.email} processed successfully")
             except Exception as user_error:
-                print(f"DEBUG ERROR processing user {user.id if hasattr(user, 'id') else 'unknown'}: {str(user_error)}")
-                print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
                 # Continuar con el siguiente usuario aunque uno falle
                 continue
 
-        print(f"DEBUG: Returning {len(results)} results")
         return jsonify({
             'success': True,
             'data': results
@@ -272,8 +238,6 @@ def search_customers():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR en search_customers: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -400,13 +364,10 @@ def manual_credit(user_id):
     """
     try:
         import traceback
-        print("DEBUG: manual_credit called")
         
         data = request.get_json()
-        print(f"DEBUG: Request data: {data}")
         
         if not data:
-            print("DEBUG ERROR: No data provided")
             return jsonify({
                 'success': False,
                 'error': 'Datos requeridos'
@@ -416,38 +377,29 @@ def manual_credit(user_id):
         reason = data.get('reason', '')
         internal_comment = data.get('internal_comment', '')
         expires_at_str = data.get('expires_at')  # Fecha de vencimiento opcional (ISO format)
-        print(f"DEBUG: amount={amount}, reason={reason}, internal_comment={internal_comment}, expires_at={expires_at_str}")
 
         if not amount or amount <= 0:
-            print("DEBUG ERROR: Invalid amount")
             return jsonify({
                 'success': False,
                 'error': 'El monto debe ser mayor a 0'
             }), 400
 
         if not reason:
-            print("DEBUG ERROR: No reason provided")
             return jsonify({
                 'success': False,
                 'error': 'El motivo es requerido'
             }), 400
 
-        print(f"DEBUG: Getting user {user_id}")
         user = User.query.get_or_404(user_id)
-        print(f"DEBUG: User found: {user.email}")
         
-        print("DEBUG: Getting or creating wallet")
         wallet = get_or_create_wallet(user_id)
-        print(f"DEBUG: Wallet ID: {wallet.id}, Balance: {wallet.balance}, Blocked: {wallet.is_blocked}")
 
         if wallet.is_blocked:
-            print("DEBUG ERROR: Wallet is blocked")
             return jsonify({
                 'success': False,
                 'error': 'La billetera está bloqueada'
             }), 400
 
-        print("DEBUG: Creating wallet movement")
         # Calcular fecha de vencimiento
         # Si se proporciona una fecha personalizada, usarla; si no, usar la configuración del sistema
         if expires_at_str:
@@ -456,9 +408,7 @@ def manual_credit(user_id):
                 expires_at = datetime.strptime(expires_at_str, '%Y-%m-%d')
                 # Asegurar que sea al final del día
                 expires_at = expires_at.replace(hour=23, minute=59, second=59)
-                print(f"DEBUG: Using custom expiration date: {expires_at}")
             except ValueError as e:
-                print(f"DEBUG ERROR: Invalid date format: {expires_at_str}")
                 return jsonify({
                     'success': False,
                     'error': 'Formato de fecha inválido. Use YYYY-MM-DD'
@@ -466,7 +416,6 @@ def manual_credit(user_id):
         else:
             # Usar la configuración del sistema
             expires_at = calculate_expiration_date()
-            print(f"DEBUG: Using system expiration date: {expires_at}")
         
         # Crear movimiento (sin admin_user_id, reason, internal_comment porque no existen en BD)
         movement = WalletMovement(
@@ -477,19 +426,13 @@ def manual_credit(user_id):
             expires_at=expires_at
         )
         db.session.add(movement)
-        print("DEBUG: Movement added to session")
 
         # Actualizar saldo excluyendo créditos vencidos (igual que en el frontend)
         # El balance guardado debe coincidir con el balance mostrado al usuario
-        print("DEBUG: Updating wallet balance")
         wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
         wallet.updated_at = datetime.utcnow()
-        print(f"DEBUG: New balance: {wallet.balance}")
 
         # Crear log de auditoría
-        print(f"DEBUG: Creating audit log. Admin user ID: {request.admin_user.id}")
-        print(f"DEBUG: Admin user object: {request.admin_user}")
-        print(f"DEBUG: Admin user type: {type(request.admin_user)}")
         
         try:
             create_audit_log(
@@ -504,15 +447,10 @@ def manual_credit(user_id):
                     'internal_comment': internal_comment
                 }
             )
-            print("DEBUG: Audit log created successfully")
         except Exception as audit_error:
-            print(f"DEBUG ERROR creating audit log: {str(audit_error)}")
-            print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
             raise
 
-        print("DEBUG: Committing transaction")
         db.session.commit()
-        print("DEBUG: Transaction committed successfully")
 
         return jsonify({
             'success': True,
@@ -525,8 +463,6 @@ def manual_credit(user_id):
     except IntegrityError as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR IntegrityError en manual_credit: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         db.session.rollback()
         return jsonify({
             'success': False,
@@ -536,8 +472,6 @@ def manual_credit(user_id):
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR Exception en manual_credit: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         db.session.rollback()
         return jsonify({
             'success': False,
@@ -561,13 +495,10 @@ def manual_debit(user_id):
     """
     try:
         import traceback
-        print("DEBUG: manual_debit called")
         
         data = request.get_json()
-        print(f"DEBUG: Request data: {data}")
         
         if not data:
-            print("DEBUG ERROR: No data provided")
             return jsonify({
                 'success': False,
                 'error': 'Datos requeridos'
@@ -576,39 +507,30 @@ def manual_debit(user_id):
         amount = data.get('amount')
         reason = data.get('reason', '')
         internal_comment = data.get('internal_comment', '')
-        print(f"DEBUG: amount={amount}, reason={reason}, internal_comment={internal_comment}")
 
         if not amount or amount <= 0:
-            print("DEBUG ERROR: Invalid amount")
             return jsonify({
                 'success': False,
                 'error': 'El monto debe ser mayor a 0'
             }), 400
 
         if not reason:
-            print("DEBUG ERROR: No reason provided")
             return jsonify({
                 'success': False,
                 'error': 'El motivo es requerido'
             }), 400
 
         if not internal_comment:
-            print("DEBUG ERROR: No internal comment provided")
             return jsonify({
                 'success': False,
                 'error': 'El comentario interno es obligatorio para descuentos'
             }), 400
 
-        print(f"DEBUG: Getting user {user_id}")
         user = User.query.get_or_404(user_id)
-        print(f"DEBUG: User found: {user.email}")
         
-        print("DEBUG: Getting or creating wallet")
         wallet = get_or_create_wallet(user_id)
-        print(f"DEBUG: Wallet ID: {wallet.id}, Balance: {wallet.balance}, Blocked: {wallet.is_blocked}")
 
         if wallet.is_blocked:
-            print("DEBUG ERROR: Wallet is blocked")
             return jsonify({
                 'success': False,
                 'error': 'La billetera está bloqueada'
@@ -617,13 +539,11 @@ def manual_debit(user_id):
         # Verificar que haya saldo suficiente
         current_balance = wallet.balance or 0
         if current_balance < amount:
-            print(f"DEBUG ERROR: Insufficient balance. Current: {current_balance}, Required: {amount}")
             return jsonify({
                 'success': False,
                 'error': f'Saldo insuficiente. Saldo actual: ${current_balance:.2f}'
             }), 400
 
-        print("DEBUG: Creating wallet movement")
         # Crear movimiento (sin admin_user_id, reason, internal_comment porque no existen en BD)
         # Los débitos deben tener amount negativo para que se resten correctamente
         movement = WalletMovement(
@@ -633,17 +553,13 @@ def manual_debit(user_id):
             description=f'Descuento manual: {reason}'
         )
         db.session.add(movement)
-        print("DEBUG: Movement added to session")
 
         # Actualizar saldo excluyendo créditos vencidos (igual que en el frontend)
         # El balance guardado debe coincidir con el balance mostrado al usuario
-        print("DEBUG: Updating wallet balance")
         wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
         wallet.updated_at = datetime.utcnow()
-        print(f"DEBUG: New balance: {wallet.balance}")
 
         # Crear log de auditoría
-        print(f"DEBUG: Creating audit log. Admin user ID: {request.admin_user.id}")
         try:
             create_audit_log(
                 admin_user_id=request.admin_user.id,
@@ -657,15 +573,10 @@ def manual_debit(user_id):
                     'internal_comment': internal_comment
                 }
             )
-            print("DEBUG: Audit log created successfully")
         except Exception as audit_error:
-            print(f"DEBUG ERROR creating audit log: {str(audit_error)}")
-            print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
             raise
 
-        print("DEBUG: Committing transaction")
         db.session.commit()
-        print("DEBUG: Transaction committed successfully")
 
         return jsonify({
             'success': True,
@@ -678,8 +589,6 @@ def manual_debit(user_id):
     except IntegrityError as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR IntegrityError en manual_debit: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         db.session.rollback()
         return jsonify({
             'success': False,
@@ -689,8 +598,6 @@ def manual_debit(user_id):
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR Exception en manual_debit: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         db.session.rollback()
         return jsonify({
             'success': False,
@@ -713,13 +620,10 @@ def toggle_block_wallet(user_id):
     """
     try:
         import traceback
-        print("DEBUG: toggle_block_wallet called")
         
         data = request.get_json()
-        print(f"DEBUG: Request data: {data}")
         
         if not data:
-            print("DEBUG ERROR: No data provided")
             return jsonify({
                 'success': False,
                 'error': 'Datos requeridos'
@@ -727,32 +631,23 @@ def toggle_block_wallet(user_id):
 
         is_blocked = data.get('is_blocked')
         reason = data.get('reason', '')
-        print(f"DEBUG: is_blocked={is_blocked}, reason={reason}")
 
         if is_blocked is None:
-            print("DEBUG ERROR: is_blocked is None")
             return jsonify({
                 'success': False,
                 'error': 'El campo is_blocked es requerido'
             }), 400
 
-        print(f"DEBUG: Getting user {user_id}")
         user = User.query.get_or_404(user_id)
-        print(f"DEBUG: User found: {user.email}")
         
-        print("DEBUG: Getting or creating wallet")
         wallet = get_or_create_wallet(user_id)
-        print(f"DEBUG: Wallet ID: {wallet.id}, Current blocked status: {wallet.is_blocked}")
 
         wallet.is_blocked = bool(is_blocked)
         wallet.updated_at = datetime.utcnow()
-        print(f"DEBUG: New blocked status: {wallet.is_blocked}")
         db.session.flush()
-        print("DEBUG: Wallet updated, flushed")
 
         # Crear log de auditoría
         action_type = 'wallet_block' if is_blocked else 'wallet_unblock'
-        print(f"DEBUG: Creating audit log. Admin user ID: {request.admin_user.id}, Action: {action_type}")
         try:
             create_audit_log(
                 admin_user_id=request.admin_user.id,
@@ -765,15 +660,10 @@ def toggle_block_wallet(user_id):
                     'reason': reason
                 }
             )
-            print("DEBUG: Audit log created successfully")
         except Exception as audit_error:
-            print(f"DEBUG ERROR creating audit log: {str(audit_error)}")
-            print(f"DEBUG TRACEBACK: {traceback.format_exc()}")
             raise
 
-        print("DEBUG: Committing transaction")
         db.session.commit()
-        print("DEBUG: Transaction committed successfully")
 
         return jsonify({
             'success': True,
@@ -784,8 +674,6 @@ def toggle_block_wallet(user_id):
     except IntegrityError as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR IntegrityError en toggle_block_wallet: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         db.session.rollback()
         return jsonify({
             'success': False,
@@ -795,8 +683,6 @@ def toggle_block_wallet(user_id):
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR Exception en toggle_block_wallet: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         db.session.rollback()
         return jsonify({
             'success': False,
@@ -822,23 +708,19 @@ def get_all_wallet_movements():
     """
     try:
         import traceback
-        print("DEBUG: get_all_wallet_movements called")
         
         # Paginación
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 50, type=int), 100)
-        print(f"DEBUG: page={page}, per_page={per_page}")
 
         # Filtros
         movement_type = request.args.get('type')
         user_id = request.args.get('user_id')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
-        print(f"DEBUG: filters - type={movement_type}, user_id={user_id}, start_date={start_date}, end_date={end_date}")
 
         # Query base con joins usando outerjoin para evitar problemas si no hay relación
         query = db.session.query(WalletMovement).outerjoin(Wallet, WalletMovement.wallet_id == Wallet.id).outerjoin(User, Wallet.user_id == User.id)
-        print("DEBUG: Query base creado")
 
         # Filtro por tipo
         if movement_type:
@@ -880,13 +762,10 @@ def get_all_wallet_movements():
 
         # Ordenar por fecha descendente
         query = query.order_by(desc(WalletMovement.created_at))
-        print("DEBUG: Query ordenado")
 
         # Paginación
-        print("DEBUG: Iniciando paginación")
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
         movements = pagination.items
-        print(f"DEBUG: Paginación completa - total={pagination.total}, items={len(movements)}")
 
         # Incluir información del usuario y billetera
         results = []
@@ -909,11 +788,9 @@ def get_all_wallet_movements():
                 
                 results.append(movement_dict)
             except Exception as e:
-                print(f"DEBUG: Error procesando movimiento {movement.id}: {str(e)}")
                 # Continuar con el siguiente movimiento aunque uno falle
                 continue
 
-        print(f"DEBUG: Resultados procesados: {len(results)}")
         return jsonify({
             'success': True,
             'data': {
@@ -930,8 +807,6 @@ def get_all_wallet_movements():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR en get_all_wallet_movements: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),
@@ -1029,8 +904,8 @@ def export_wallet_movements():
                         if user:
                             user_name = f"{user.first_name} {user.last_name}"
                             user_email = user.email
-            except Exception as e:
-                print(f"DEBUG: Error obteniendo usuario para movimiento {movement.id} en export: {str(e)}")
+            except Exception:
+                pass
 
             # Obtener email del admin, reason e internal_comment desde audit_logs si existe
             admin_email = ''
@@ -1051,7 +926,6 @@ def export_wallet_movements():
                         reason = audit_log.details.get('reason', '') or ''
                         internal_comment = audit_log.details.get('internal_comment', '') or ''
             except Exception as e:
-                print(f"DEBUG: Error obteniendo admin email para movimiento {movement.id}: {str(e)}")
                 pass
 
             writer.writerow([
@@ -1100,11 +974,9 @@ def detect_anomalies():
     """
     try:
         import traceback
-        print("DEBUG: detect_anomalies called")
         
         min_adjustments = request.args.get('min_manual_adjustments', 5, type=int)
         min_amount = request.args.get('min_amount', 10000, type=float)
-        print(f"DEBUG: min_adjustments={min_adjustments}, min_amount={min_amount}")
 
         anomalies = {
             'many_manual_adjustments': [],
@@ -1112,7 +984,6 @@ def detect_anomalies():
         }
 
         # Clientes con muchos ajustes manuales
-        print("DEBUG: Buscando clientes con muchos ajustes manuales")
         manual_types = ['manual_credit', 'manual_debit']
         try:
             users_with_many_adjustments = db.session.query(
@@ -1127,9 +998,7 @@ def detect_anomalies():
              .group_by(User.id, User.first_name, User.last_name, User.email)\
              .having(func.count(WalletMovement.id) >= min_adjustments)\
              .all()
-            print(f"DEBUG: Encontrados {len(users_with_many_adjustments)} usuarios con muchos ajustes")
         except Exception as e:
-            print(f"DEBUG ERROR en query de ajustes: {str(e)}")
             users_with_many_adjustments = []
 
         for user_id, first_name, last_name, email, count in users_with_many_adjustments:
@@ -1142,14 +1011,11 @@ def detect_anomalies():
             })
 
         # Movimientos muy grandes
-        print("DEBUG: Buscando movimientos grandes")
         try:
             large_movements = WalletMovement.query.filter(
                 WalletMovement.amount >= min_amount
             ).order_by(desc(WalletMovement.amount)).limit(50).all()
-            print(f"DEBUG: Encontrados {len(large_movements)} movimientos grandes")
         except Exception as e:
-            print(f"DEBUG ERROR en query de movimientos grandes: {str(e)}")
             large_movements = []
 
         for movement in large_movements:
@@ -1166,8 +1032,8 @@ def detect_anomalies():
                                 'last_name': user.last_name,
                                 'email': user.email
                             }
-            except Exception as e:
-                print(f"DEBUG: Error obteniendo usuario para movimiento {movement.id}: {str(e)}")
+            except Exception:
+                pass
 
             anomalies['large_movements'].append({
                 'movement_id': str(movement.id),
@@ -1178,7 +1044,6 @@ def detect_anomalies():
                 'created_at': movement.created_at.isoformat() if movement.created_at else None
             })
 
-        print(f"DEBUG: Anomalías procesadas - ajustes: {len(anomalies['many_manual_adjustments'])}, grandes: {len(anomalies['large_movements'])}")
         return jsonify({
             'success': True,
             'data': anomalies
@@ -1187,8 +1052,6 @@ def detect_anomalies():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"DEBUG ERROR en detect_anomalies: {str(e)}")
-        print(f"DEBUG TRACEBACK: {error_trace}")
         return jsonify({
             'success': False,
             'error': str(e),
