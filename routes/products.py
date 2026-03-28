@@ -5,7 +5,7 @@ from models.image import ProductImage
 from models.category import Category
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, and_, func, text
+from sqlalchemy import or_, and_, func, text, bindparam
 from sqlalchemy.orm import joinedload
 from routes.admin import admin_required
 
@@ -104,13 +104,6 @@ def get_products():
                     # Obtener todos los IDs de categorías a incluir (la categoría principal + todas sus subcategorías)
                     all_category_ids = get_all_subcategory_ids(category_uuid)
                     
-                    
-                    # Verificar cuántos productos hay en estas categorías (antes de otros filtros)
-                    product_count_before = Product.query.filter(
-                        Product.category_id.in_(all_category_ids),
-                        Product.is_active == True
-                    ).count()
-                    
                     # Filtrar productos que estén en cualquiera de estas categorías
                     query = query.filter(Product.category_id.in_(all_category_ids))
             except Exception as e:
@@ -130,26 +123,14 @@ def get_products():
             # Por defecto, solo productos activos para ecommerce
             query = query.filter_by(is_active=True)
         
-        # Filtrar productos sin stock en crm_products (solo para ecommerce público)
-        # Excluir productos donde crm_products.stock = false
-        from sqlalchemy import text
-        # Filtrar productos que tienen stock = false en crm_products
-        # Primero obtener IDs de productos sin stock
+        # Excluir filas con stock explícito false en crm (subquery, sin materializar todos los ids)
         try:
-            no_stock_query = text("""
-                SELECT DISTINCT p.id 
-                FROM products p
-                INNER JOIN crm_products cp ON p.crm_product_id = cp.crm_product_id
-                WHERE cp.stock = false
-            """)
-            no_stock_result = db.session.execute(no_stock_query)
-            no_stock_ids = [row[0] for row in no_stock_result.fetchall()]
-            
-            # Excluir productos sin stock
-            if no_stock_ids:
-                query = query.filter(~Product.id.in_(no_stock_ids))
+            crm_no_stock = text(
+                "EXISTS (SELECT 1 FROM crm_products cp WHERE "
+                "cp.crm_product_id = products.crm_product_id AND cp.stock = false)"
+            )
+            query = query.filter(~crm_no_stock)
         except Exception:
-            # Si hay error, continuar sin filtrar
             pass
         
         # Filtro por stock (stock en ProductVariantOption)
@@ -651,30 +632,46 @@ def get_product_combos(product_id):
         
         result = db.session.execute(text(query), {'crm_product_id': product.crm_product_id})
         rows = result.fetchall()
+        if not rows:
+            return jsonify({
+                'success': True,
+                'data': []
+            }), 200
+
+        combo_crm_ids = list({row.crm_product_id for row in rows})
+        items_stmt = text("""
+            SELECT
+                cpci.crm_combo_product_id,
+                cpci.crm_item_product_id,
+                cpci.quantity,
+                cpci.item_description,
+                cp2.description as item_name
+            FROM crm_product_combo_items cpci
+            JOIN crm_products cp2 ON cp2.crm_product_id = cpci.crm_item_product_id
+            WHERE cpci.crm_combo_product_id IN :combo_ids
+        """).bindparams(bindparam("combo_ids", expanding=True))
+        items_rows = db.session.execute(items_stmt, {"combo_ids": combo_crm_ids}).fetchall()
+        items_by_combo = {}
+        for item_row in items_rows:
+            cid = item_row.crm_combo_product_id
+            items_by_combo.setdefault(cid, []).append({
+                'crm_product_id': item_row.crm_item_product_id,
+                'quantity': item_row.quantity,
+                'item_description': item_row.item_description,
+                'item_name': item_row.item_name
+            })
+
+        product_rows = [row.product_id for row in rows if row.product_id]
+        combo_products_map = {}
+        if product_rows:
+            for p in Product.query.options(
+                joinedload(Product.images),
+            ).filter(Product.id.in_(product_rows)).all():
+                combo_products_map[p.id] = p
         
         combos = []
         for row in rows:
-            # Obtener items del combo
-            items_query = """
-                SELECT 
-                    cpci.crm_item_product_id,
-                    cpci.quantity,
-                    cpci.item_description,
-                    cp2.description as item_name
-                FROM crm_product_combo_items cpci
-                JOIN crm_products cp2 ON cp2.crm_product_id = cpci.crm_item_product_id
-                WHERE cpci.crm_combo_product_id = :combo_id
-            """
-            items_result = db.session.execute(text(items_query), {'combo_id': row.crm_product_id})
-            items = []
-            for item_row in items_result:
-                items.append({
-                    'crm_product_id': item_row.crm_item_product_id,
-                    'quantity': item_row.quantity,
-                    'item_description': item_row.item_description,
-                    'item_name': item_row.item_name
-                })
-            
+            items = items_by_combo.get(row.crm_product_id, [])
             combo_data = {
                 'id': str(row.id),
                 'crm_product_id': row.crm_product_id,
@@ -687,17 +684,12 @@ def get_product_combos(product_id):
                 'is_completed': row.product_id is not None,
                 'items': items
             }
-            
-            # Si el combo está completado, obtener más información del producto
-            if row.product_id:
-                combo_product = Product.query.get(row.product_id)
-                if combo_product:
-                    combo_data['product'] = combo_product.to_dict(
-                        include_images=True,
-                        include_variants=False,
-                        include_promos=True
-                    )
-            
+            if row.product_id and row.product_id in combo_products_map:
+                combo_data['product'] = combo_products_map[row.product_id].to_dict(
+                    include_images=True,
+                    include_variants=False,
+                    include_promos=True
+                )
             combos.append(combo_data)
         
         return jsonify({

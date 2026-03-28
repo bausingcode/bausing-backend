@@ -21,24 +21,76 @@ def clear_catalog_cache():
     global _cordoba_capital_catalog_id
     _cordoba_capital_catalog_id = None
 
+def get_crm_stock_map(crm_product_ids):
+    """
+    Una sola query: crm_product_id -> bool (tiene stock).
+    Si no hay fila en crm_products, el id no entra al mapa (equivale a stock asumido True).
+    """
+    from sqlalchemy import bindparam, text
+
+    ids = list({int(i) for i in crm_product_ids if i is not None})
+    if not ids:
+        return {}
+    try:
+        stmt = text(
+            "SELECT crm_product_id, stock FROM crm_products WHERE crm_product_id IN :ids"
+        ).bindparams(bindparam("ids", expanding=True))
+        rows = db.session.execute(stmt, {"ids": ids}).fetchall()
+        return {
+            int(r.crm_product_id): (bool(r.stock) if r.stock is not None else True)
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
+def crm_id_has_stock(crm_product_id, stock_map):
+    """Misma semántica que el antiguo check_crm_stock, usando mapa precargado."""
+    if not crm_product_id:
+        return True
+    cid = int(crm_product_id)
+    if cid not in stock_map:
+        return True
+    return stock_map[cid]
+
+
+def get_available_replacement_product_sql(exclude_product_ids, section_products=None):
+    """
+    Primer producto activo que no está explícitamente sin stock en crm_products.
+    Evita el bucle Python + N llamadas a check_crm_stock.
+    """
+    from sqlalchemy import text
+
+    q = Product.query.filter(Product.is_active == True)
+    exclude_norm = []
+    for raw in exclude_product_ids or []:
+        try:
+            exclude_norm.append(raw if hasattr(raw, "hex") else uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    if exclude_norm:
+        q = q.filter(~Product.id.in_(exclude_norm))
+
+    category_ids = None
+    if section_products:
+        category_ids = list({p.category_id for p in section_products if p and p.category_id})
+        if category_ids:
+            q = q.filter(Product.category_id.in_(category_ids))
+
+    stock_ok = text(
+        "NOT EXISTS (SELECT 1 FROM crm_products cp WHERE "
+        "cp.crm_product_id = products.crm_product_id AND cp.stock = false)"
+    )
+    q = q.filter(stock_ok)
+    return q.order_by(Product.created_at.desc()).limit(1).first()
+
+
 def check_crm_stock(crm_product_id):
     """Verifica si un producto tiene stock en crm_products (stock = true)"""
     if not crm_product_id:
-        return True  # Si no tiene crm_product_id, asumir que tiene stock
-    
-    try:
-        from sqlalchemy import text
-        from database import db
-        query = text("SELECT stock FROM crm_products WHERE crm_product_id = :crm_product_id")
-        result = db.session.execute(query, {'crm_product_id': crm_product_id})
-        row = result.fetchone()
-        
-        if row:
-            # stock es boolean en crm_products
-            return bool(row.stock) if row.stock is not None else True
-        return True  # Si no existe en crm_products, asumir que tiene stock
-    except Exception as e:
-        return True  # En caso de error, asumir que tiene stock
+        return True
+    m = get_crm_stock_map([crm_product_id])
+    return crm_id_has_stock(crm_product_id, m)
 
 class Product(db.Model):
     __tablename__ = 'products'

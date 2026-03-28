@@ -10,33 +10,11 @@ import uuid
 homepage_distribution_bp = Blueprint('homepage_distribution', __name__)
 
 def get_available_replacement_product(exclude_product_ids, section_products=None):
-    """Obtiene un producto disponible (con stock) para reemplazar uno sin stock"""
+    """Una query SQL con filtro de stock; reemplaza el bucle N×check_crm_stock."""
     try:
-        # Buscar productos activos con stock que no estén en la lista de excluidos
-        from sqlalchemy import and_, or_
-        from models.product import Product, check_crm_stock
-        
-        query = Product.query.filter(
-            Product.is_active == True,
-            Product.id.notin_(exclude_product_ids) if exclude_product_ids else True
-        )
-        
-        # Si hay productos de la sección, preferir productos de la misma categoría
-        if section_products:
-            category_ids = [p.category_id for p in section_products if p and p.category_id]
-            if category_ids:
-                query = query.filter(Product.category_id.in_(category_ids))
-        
-        # Verificar stock en crm_products
-        available_products = []
-        for product in query.limit(100).all():
-            if check_crm_stock(product.crm_product_id):
-                available_products.append(product)
-                if len(available_products) >= 10:  # Limitar búsqueda
-                    break
-        
-        return available_products[0] if available_products else None
-    except Exception as e:
+        from models.product import get_available_replacement_product_sql
+        return get_available_replacement_product_sql(exclude_product_ids, section_products)
+    except Exception:
         return None
 
 @homepage_distribution_bp.route('/admin/homepage-distribution', methods=['GET'])
@@ -204,6 +182,13 @@ def get_public_homepage_distribution_quick():
             HomepageProductDistribution.section,
             HomepageProductDistribution.position
         ).all()
+
+        from models.product import crm_id_has_stock, get_crm_stock_map
+        crm_ids = [
+            d.product.crm_product_id for d in distributions
+            if d.product and d.product.crm_product_id
+        ]
+        stock_map = get_crm_stock_map(crm_ids)
         
         # Organizar por sección - solo datos básicos, sin precios ni promociones
         result = {
@@ -220,9 +205,7 @@ def get_public_homepage_distribution_quick():
             if dist.section in result and dist.product:
                 product = dist.product
                 
-                # Verificar stock en crm_products
-                from models.product import check_crm_stock
-                has_stock = check_crm_stock(product.crm_product_id)
+                has_stock = crm_id_has_stock(product.crm_product_id, stock_map)
                 
                 # Si no tiene stock, buscar un reemplazo
                 if not has_stock:
@@ -230,10 +213,17 @@ def get_public_homepage_distribution_quick():
                     section_used_ids = [item['product']['id'] for item in result[dist.section] if 'product' in item and 'id' in item['product']]
                     all_used_ids = list(used_product_ids) + section_used_ids
                     
-                    replacement = get_available_replacement_product(all_used_ids, [p.product for p in distributions if p.section == dist.section and p.product])
+                    replacement = get_available_replacement_product(
+                        all_used_ids,
+                        [p.product for p in distributions if p.section == dist.section and p.product],
+                    )
                     
                     if replacement:
                         product = replacement
+                        if replacement.crm_product_id:
+                            stock_map.update(
+                                get_crm_stock_map([replacement.crm_product_id])
+                            )
                     else:
                         continue  # Omitir este producto si no hay reemplazo
                 
@@ -265,10 +255,12 @@ def get_public_homepage_distribution_quick():
             result[section].sort(key=lambda x: x['position'])
             result[section] = [item['product'] for item in result[section]]
         
-        return jsonify({
+        resp = jsonify({
             'success': True,
             'data': result
-        }), 200
+        })
+        resp.headers['Cache-Control'] = 'public, max-age=20'
+        return resp, 200
     except Exception as e:
         import traceback
         return jsonify({
@@ -569,13 +561,18 @@ def get_public_homepage_distribution():
         # Track de productos usados para evitar duplicados al reemplazar
         used_product_ids = set()
         
+        from models.product import crm_id_has_stock, get_crm_stock_map
+        crm_ids_full = [
+            d.product.crm_product_id for d in distributions
+            if d.product and d.product.crm_product_id
+        ]
+        stock_map_full = get_crm_stock_map(crm_ids_full)
+
         for dist in distributions:
             if dist.section in result and dist.product:
                 product = dist.product
                 
-                # Verificar stock en crm_products
-                from models.product import check_crm_stock
-                has_stock = check_crm_stock(product.crm_product_id)
+                has_stock = crm_id_has_stock(product.crm_product_id, stock_map_full)
                 
                 # Si no tiene stock, buscar un reemplazo
                 if not has_stock:

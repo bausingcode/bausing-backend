@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.category import Category, CategoryOption
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 from routes.admin import admin_required
 
 categories_bp = Blueprint('categories', __name__)
@@ -19,6 +20,14 @@ def get_categories():
             query = query.filter_by(parent_id=parent_id)
         elif parent_id == '':
             query = query.filter_by(parent_id=None)
+
+        if include_children:
+            query = query.options(
+                joinedload(Category.options),
+                joinedload(Category.children).joinedload(Category.options),
+            )
+        elif include_options:
+            query = query.options(joinedload(Category.options))
         
         # Ordenar por el campo 'order' y luego por nombre como fallback
         categories = query.order_by(Category.order, Category.name).all()
@@ -31,15 +40,19 @@ def get_categories():
                 if cat.children:
                     cat_dict['subcategories'] = [child.to_dict(include_options=include_options) for child in cat.children]
                 category_dicts.append(cat_dict)
-            return jsonify({
+            resp = jsonify({
                 'success': True,
                 'data': category_dicts
-            }), 200
+            })
+            resp.headers['Cache-Control'] = 'public, max-age=60'
+            return resp, 200
         else:
-            return jsonify({
+            resp = jsonify({
                 'success': True,
                 'data': [cat.to_dict(include_options=include_options) for cat in categories]
-            }), 200
+            })
+            resp.headers['Cache-Control'] = 'public, max-age=60'
+            return resp, 200
     except Exception as e:
         return jsonify({
             'success': False,
