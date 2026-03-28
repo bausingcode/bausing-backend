@@ -32,21 +32,26 @@ class HomepageProductDistribution(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
         
-        if include_product and self.product:
-            precalc_min = precalc_max = None
-            if product_price_map is not None:
-                pair = product_price_map.get(
-                    self.product.id, {'min': 0.0, 'max': 0.0}
+        if include_product and self.product_id:
+            prod = self.product
+            if prod is None:
+                from models.product import Product as ProductModel
+                prod = db.session.get(ProductModel, self.product_id)
+            if prod is not None:
+                precalc_min = precalc_max = None
+                if product_price_map is not None:
+                    pair = product_price_map.get(
+                        prod.id, {'min': 0.0, 'max': 0.0}
+                    )
+                    precalc_min = pair['min']
+                    precalc_max = pair['max']
+                data['product'] = prod.to_dict(
+                    include_variants=False,
+                    include_images=True,
+                    include_promos=False,
+                    include_inventory=False,
+                    precalculated_min_price=precalc_min,
+                    precalculated_max_price=precalc_max,
                 )
-                precalc_min = pair['min']
-                precalc_max = pair['max']
-            data['product'] = self.product.to_dict(
-                include_variants=False,
-                include_images=True,
-                include_promos=False,
-                include_inventory=False,
-                precalculated_min_price=precalc_min,
-                precalculated_max_price=precalc_max,
-            )
         
         return data
