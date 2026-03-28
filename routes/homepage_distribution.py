@@ -4,7 +4,7 @@ from models.homepage_distribution import HomepageProductDistribution
 from models.product import Product
 from routes.admin import admin_required
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import text
+from sqlalchemy import text, or_, func
 import uuid
 
 homepage_distribution_bp = Blueprint('homepage_distribution', __name__)
@@ -34,19 +34,75 @@ def _empty_homepage_grid():
     return {s: [None] * n for s, n in HOMEPAGE_SECTION_LEN.items()}
 
 
-def _distributions_to_grid(distributions, include_product):
+def _published_rows_filter():
+    """Filas que ven el sitio: is_draft false o NULL (filas previas a la migración)."""
+    return or_(
+        HomepageProductDistribution.is_draft.is_(False),
+        HomepageProductDistribution.is_draft.is_(None),
+    )
+
+
+def _price_map_for_product_ids(product_ids):
+    """Una sola query de min/max por producto (catálogo Córdoba capital) para el admin."""
+    if not product_ids:
+        return {}
+    from models.product import ProductVariant, ProductVariantOption, ProductPrice, get_cordoba_capital_catalog_id
+
+    default = {pid: {'min': 0.0, 'max': 0.0} for pid in product_ids}
+    catalog_id = get_cordoba_capital_catalog_id()
+    if not catalog_id:
+        return default
+    rows = (
+        db.session.query(
+            ProductVariant.product_id,
+            func.min(ProductPrice.price).label('min_price'),
+            func.max(ProductPrice.price).label('max_price'),
+        )
+        .select_from(ProductVariant)
+        .join(
+            ProductVariantOption,
+            ProductVariantOption.product_variant_id == ProductVariant.id,
+        )
+        .join(
+            ProductPrice,
+            ProductPrice.product_variant_id == ProductVariantOption.id,
+        )
+        .filter(
+            ProductVariant.product_id.in_(product_ids),
+            ProductPrice.catalog_id == catalog_id,
+        )
+        .group_by(ProductVariant.product_id)
+        .all()
+    )
+    out = dict(default)
+    for r in rows:
+        out[r.product_id] = {
+            'min': float(r.min_price) if r.min_price is not None else 0.0,
+            'max': float(r.max_price) if r.max_price is not None else 0.0,
+        }
+    return out
+
+
+def _distributions_to_grid(distributions, include_product, product_price_map=None):
     grid = _empty_homepage_grid()
     for dist in distributions:
         if dist.section in grid and 0 <= dist.position < len(grid[dist.section]):
             if dist.product_id is None:
                 grid[dist.section][dist.position] = None
             else:
-                grid[dist.section][dist.position] = dist.to_dict(include_product=include_product)
+                grid[dist.section][dist.position] = dist.to_dict(
+                    include_product=include_product,
+                    product_price_map=product_price_map,
+                )
     return grid
 
 
-def _merge_draft_over_published(published_distributions, draft_distributions, include_product):
-    pub_grid = _distributions_to_grid(published_distributions, include_product)
+def _merge_draft_over_published(
+    published_distributions, draft_distributions, include_product, product_price_map=None
+):
+    pub_grid = _distributions_to_grid(
+        published_distributions, include_product, product_price_map
+    )
     draft_by_key = {(d.section, d.position): d for d in draft_distributions}
     merged = {k: list(v) for k, v in pub_grid.items()}
     for section in merged:
@@ -58,7 +114,10 @@ def _merge_draft_over_published(published_distributions, draft_distributions, in
             if d.product_id is None:
                 merged[section][pos] = None
             elif d.product:
-                merged[section][pos] = d.to_dict(include_product=include_product)
+                merged[section][pos] = d.to_dict(
+                    include_product=include_product,
+                    product_price_map=product_price_map,
+                )
             else:
                 merged[section][pos] = {
                     'id': str(d.id),
@@ -83,7 +142,7 @@ def get_homepage_distribution():
     """Publicado + borrador mezclado (draft sobre escribe slots editados)."""
     try:
         pub = (
-            HomepageProductDistribution.query.filter_by(is_draft=False)
+            HomepageProductDistribution.query.filter(_published_rows_filter())
             .options(*_homepage_dist_load_options())
             .order_by(
                 HomepageProductDistribution.section,
@@ -100,8 +159,15 @@ def get_homepage_distribution():
             )
             .all()
         )
-        published_grid = _distributions_to_grid(pub, True)
-        draft_grid = _merge_draft_over_published(pub, draft, True)
+        price_ids = []
+        seen_pid = set()
+        for d in pub + draft:
+            if d.product and d.product.id not in seen_pid:
+                seen_pid.add(d.product.id)
+                price_ids.append(d.product.id)
+        price_map = _price_map_for_product_ids(price_ids)
+        published_grid = _distributions_to_grid(pub, True, price_map)
+        draft_grid = _merge_draft_over_published(pub, draft, True, price_map)
         return jsonify({
             'success': True,
             'data': {
@@ -246,11 +312,15 @@ def set_homepage_distribution():
 def publish_homepage_distribution():
     """Aplica el borrador como distribución publicada y limpia borradores."""
     try:
-        pub = HomepageProductDistribution.query.filter_by(is_draft=False).all()
+        pub = HomepageProductDistribution.query.filter(_published_rows_filter()).all()
         draft = HomepageProductDistribution.query.filter_by(is_draft=True).all()
         merged = _merge_draft_over_published(pub, draft, include_product=False)
-        HomepageProductDistribution.query.filter_by(is_draft=False).delete(synchronize_session=False)
-        HomepageProductDistribution.query.filter_by(is_draft=True).delete(synchronize_session=False)
+        HomepageProductDistribution.query.filter(_published_rows_filter()).delete(
+            synchronize_session=False
+        )
+        HomepageProductDistribution.query.filter_by(is_draft=True).delete(
+            synchronize_session=False
+        )
         for section, n in HOMEPAGE_SECTION_LEN.items():
             for pos in range(n):
                 cell = merged[section][pos]
@@ -304,7 +374,7 @@ def get_public_homepage_distribution_quick():
         from sqlalchemy.orm import joinedload
         distributions = HomepageProductDistribution.query.filter(
             HomepageProductDistribution.product_id.isnot(None),
-            HomepageProductDistribution.is_draft.is_(False),
+            _published_rows_filter(),
         ).options(
             joinedload(HomepageProductDistribution.product).joinedload(Product.images),
             joinedload(HomepageProductDistribution.product).joinedload(Product.category),
@@ -568,7 +638,7 @@ def get_public_homepage_distribution():
         from models.product import ProductVariant, ProductVariantOption
         distributions = HomepageProductDistribution.query.filter(
             HomepageProductDistribution.product_id.isnot(None),
-            HomepageProductDistribution.is_draft.is_(False),
+            _published_rows_filter(),
         ).options(
             joinedload(HomepageProductDistribution.product).joinedload(Product.images),
             joinedload(HomepageProductDistribution.product).joinedload(Product.variants).joinedload(ProductVariant.options),

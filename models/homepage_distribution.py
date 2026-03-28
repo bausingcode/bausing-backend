@@ -22,7 +22,7 @@ class HomepageProductDistribution(db.Model):
     # Relaciones
     product = db.relationship('Product', backref='homepage_distributions', lazy=True)
 
-    def to_dict(self, include_product=False):
+    def to_dict(self, include_product=False, product_price_map=None):
         data = {
             'id': str(self.id),
             'section': self.section,
@@ -33,11 +33,20 @@ class HomepageProductDistribution(db.Model):
         }
         
         if include_product and self.product:
+            precalc_min = precalc_max = None
+            if product_price_map is not None:
+                pair = product_price_map.get(
+                    self.product.id, {'min': 0.0, 'max': 0.0}
+                )
+                precalc_min = pair['min']
+                precalc_max = pair['max']
             data['product'] = self.product.to_dict(
                 include_variants=False,
                 include_images=True,
                 include_promos=False,
                 include_inventory=False,
+                precalculated_min_price=precalc_min,
+                precalculated_max_price=precalc_max,
             )
         
         return data
