@@ -1,6 +1,12 @@
 from flask import Blueprint, request, jsonify
 from database import db
-from models.product import Product, ProductVariant, ProductVariantOption, ProductPrice
+from models.product import (
+    Product,
+    ProductVariant,
+    ProductVariantOption,
+    ProductPrice,
+    ProductSubcategory,
+)
 from models.image import ProductImage
 from models.category import Category
 from models.locality import Locality
@@ -10,6 +16,68 @@ from sqlalchemy.orm import joinedload
 from routes.admin import admin_required
 
 products_bp = Blueprint('products', __name__)
+
+
+def _build_promo_map_for_product_ids(product_ids):
+    """Pre-calculates applicable promos for many products without per-row Promo queries."""
+    promo_map = {}
+    if not product_ids:
+        return promo_map
+    from models.promo import Promo, PromoApplicability
+    from datetime import datetime
+
+    category_map = {}
+    for p in db.session.query(Product.id, Product.category_id).filter(
+        Product.id.in_(product_ids)
+    ).all():
+        category_map[p.id] = p.category_id
+
+    now = datetime.utcnow()
+    all_promo_applicabilities = (
+        PromoApplicability.query.join(Promo, PromoApplicability.promo_id == Promo.id)
+        .filter(
+            Promo.is_active == True,
+            Promo.start_at <= now,
+            Promo.end_at >= now,
+        )
+        .options(joinedload(PromoApplicability.promo))
+        .all()
+    )
+
+    promos_for_all = []
+    for app in all_promo_applicabilities:
+        promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
+        if not promo_dict:
+            continue
+
+        if app.applies_to == "all":
+            promos_for_all.append(promo_dict)
+        elif app.applies_to == "product" and app.product_id:
+            if app.product_id in product_ids:
+                promo_map.setdefault(app.product_id, [])
+                if not any(p.get("id") == promo_dict.get("id") for p in promo_map[app.product_id]):
+                    promo_map[app.product_id].append(promo_dict)
+        elif app.applies_to == "category" and app.category_id:
+            for pid, cat_id in category_map.items():
+                if cat_id == app.category_id:
+                    promo_map.setdefault(pid, [])
+                    if not any(p.get("id") == promo_dict.get("id") for p in promo_map[pid]):
+                        promo_map[pid].append(promo_dict)
+
+    if promos_for_all:
+        for pid in product_ids:
+            lst = promo_map.setdefault(pid, [])
+            seen = {p.get("id") for p in lst if p.get("id") is not None}
+            for pdict in promos_for_all:
+                iid = pdict.get("id")
+                if iid is None:
+                    lst.append(pdict)
+                elif iid not in seen:
+                    lst.append(pdict)
+                    seen.add(iid)
+
+    return promo_map
+
 
 @products_bp.route('', methods=['GET'])
 def get_products():
@@ -60,7 +128,6 @@ def get_products():
         include_promos = request.args.get('include_promos', 'false').lower() == 'true'
         
         # Construir query base - cargar imágenes y subcategorías asociadas
-        from models.product import ProductSubcategory
         from models.category import Category, CategoryOption
         query = Product.query.options(
             joinedload(Product.images),
@@ -340,8 +407,11 @@ def get_products():
         # Pre-calcular min/max prices y promociones para todos los productos de una vez (optimización)
         product_ids = [p.id for p in products]
         price_map = {}  # {product_id: {'min': float, 'max': float}}
-        promo_map = {}  # {product_id: [promo_dict, ...]}
-        category_map = {}  # {product_id: category_id}
+        promo_map = (
+            _build_promo_map_for_product_ids(product_ids)
+            if include_promos and product_ids
+            else {}
+        )
         
         if product_ids and target_catalog_id:
             # Query optimizado: obtener min/max price por producto en una sola consulta
@@ -388,63 +458,6 @@ def get_products():
                         }
                 except:
                     pass
-        
-        # Pre-calcular promociones para todos los productos de una vez (solo si include_promos=True)
-        if include_promos and product_ids:
-            from models.promo import Promo, PromoApplicability
-            from datetime import datetime
-            
-            # Obtener categorías de todos los productos
-            products_with_categories = db.session.query(
-                Product.id, Product.category_id
-            ).filter(Product.id.in_(product_ids)).all()
-            
-            for p in products_with_categories:
-                category_map[p.id] = p.category_id
-            
-            # Cargar todas las promociones válidas y sus aplicabilidades de una vez
-            now = datetime.utcnow()
-            all_promo_applicabilities = PromoApplicability.query.join(
-                Promo, PromoApplicability.promo_id == Promo.id
-            ).filter(
-                Promo.is_active == True,
-                Promo.start_at <= now,
-                Promo.end_at >= now
-            ).options(
-                joinedload(PromoApplicability.promo)
-            ).all()
-            
-            promos_for_all = []
-            for app in all_promo_applicabilities:
-                promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
-                if not promo_dict:
-                    continue
-
-                if app.applies_to == 'all':
-                    promos_for_all.append(promo_dict)
-                elif app.applies_to == 'product' and app.product_id:
-                    if app.product_id in product_ids:
-                        promo_map.setdefault(app.product_id, [])
-                        if not any(p.get('id') == promo_dict.get('id') for p in promo_map[app.product_id]):
-                            promo_map[app.product_id].append(promo_dict)
-                elif app.applies_to == 'category' and app.category_id:
-                    for pid, cat_id in category_map.items():
-                        if cat_id == app.category_id:
-                            promo_map.setdefault(pid, [])
-                            if not any(p.get('id') == promo_dict.get('id') for p in promo_map[pid]):
-                                promo_map[pid].append(promo_dict)
-
-            if promos_for_all:
-                for pid in product_ids:
-                    lst = promo_map.setdefault(pid, [])
-                    seen = {p.get('id') for p in lst if p.get('id') is not None}
-                    for pdict in promos_for_all:
-                        iid = pdict.get('id')
-                        if iid is None:
-                            lst.append(pdict)
-                        elif iid not in seen:
-                            lst.append(pdict)
-                            seen.add(iid)
         
         # Serializar productos
         products_data = []
@@ -528,56 +541,127 @@ def get_product(product_id):
         include_images = request.args.get('include_images', 'true').lower() == 'true'
         include_promos = request.args.get('include_promos', 'true').lower() == 'true'
         locality_id = request.args.get('locality_id')
-        
-        # Pre-cargar mapeo de localidades a catálogos para optimizar
+
+        import uuid as uuid_lib
         from models.catalog import LocalityCatalog
+        from models.product import get_cordoba_capital_catalog_id, check_crm_stock
+
         locality_to_catalog = {}
+        target_catalog_id = None
+        locality_uuid = None
         if locality_id:
             try:
-                import uuid as uuid_lib
                 locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
                 locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
                 if locality_catalog:
                     locality_to_catalog[str(locality_uuid)] = str(locality_catalog.catalog_id)
-            except:
+                    target_catalog_id = locality_catalog.catalog_id
+            except Exception:
                 pass
-        
-        # Cargar todas las relaciones necesarias
-        from models.product import ProductSubcategory
-        from models.category import Category, CategoryOption
-        # Cargar todas las relaciones necesarias con eager loading para optimizar
+        else:
+            target_catalog_id = get_cordoba_capital_catalog_id()
+
         product = Product.query.options(
             joinedload(Product.images),
+            joinedload(Product.category),
+            joinedload(Product.category_option),
             joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
             joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
-            joinedload(Product.variants).joinedload(ProductVariant.options).joinedload(
-                ProductVariantOption.prices
-            ).joinedload(ProductPrice.catalog),  # Cargar catálogo de los precios
-            joinedload(Product.variants).joinedload(ProductVariant.options).joinedload(
-                ProductVariantOption.prices
-            ).joinedload(ProductPrice.locality)  # Mantener localidad por compatibilidad
+            joinedload(Product.variants)
+            .joinedload(ProductVariant.options)
+            .joinedload(ProductVariantOption.prices)
+            .options(
+                joinedload(ProductPrice.catalog),
+                joinedload(ProductPrice.locality),
+            ),
         ).get(product_id)
-        
+
         if not product:
             return jsonify({
                 'success': False,
                 'error': f'Producto con ID {product_id} no encontrado'
             }), 404
-        
-        # Verificar que el producto esté activo (para ecommerce público)
-        # Si es admin, puede ver productos inactivos también
-        # Por ahora, permitimos ver todos
-        
+
+        precalc_min_price = None
+        precalc_max_price = None
+        if target_catalog_id:
+            price_row = (
+                db.session.query(
+                    func.min(ProductPrice.price).label('min_price'),
+                    func.max(ProductPrice.price).label('max_price'),
+                )
+                .select_from(ProductVariant)
+                .join(
+                    ProductVariantOption,
+                    ProductVariantOption.product_variant_id == ProductVariant.id,
+                )
+                .join(
+                    ProductPrice,
+                    ProductPrice.product_variant_id == ProductVariantOption.id,
+                )
+                .filter(
+                    ProductVariant.product_id == product.id,
+                    ProductPrice.catalog_id == target_catalog_id,
+                )
+                .first()
+            )
+            if price_row is not None and (
+                price_row.min_price is not None or price_row.max_price is not None
+            ):
+                precalc_min_price = (
+                    float(price_row.min_price) if price_row.min_price is not None else 0.0
+                )
+                precalc_max_price = (
+                    float(price_row.max_price) if price_row.max_price is not None else 0.0
+                )
+        elif locality_uuid is not None:
+            price_row = (
+                db.session.query(
+                    func.min(ProductPrice.price).label('min_price'),
+                    func.max(ProductPrice.price).label('max_price'),
+                )
+                .select_from(ProductVariant)
+                .join(
+                    ProductVariantOption,
+                    ProductVariantOption.product_variant_id == ProductVariant.id,
+                )
+                .join(
+                    ProductPrice,
+                    ProductPrice.product_variant_id == ProductVariantOption.id,
+                )
+                .filter(
+                    ProductVariant.product_id == product.id,
+                    ProductPrice.locality_id == locality_uuid,
+                )
+                .first()
+            )
+            if price_row is not None and (
+                price_row.min_price is not None or price_row.max_price is not None
+            ):
+                precalc_min_price = (
+                    float(price_row.min_price) if price_row.min_price is not None else 0.0
+                )
+                precalc_max_price = (
+                    float(price_row.max_price) if price_row.max_price is not None else 0.0
+                )
+
+        promo_map = (
+            _build_promo_map_for_product_ids([product.id]) if include_promos else {}
+        )
+
         product_dict = product.to_dict(
             include_variants=include_variants,
             include_images=include_images,
             locality_id=locality_id,
-            include_promos=include_promos,
-            locality_to_catalog_map=locality_to_catalog
+            include_promos=False,
+            locality_to_catalog_map=locality_to_catalog,
+            precalculated_min_price=precalc_min_price,
+            precalculated_max_price=precalc_max_price,
+            include_inventory=False,
         )
-        
-        # Verificar stock en crm_products
-        from models.product import check_crm_stock
+        if include_promos:
+            product_dict['promos'] = promo_map.get(product.id, [])
+
         has_crm_stock = check_crm_stock(product.crm_product_id)
         product_dict['has_crm_stock'] = has_crm_stock
         

@@ -3,6 +3,7 @@ from database import db
 from models.catalog import Catalog, LocalityCatalog
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 from routes.admin import admin_required
 
 catalogs_bp = Blueprint('catalogs', __name__)
@@ -19,7 +20,13 @@ def get_catalogs():
     try:
         include_localities = request.args.get('include_localities', 'false').lower() == 'true'
         
-        catalogs = Catalog.query.order_by(Catalog.name).all()
+        catalogs = (
+            Catalog.query.options(
+                joinedload(Catalog.locality_associations).joinedload(LocalityCatalog.locality)
+            )
+            .order_by(Catalog.name)
+            .all()
+        )
         
         return jsonify({
             'success': True,
