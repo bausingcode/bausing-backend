@@ -233,11 +233,12 @@ def get_public_homepage_distribution_quick():
                 # Solo datos básicos, sin precios ni promociones para carga rápida
                 product_dict = product.to_dict(
                     include_variants=False,
-                    include_images=True,
+                    include_images=False,
                     include_promos=False,
                     locality_id=None,
                     precalculated_min_price=0.0,  # Placeholder
-                    precalculated_max_price=0.0    # Placeholder
+                    precalculated_max_price=0.0,  # Placeholder
+                    include_inventory=False,
                 )
                 # Remover precios para que el frontend sepa que debe cargarlos después
                 product_dict['min_price'] = None

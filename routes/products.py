@@ -64,8 +64,10 @@ def get_products():
         from models.category import Category, CategoryOption
         query = Product.query.options(
             joinedload(Product.images),
+            joinedload(Product.category),
+            joinedload(Product.category_option),
             joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
-            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option)
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
         )
         
         # Búsqueda por texto
@@ -412,34 +414,37 @@ def get_products():
                 joinedload(PromoApplicability.promo)
             ).all()
             
-            # Organizar promociones por producto
+            promos_for_all = []
             for app in all_promo_applicabilities:
                 promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
                 if not promo_dict:
                     continue
-                
+
                 if app.applies_to == 'all':
-                    # Aplicar a todos los productos
-                    for pid in product_ids:
-                        if pid not in promo_map:
-                            promo_map[pid] = []
-                        if promo_dict not in promo_map[pid]:  # Evitar duplicados
-                            promo_map[pid].append(promo_dict)
+                    promos_for_all.append(promo_dict)
                 elif app.applies_to == 'product' and app.product_id:
-                    # Aplicar a producto específico
                     if app.product_id in product_ids:
-                        if app.product_id not in promo_map:
-                            promo_map[app.product_id] = []
-                        if promo_dict not in promo_map[app.product_id]:  # Evitar duplicados
+                        promo_map.setdefault(app.product_id, [])
+                        if not any(p.get('id') == promo_dict.get('id') for p in promo_map[app.product_id]):
                             promo_map[app.product_id].append(promo_dict)
                 elif app.applies_to == 'category' and app.category_id:
-                    # Aplicar a todos los productos de esta categoría
                     for pid, cat_id in category_map.items():
                         if cat_id == app.category_id:
-                            if pid not in promo_map:
-                                promo_map[pid] = []
-                            if promo_dict not in promo_map[pid]:  # Evitar duplicados
+                            promo_map.setdefault(pid, [])
+                            if not any(p.get('id') == promo_dict.get('id') for p in promo_map[pid]):
                                 promo_map[pid].append(promo_dict)
+
+            if promos_for_all:
+                for pid in product_ids:
+                    lst = promo_map.setdefault(pid, [])
+                    seen = {p.get('id') for p in lst if p.get('id') is not None}
+                    for pdict in promos_for_all:
+                        iid = pdict.get('id')
+                        if iid is None:
+                            lst.append(pdict)
+                        elif iid not in seen:
+                            lst.append(pdict)
+                            seen.add(iid)
         
         # Serializar productos
         products_data = []
@@ -467,7 +472,8 @@ def get_products():
                     locality_id=str(locality_uuid) if locality_uuid else None,
                     include_promos=False,  # Deshabilitado porque las pre-calculamos
                     precalculated_min_price=precalc_min_price,
-                    precalculated_max_price=precalc_max_price
+                    precalculated_max_price=precalc_max_price,
+                    include_inventory=False,
                 )
                 
                 # Agregar promociones pre-calculadas

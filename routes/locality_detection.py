@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from database import db
+from sqlalchemy.orm import joinedload
 from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 from models.locality import Locality
 from models.catalog import Catalog, LocalityCatalog
@@ -98,8 +99,10 @@ def find_locality_by_coordinates(lon, lat):
         None en caso contrario.
     """
     
-    # Obtener todas las zonas de entrega activas (no eliminadas)
-    zones = CrmDeliveryZone.query.filter(
+    # Zonas con localidad precargada (evita N queries a crm_zone_localities)
+    zones = CrmDeliveryZone.query.options(
+        joinedload(CrmDeliveryZone.zone_localities).joinedload(CrmZoneLocality.locality)
+    ).filter(
         CrmDeliveryZone.crm_deleted_at.is_(None)
     ).all()
     
@@ -159,11 +162,8 @@ def find_locality_by_coordinates(lon, lat):
                                 break
         
         if point_in_zone:
-            # Encontrar la localidad asociada a esta zona
-            zone_locality = CrmZoneLocality.query.filter_by(
-                crm_zone_id=zone.crm_zone_id
-            ).first()
-            
+            zone_locality = zone.zone_localities[0] if zone.zone_localities else None
+
             if zone_locality and zone_locality.locality:
                 matching_zones.append({
                     'zone': zone,
@@ -266,7 +266,7 @@ def get_coordinates_from_ip(ip_address, force_geolocation=False):
 
     try:
         url = f'http://ip-api.com/json/{ip_address}'
-        response = requests.get(url, headers={}, timeout=5)
+        response = requests.get(url, headers={}, timeout=2)
 
         if response.status_code == 200:
             data = response.json()

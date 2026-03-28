@@ -82,7 +82,15 @@ def get_available_replacement_product_sql(exclude_product_ids, section_products=
         "cp.crm_product_id = products.crm_product_id AND cp.stock = false)"
     )
     q = q.filter(stock_ok)
-    return q.order_by(Product.created_at.desc()).limit(1).first()
+    from sqlalchemy.orm import joinedload
+
+    return q.options(
+        joinedload(Product.images),
+        joinedload(Product.category),
+        joinedload(Product.category_option),
+        joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
+        joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
+    ).order_by(Product.created_at.desc()).limit(1).first()
 
 
 def check_crm_stock(crm_product_id):
@@ -233,7 +241,7 @@ class Product(db.Model):
                     return img.image_url
         return None
     
-    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None):
+    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True):
         data = {
             'id': str(self.id),
             'name': self.name,
@@ -257,9 +265,13 @@ class Product(db.Model):
             'subcategories': [assoc.to_dict() for assoc in self.subcategory_associations] if hasattr(self, 'subcategory_associations') else [],
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'has_stock': self.has_stock(),
-            'total_stock': self.get_total_stock()
         }
+        if include_inventory:
+            data['has_stock'] = self.has_stock()
+            data['total_stock'] = self.get_total_stock()
+        else:
+            data['has_stock'] = True
+            data['total_stock'] = None
         
         # Precios - usar pre-calculados si están disponibles para evitar queries innecesarias
         if precalculated_min_price is not None and precalculated_max_price is not None:
