@@ -16,6 +16,41 @@ HOMEPAGE_SECTION_LEN = {
     'complete_purchase': 4,
 }
 
+_SECTION_ALIASES = {
+    'complete-purchase': 'complete_purchase',
+    'completepurchase': 'complete_purchase',
+    'descuentos': 'discounts',
+    'destacados': 'featured',
+}
+
+
+def _normalize_section(section):
+    if section is None:
+        return None
+    s = str(section).strip().lower().replace('-', '_')
+    if s in HOMEPAGE_SECTION_LEN:
+        return s
+    return _SECTION_ALIASES.get(s) or _SECTION_ALIASES.get(str(section).strip().lower()) or s
+
+
+def _normalize_position_to_index(section_key, position):
+    """
+    Índice 0-based para la grilla del admin.
+    Acepta posiciones ya en 0..n-1 o legacy 1..n (p. ej. la cuarta viñeta guardada como 4).
+    """
+    if section_key not in HOMEPAGE_SECTION_LEN or position is None:
+        return None
+    try:
+        pos = int(position)
+    except (TypeError, ValueError):
+        return None
+    maxlen = HOMEPAGE_SECTION_LEN[section_key]
+    if 0 <= pos < maxlen:
+        return pos
+    if 1 <= pos <= maxlen:
+        return pos - 1
+    return None
+
 
 def _homepage_dist_load_options():
     from sqlalchemy.orm import joinedload
@@ -86,14 +121,17 @@ def _price_map_for_product_ids(product_ids):
 def _distributions_to_grid(distributions, include_product, product_price_map=None):
     grid = _empty_homepage_grid()
     for dist in distributions:
-        if dist.section in grid and 0 <= dist.position < len(grid[dist.section]):
-            if dist.product_id is None:
-                grid[dist.section][dist.position] = None
-            else:
-                grid[dist.section][dist.position] = dist.to_dict(
-                    include_product=include_product,
-                    product_price_map=product_price_map,
-                )
+        sec = _normalize_section(dist.section)
+        idx = _normalize_position_to_index(sec, dist.position)
+        if sec is None or idx is None or sec not in grid:
+            continue
+        if dist.product_id is None:
+            grid[sec][idx] = None
+        else:
+            grid[sec][idx] = dist.to_dict(
+                include_product=include_product,
+                product_price_map=product_price_map,
+            )
     return grid
 
 
@@ -103,7 +141,12 @@ def _merge_draft_over_published(
     pub_grid = _distributions_to_grid(
         published_distributions, include_product, product_price_map
     )
-    draft_by_key = {(d.section, d.position): d for d in draft_distributions}
+    draft_by_key = {}
+    for d in draft_distributions:
+        sec = _normalize_section(d.section)
+        idx = _normalize_position_to_index(sec, d.position)
+        if sec is not None and idx is not None:
+            draft_by_key[(sec, idx)] = d
     merged = {k: list(v) for k, v in pub_grid.items()}
     for section in merged:
         for pos in range(len(merged[section])):
