@@ -899,6 +899,18 @@ def create_complete_product():
         
         db.session.add(product)
         db.session.flush()  # Para obtener el ID del producto
+
+        # Campos técnicos / colchón (opcionales, mismo criterio que complete CRM)
+        _optional_product_fields = (
+            'technical_description', 'warranty_months', 'warranty_description', 'materials',
+            'filling_type', 'max_supported_weight_kg', 'has_pillow_top', 'is_bed_in_box',
+            'mattress_firmness', 'mattress_height_cm', 'mattress_fabric_type',
+            'has_double_pillow', 'has_moisture_breathers', 'has_side_handles',
+            'size_label',
+        )
+        for _f in _optional_product_fields:
+            if _f in data:
+                setattr(product, _f, data[_f])
         
         # Crear variantes con sus precios
         variants_data = data.get('variants', [])

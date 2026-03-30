@@ -115,6 +115,11 @@ class Product(db.Model):
     has_pillow_top = db.Column(db.Boolean, default=False)
     is_bed_in_box = db.Column(db.Boolean, default=False)
     mattress_firmness = db.Column(db.String(255))
+    mattress_height_cm = db.Column(db.Integer)
+    mattress_fabric_type = db.Column(db.String(255))
+    has_double_pillow = db.Column(db.Boolean, default=False, nullable=False)
+    has_moisture_breathers = db.Column(db.Boolean, default=False, nullable=False)
+    has_side_handles = db.Column(db.Boolean, default=False, nullable=False)
     size_label = db.Column(db.String(255))
     sku = db.Column(db.String(100))
     crm_product_id = db.Column(db.Integer, unique=True, nullable=True)
@@ -255,6 +260,11 @@ class Product(db.Model):
             'has_pillow_top': self.has_pillow_top,
             'is_bed_in_box': self.is_bed_in_box,
             'mattress_firmness': self.mattress_firmness,
+            'mattress_height_cm': self.mattress_height_cm,
+            'mattress_fabric_type': self.mattress_fabric_type,
+            'has_double_pillow': self.has_double_pillow,
+            'has_moisture_breathers': self.has_moisture_breathers,
+            'has_side_handles': self.has_side_handles,
             'size_label': self.size_label,
             'sku': self.sku,
             'crm_product_id': self.crm_product_id,
