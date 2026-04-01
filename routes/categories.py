@@ -91,7 +91,8 @@ def create_category():
         category = Category(
             name=data['name'],
             description=data.get('description'),
-            parent_id=data.get('parent_id')
+            parent_id=data.get('parent_id'),
+            navbar_image_url=data.get('navbar_image_url'),
         )
         
         db.session.add(category)
@@ -132,6 +133,8 @@ def update_category(category_id):
                 category.parent_id = data['parent_id']
             elif data['parent_id'] is None:
                 category.parent_id = None
+        if 'navbar_image_url' in data:
+            category.navbar_image_url = data.get('navbar_image_url') or None
         
         db.session.commit()
         

@@ -11,6 +11,7 @@ class Category(db.Model):
     description = db.Column(db.Text)
     parent_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=True)
     order = db.Column(db.Integer, nullable=False, default=0)
+    navbar_image_url = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -26,6 +27,7 @@ class Category(db.Model):
             'parent_id': str(self.parent_id) if self.parent_id else None,
             'parent_name': self.parent.name if self.parent else None,
             'order': self.order,
+            'navbar_image_url': self.navbar_image_url,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
         if include_options:

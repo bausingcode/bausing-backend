@@ -27,6 +27,7 @@ from .product_review import ProductReview
 from .card_type import CardType
 from .bank import Bank
 from .card_bank_installment import CardBankInstallment
+from .faq_item import FaqItem
 
 __all__ = [
     'Category',
@@ -75,6 +76,7 @@ __all__ = [
     'ProductReview',
     'CardType',
     'Bank',
-    'CardBankInstallment'
+    'CardBankInstallment',
+    'FaqItem',
 ]
 
