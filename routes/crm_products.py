@@ -25,11 +25,13 @@ def list_crm_products():
     - search: término de búsqueda (busca en ID CRM, descripción, alt_description, product_name)
     - page: número de página (default: 1)
     - per_page: items por página (default: 20, max: 100)
+    - hidden_only: solo aplica con status=not_completed; true = solo ocultos, false = excluir ocultos (default)
     """
     try:
         status = request.args.get('status', 'all')
         combo_filter = request.args.get('combo')
         search = request.args.get('search', '').strip()
+        hidden_only = request.args.get('hidden_only', 'false').lower() == 'true'
         
         # Paginación
         page = request.args.get('page', 1, type=int)
@@ -69,6 +71,7 @@ def list_crm_products():
                 cp.crm_created_at,
                 cp.crm_updated_at,
                 cp.raw,
+                cp.hidden_from_not_completed_list,
                 p.id as product_id,
                 p.name as product_name
             FROM crm_products cp
@@ -82,6 +85,10 @@ def list_crm_products():
             conditions.append("p.id IS NOT NULL")
         elif status == 'not_completed':
             conditions.append("p.id IS NULL")
+            if hidden_only:
+                conditions.append("COALESCE(cp.hidden_from_not_completed_list, false) = true")
+            else:
+                conditions.append("COALESCE(cp.hidden_from_not_completed_list, false) = false")
         
         if combo_filter is not None:
             if combo_filter.lower() == 'true':
@@ -136,6 +143,7 @@ def list_crm_products():
                 'product_id': str(row.product_id) if row.product_id else None,
                 'product_name': row.product_name,
                 'is_completed': row.product_id is not None,
+                'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
                 'raw': row.raw
             })
         
@@ -159,8 +167,47 @@ def list_crm_products():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': error_trace if app.config.get('DEBUG') else None
+            'traceback': error_trace if current_app.config.get('DEBUG') else None
         }), 500
+
+@crm_products_bp.route('/admin/crm-products/<uuid:product_id>/not-completed-visibility', methods=['PATCH'])
+@admin_required
+def patch_not_completed_visibility(product_id):
+    """Ocultar o volver a mostrar un CRM en el listado de no completados (solo aplica si aún no tiene producto vinculado al ocultar)."""
+    try:
+        data = request.get_json() or {}
+        hidden = data.get('hidden')
+        if hidden is None or not isinstance(hidden, bool):
+            return jsonify({
+                'success': False,
+                'error': 'Se requiere "hidden" booleano'
+            }), 400
+
+        check_q = text("""
+            SELECT cp.id, p.id as product_id
+            FROM crm_products cp
+            LEFT JOIN products p ON p.crm_product_id = cp.crm_product_id
+            WHERE cp.id = :product_id
+        """)
+        row = db.session.execute(check_q, {'product_id': str(product_id)}).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Producto CRM no encontrado'}), 404
+        if hidden and row.product_id is not None:
+            return jsonify({
+                'success': False,
+                'error': 'Solo se pueden ocultar productos aún no completados'
+            }), 400
+
+        db.session.execute(text("""
+            UPDATE crm_products
+            SET hidden_from_not_completed_list = :hidden
+            WHERE id = :product_id
+        """), {'hidden': hidden, 'product_id': str(product_id)})
+        db.session.commit()
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @crm_products_bp.route('/admin/crm-products/<uuid:product_id>', methods=['GET'])
 @admin_required
@@ -182,6 +229,7 @@ def get_crm_product(product_id):
                 cp.crm_created_at,
                 cp.crm_updated_at,
                 cp.raw,
+                cp.hidden_from_not_completed_list,
                 p.id as product_id
             FROM crm_products cp
             LEFT JOIN products p ON p.crm_product_id = cp.crm_product_id
@@ -212,6 +260,7 @@ def get_crm_product(product_id):
             'crm_updated_at': row.crm_updated_at.isoformat() if row.crm_updated_at else None,
             'product_id': str(row.product_id) if row.product_id else None,
             'is_completed': row.product_id is not None,
+            'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
             'raw': row.raw
         }
         
@@ -752,6 +801,13 @@ def complete_crm_product(product_id):
                     db.session.add(image)
             db.session.commit()
         
+        db.session.execute(text("""
+            UPDATE crm_products
+            SET hidden_from_not_completed_list = false
+            WHERE id = :crm_row_id
+        """), {'crm_row_id': str(product_id)})
+        db.session.commit()
+
         return jsonify({
             'success': True,
             'data': product.to_dict(include_images=True, include_variants=True)
@@ -790,15 +846,17 @@ def complete_crm_product(product_id):
 @admin_required
 def list_crm_combos():
     """
-    Listar combos del CRM
+    Listar combos CRM aún no vinculados a un producto (no completados).
     
     Query parameters:
     - search: término de búsqueda (busca en ID CRM, descripción, alt_description, product_name)
     - page: número de página (default: 1)
     - per_page: items por página (default: 20, max: 100)
+    - hidden_only: true = solo los marcados ocultos en el admin; false = pendientes no ocultos
     """
     try:
         search = request.args.get('search', '').strip()
+        hidden_only = request.args.get('hidden_only', 'false').lower() == 'true'
         
         # Paginación
         page = request.args.get('page', 1, type=int)
@@ -818,6 +876,7 @@ def list_crm_combos():
                 cp.alt_description,
                 cp.crm_created_at,
                 cp.crm_updated_at,
+                cp.hidden_from_not_completed_list,
                 p.id as product_id,
                 p.name as product_name
             FROM crm_products cp
@@ -826,6 +885,11 @@ def list_crm_combos():
         
         params = {}
         conditions = ["cp.combo = true"]
+        conditions.append("p.id IS NULL")
+        if hidden_only:
+            conditions.append("COALESCE(cp.hidden_from_not_completed_list, false) = true")
+        else:
+            conditions.append("COALESCE(cp.hidden_from_not_completed_list, false) = false")
         
         # Búsqueda
         if search:
@@ -893,6 +957,7 @@ def list_crm_combos():
                 'product_id': str(row.product_id) if row.product_id else None,
                 'product_name': row.product_name,
                 'is_completed': row.product_id is not None,
+                'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
                 'items': items
             })
         
@@ -916,7 +981,7 @@ def list_crm_combos():
         return jsonify({
             'success': False,
             'error': str(e),
-            'traceback': error_trace if app.config.get('DEBUG') else None
+            'traceback': error_trace if current_app.config.get('DEBUG') else None
         }), 500
 
 @crm_products_bp.route('/admin/crm-combos/<uuid:combo_id>', methods=['GET'])
@@ -936,6 +1001,7 @@ def get_crm_combo(combo_id):
                 cp.crm_created_at,
                 cp.crm_updated_at,
                 cp.raw,
+                cp.hidden_from_not_completed_list,
                 p.id as product_id
             FROM crm_products cp
             LEFT JOIN products p ON p.crm_product_id = cp.crm_product_id
@@ -984,6 +1050,7 @@ def get_crm_combo(combo_id):
             'crm_updated_at': row.crm_updated_at.isoformat() if row.crm_updated_at else None,
             'product_id': str(row.product_id) if row.product_id else None,
             'is_completed': row.product_id is not None,
+            'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
             'items': items,
             'raw': row.raw
         }
