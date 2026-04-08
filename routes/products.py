@@ -13,9 +13,23 @@ from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_, func, text, bindparam
 from sqlalchemy.orm import joinedload
-from routes.admin import admin_required
+from routes.admin import admin_required, verify_token
 
 products_bp = Blueprint('products', __name__)
+
+
+def _storefront_may_view_product_detail(product):
+    """Tienda: solo productos activos. Admin (Bearer JWT) puede ver inactivos para edición/preview."""
+    if getattr(product, "is_active", False):
+        return True
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return False
+    try:
+        token = auth.split(" ", 1)[1]
+    except IndexError:
+        return False
+    return verify_token(token) is not None
 
 
 def _build_promo_map_for_product_ids(product_ids):
@@ -582,6 +596,12 @@ def get_product(product_id):
                 'error': f'Producto con ID {product_id} no encontrado'
             }), 404
 
+        if not _storefront_may_view_product_detail(product):
+            return jsonify({
+                'success': False,
+                'error': 'Producto no disponible'
+            }), 404
+
         precalc_min_price = None
         precalc_max_price = None
         if target_catalog_id:
@@ -692,6 +712,12 @@ def get_product_combos(product_id):
     """
     try:
         product = Product.query.get_or_404(product_id)
+
+        if not _storefront_may_view_product_detail(product):
+            return jsonify({
+                'success': False,
+                'error': 'Producto no disponible'
+            }), 404
         
         # Si el producto no tiene crm_product_id, no puede estar en combos
         if not product.crm_product_id:

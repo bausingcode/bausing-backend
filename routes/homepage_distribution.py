@@ -452,8 +452,8 @@ def get_public_homepage_distribution_quick():
                 
                 has_stock = crm_id_has_stock(product.crm_product_id, stock_map)
                 
-                # Si no tiene stock, buscar un reemplazo
-                if not has_stock:
+                # Inactivo o sin stock: intentar reemplazo (solo activos en catálogo)
+                if not product.is_active or not has_stock:
                     # Obtener productos ya usados en esta sección
                     section_used_ids = [item['product']['id'] for item in result[dist.section] if 'product' in item and 'id' in item['product']]
                     all_used_ids = list(used_product_ids) + section_used_ids
@@ -545,6 +545,18 @@ def get_products_prices():
             except:
                 continue
         
+        if not product_uuids:
+            return jsonify({
+                'success': True,
+                'data': {}
+            }), 200
+
+        product_uuids = [
+            row.id for row in db.session.query(Product.id).filter(
+                Product.id.in_(product_uuids),
+                Product.is_active == True,
+            ).all()
+        ]
         if not product_uuids:
             return jsonify({
                 'success': True,

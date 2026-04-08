@@ -970,6 +970,11 @@ def create_order():
             product = Product.query.get(product_id)
             if not product:
                 continue
+            if not product.is_active:
+                return jsonify({
+                    'success': False,
+                    'error': 'Hay productos en el pedido que ya no están disponibles en el catálogo.'
+                }), 400
             
             variant = ProductVariant.query.filter_by(product_id=product_id).first()
             if not variant:
