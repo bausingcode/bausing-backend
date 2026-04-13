@@ -531,7 +531,14 @@ def get_products_prices():
         # Pre-cargar el catálogo
         from models.product import get_cordoba_capital_catalog_id
         from models.catalog import LocalityCatalog
-        from models.product import ProductVariant, ProductVariantOption, ProductPrice, Product
+        from models.product import (
+            ProductVariant,
+            ProductVariantOption,
+            ProductPrice,
+            Product,
+            product_price_transfer_filter,
+            PRICE_KIND_CARD,
+        )
         from models.promo import Promo, PromoApplicability
         from sqlalchemy import func
         from datetime import datetime
@@ -576,8 +583,9 @@ def get_products_prices():
         else:
             target_catalog_id = get_cordoba_capital_catalog_id()
         
-        # Pre-calcular precios
+        # Pre-calcular precios (transfer) y tarjeta
         price_map = {}
+        card_price_map = {}
         if target_catalog_id:
             price_results = db.session.query(
                 ProductVariant.product_id,
@@ -589,7 +597,8 @@ def get_products_prices():
                 ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
             ).filter(
                 ProductVariant.product_id.in_(product_uuids),
-                ProductPrice.catalog_id == target_catalog_id
+                ProductPrice.catalog_id == target_catalog_id,
+                product_price_transfer_filter(),
             ).group_by(ProductVariant.product_id).all()
             
             for result in price_results:
@@ -597,6 +606,28 @@ def get_products_prices():
                     'min': float(result.min_price) if result.min_price else 0.0,
                     'max': float(result.max_price) if result.max_price else 0.0
                 }
+
+            card_results = db.session.query(
+                ProductVariant.product_id,
+                func.min(ProductPrice.price).label('min_price'),
+                func.max(ProductPrice.price).label('max_price')
+            ).join(
+                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+            ).join(
+                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+            ).filter(
+                ProductVariant.product_id.in_(product_uuids),
+                ProductPrice.catalog_id == target_catalog_id,
+                ProductPrice.price_kind == PRICE_KIND_CARD,
+            ).group_by(ProductVariant.product_id).all()
+            for result in card_results:
+                card_price_map[result.product_id] = {
+                    'min': float(result.min_price) if result.min_price else 0.0,
+                    'max': float(result.max_price) if result.max_price else 0.0
+                }
+
+        highlight_rows = Product.query.filter(Product.id.in_(product_uuids)).all()
+        highlight_map = {p.id: bool(p.show_transfer_price_highlight) for p in highlight_rows}
         
         # Pre-calcular promociones
         promo_map = {}
@@ -653,9 +684,16 @@ def get_products_prices():
         result = {}
         for pid in product_uuids:
             pid_str = str(pid)
+            tmin = price_map.get(pid, {}).get('min', 0.0)
+            tmax = price_map.get(pid, {}).get('max', 0.0)
+            cmin = card_price_map.get(pid, {}).get('min', 0.0)
+            cmax = card_price_map.get(pid, {}).get('max', 0.0)
             result[pid_str] = {
-                'min_price': price_map.get(pid, {}).get('min', 0.0),
-                'max_price': price_map.get(pid, {}).get('max', 0.0),
+                'min_price': tmin,
+                'max_price': tmax,
+                'min_card_price': cmin if cmin > 0 else tmin,
+                'max_card_price': cmax if cmax > 0 else tmax,
+                'show_transfer_price_highlight': highlight_map.get(pid, False),
                 'promos': promo_map.get(pid, [])
             }
             # Calcular price_range
@@ -708,7 +746,12 @@ def get_public_homepage_distribution():
         # Pre-calcular precios y promociones para todos los productos de una vez (optimización)
         from models.product import get_cordoba_capital_catalog_id
         from models.catalog import LocalityCatalog
-        from models.product import ProductVariant, ProductVariantOption, ProductPrice
+        from models.product import (
+            ProductVariant,
+            ProductVariantOption,
+            ProductPrice,
+            product_price_transfer_filter,
+        )
         from models.promo import Promo, PromoApplicability
         from sqlalchemy import func
         from datetime import datetime
@@ -743,7 +786,8 @@ def get_public_homepage_distribution():
                 ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
             ).filter(
                 ProductVariant.product_id.in_(product_ids),
-                ProductPrice.catalog_id == target_catalog_id
+                ProductPrice.catalog_id == target_catalog_id,
+                product_price_transfer_filter(),
             ).group_by(ProductVariant.product_id).all()
             
             for result in price_results:

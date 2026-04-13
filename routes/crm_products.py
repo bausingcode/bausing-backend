@@ -1,6 +1,22 @@
 from flask import Blueprint, request, jsonify, current_app
 from database import db
-from models.product import Product, ProductVariant, ProductVariantOption, ProductPrice
+from models.product import (
+    Product,
+    ProductVariant,
+    ProductVariantOption,
+    ProductPrice,
+    PRICE_KIND_TRANSFER,
+    PRICE_KIND_CARD,
+)
+
+
+def _price_kind_from_payload(price_data):
+    raw = price_data.get("price_kind") or PRICE_KIND_TRANSFER
+    if isinstance(raw, str):
+        raw = raw.strip().lower()
+    if raw == "card" or raw == PRICE_KIND_CARD:
+        return PRICE_KIND_CARD
+    return PRICE_KIND_TRANSFER
 from models.locality import Locality
 from models.catalog import Catalog
 from models.category import Category, CategoryOption
@@ -574,6 +590,15 @@ def complete_crm_product(product_id):
                 # Crear los precios para la opción default
                 # Aceptar tanto catalog_id como locality_id (compatibilidad hacia atrás)
                 price_list = direct_prices if isinstance(direct_prices, list) else [{'catalog_id': k, 'price': v} for k, v in direct_prices.items() if v]
+                card_direct = data.get("card_prices", [])
+                if isinstance(card_direct, dict):
+                    for k, v in card_direct.items():
+                        if k and v:
+                            price_list.append({"catalog_id": k, "price": v, "price_kind": PRICE_KIND_CARD})
+                elif isinstance(card_direct, list):
+                    for cp in card_direct:
+                        if isinstance(cp, dict) and cp.get("price") is not None:
+                            price_list.append({**cp, "price_kind": cp.get("price_kind") or PRICE_KIND_CARD})
                 for price_data in price_list:
                     catalog_id = price_data.get('catalog_id')
                     locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
@@ -590,7 +615,8 @@ def complete_crm_product(product_id):
                         price = ProductPrice(
                             product_variant_id=default_option.id,
                             catalog_id=catalog_id,
-                            price=price_value
+                            price=price_value,
+                            price_kind=_price_kind_from_payload(price_data),
                         )
                     elif locality_id:
                         # Compatibilidad hacia atrás: usar locality_id
@@ -600,7 +626,8 @@ def complete_crm_product(product_id):
                         price = ProductPrice(
                             product_variant_id=default_option.id,
                             locality_id=locality_id,
-                            price=price_value
+                            price=price_value,
+                            price_kind=_price_kind_from_payload(price_data),
                         )
                     else:
                         continue
@@ -623,6 +650,16 @@ def complete_crm_product(product_id):
                     prices_data = [p for p in prices_data if p]  # Filtrar None
                 elif not isinstance(prices_data, list):
                     prices_data = []
+
+                card_prices_raw = variant_data.get("card_prices", [])
+                if isinstance(card_prices_raw, dict):
+                    for k, v in card_prices_raw.items():
+                        if k and v:
+                            prices_data.append({"catalog_id": k, "price": v, "price_kind": PRICE_KIND_CARD})
+                elif isinstance(card_prices_raw, list):
+                    for cp in card_prices_raw:
+                        if isinstance(cp, dict) and cp.get("price") is not None:
+                            prices_data.append({**cp, "price_kind": cp.get("price_kind") or PRICE_KIND_CARD})
                 
                 # Si no hay atributos pero hay precios, crear una variante default para esta variant_data
                 if not attributes and prices_data:
@@ -660,7 +697,8 @@ def complete_crm_product(product_id):
                             price = ProductPrice(
                                 product_variant_id=default_option.id,
                                 catalog_id=catalog_id,
-                                price=price_value
+                                price=price_value,
+                                price_kind=_price_kind_from_payload(price_data),
                             )
                         elif locality_id:
                             locality = Locality.query.get(locality_id)
@@ -669,7 +707,8 @@ def complete_crm_product(product_id):
                             price = ProductPrice(
                                 product_variant_id=default_option.id,
                                 locality_id=locality_id,
-                                price=price_value
+                                price=price_value,
+                                price_kind=_price_kind_from_payload(price_data),
                             )
                         else:
                             continue
@@ -726,7 +765,8 @@ def complete_crm_product(product_id):
                                         price = ProductPrice(
                                             product_variant_id=option.id,
                                             catalog_id=catalog_id,
-                                            price=price_value
+                                            price=price_value,
+                                            price_kind=_price_kind_from_payload(price_item),
                                         )
                                         db.session.add(price)
                                 elif locality_id:
@@ -735,7 +775,8 @@ def complete_crm_product(product_id):
                                         price = ProductPrice(
                                             product_variant_id=option.id,
                                             locality_id=locality_id,
-                                            price=price_value
+                                            price=price_value,
+                                            price_kind=_price_kind_from_payload(price_item),
                                         )
                                         db.session.add(price)
                         elif isinstance(prices_data, dict):
@@ -750,7 +791,8 @@ def complete_crm_product(product_id):
                                     price = ProductPrice(
                                         product_variant_id=option.id,
                                         catalog_id=key,
-                                        price=price_value
+                                        price=price_value,
+                                        price_kind=PRICE_KIND_TRANSFER,
                                     )
                                     db.session.add(price)
                                 else:
@@ -760,7 +802,8 @@ def complete_crm_product(product_id):
                                         price = ProductPrice(
                                             product_variant_id=option.id,
                                             locality_id=key,
-                                            price=price_value
+                                            price=price_value,
+                                            price_kind=PRICE_KIND_TRANSFER,
                                         )
                                         db.session.add(price)
             

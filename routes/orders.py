@@ -19,6 +19,19 @@ import re
 import json
 import os
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _ars_to_cents(value) -> int:
+    """ARS a centavos (evita 1 < 1 por float/Decimal al comparar saldo vs monto a debitar)."""
+    return int(round(float(value) * 100 + 1e-9))
+
+
+def _wallet_covers(available, required) -> bool:
+    return _ars_to_cents(available) >= _ars_to_cents(required)
+
 
 orders_bp = Blueprint('orders', __name__)
 
@@ -831,6 +844,31 @@ def create_order():
             used_wallet_amount = float(data.get('wallet_amount'))
         elif data.get('use_wallet_balance') and data.get('wallet_amount'):
             used_wallet_amount = float(data.get('wallet_amount'))
+        # Mismo monto que envía el checkout en payment_methods[].method == wallet
+        if (used_wallet_amount is None or used_wallet_amount <= 0) and frontend_payment_methods:
+            for pm in frontend_payment_methods:
+                if isinstance(pm, dict) and pm.get('method') == 'wallet':
+                    try:
+                        w = float(pm.get('amount') or 0)
+                        if w > 0:
+                            used_wallet_amount = w
+                    except (TypeError, ValueError):
+                        pass
+                    break
+
+        logger.info(
+            "[create_order] wallet: user_id=%s payment_method=%s used_wallet_amount=%s "
+            "total=%s payment_methods=%s",
+            getattr(user, "id", None),
+            payment_method,
+            used_wallet_amount,
+            total,
+            [
+                {"method": (pm or {}).get("method"), "amount": (pm or {}).get("amount")}
+                for pm in (frontend_payment_methods or [])
+                if isinstance(pm, dict)
+            ],
+        )
         
         # Si es pago con wallet completo y no se envió wallet_amount, usar el total original
         # Calcular el total original (antes del descuento) sumando los items
@@ -1154,7 +1192,6 @@ def create_order():
         if used_wallet_amount and used_wallet_amount > 0:
             try:
                 from models.wallet import Wallet, WalletMovement
-                from routes.wallet import calculate_wallet_balance
                 
                 # Obtener o crear wallet del usuario
                 wallet = Wallet.query.filter_by(user_id=user.id).first()
@@ -1163,9 +1200,32 @@ def create_order():
                     db.session.add(wallet)
                     db.session.flush()
                 
-                # Verificar que tenga saldo suficiente
-                current_balance = calculate_wallet_balance(wallet.id, include_expired=False)
-                if current_balance < used_wallet_amount:
+                # Saldo disponible: columna wallets.balance (fuente de verdad operativa)
+                try:
+                    column_balance = float(wallet.balance) if wallet.balance is not None else 0.0
+                except (TypeError, ValueError):
+                    column_balance = 0.0
+                current_balance = column_balance
+
+                bal_cents = _ars_to_cents(current_balance)
+                req_cents = _ars_to_cents(used_wallet_amount)
+                logger.info(
+                    "[create_order] wallet debit check: user_id=%s wallet_id=%s "
+                    "wallets.balance=%.6f (%s centavos) used_wallet_amount=%.6f (%s centavos) covers=%s",
+                    user.id,
+                    wallet.id,
+                    current_balance,
+                    bal_cents,
+                    float(used_wallet_amount),
+                    req_cents,
+                    _wallet_covers(current_balance, used_wallet_amount),
+                )
+                if not _wallet_covers(current_balance, used_wallet_amount):
+                    logger.info(
+                        "[create_order] wallet debit REJECTED: %s centavos < %s centavos",
+                        bal_cents,
+                        req_cents,
+                    )
                     return jsonify({
                         'success': False,
                         'error': f'Saldo insuficiente en billetera. Saldo disponible: ${current_balance:.2f}, requerido: ${used_wallet_amount:.2f}'
@@ -1182,9 +1242,8 @@ def create_order():
                 db.session.add(wallet_movement)
                 db.session.flush()  # Flush para obtener el ID del movimiento y que esté disponible para calcular el balance
                 
-                # Actualizar balance de la wallet (recalcular después de agregar el movimiento)
-                # Esto actualiza el balance en memoria, pero no se hace commit hasta después de crear la orden
-                wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                # Actualizar columna wallets.balance restando el débito (coherente con la validación)
+                wallet.balance = round(column_balance - float(used_wallet_amount), 2)
                 wallet.updated_at = datetime.utcnow()
                 
                 nuevo_balance = float(wallet.balance)

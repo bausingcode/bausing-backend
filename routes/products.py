@@ -6,6 +6,9 @@ from models.product import (
     ProductVariantOption,
     ProductPrice,
     ProductSubcategory,
+    product_price_transfer_filter,
+    PRICE_KIND_TRANSFER,
+    PRICE_KIND_CARD,
 )
 from models.image import ProductImage
 from models.category import Category
@@ -232,7 +235,7 @@ def get_products():
                     ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
                 ).join(
                     ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-                )
+                ).filter(product_price_transfer_filter())
 
                 # Determinar catálogo para filtrar precios
                 try:
@@ -293,7 +296,7 @@ def get_products():
                         func.min(ProductPrice.price).label('min_price')
                     ).join(
                         ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-                    )
+                    ).filter(product_price_transfer_filter())
                     if locality_catalog:
                         # Filtrar por catalog_id (nuevo sistema)
                         subquery = subquery.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
@@ -317,14 +320,15 @@ def get_products():
                         ProductVariant.product_id,
                         func.min(ProductPrice.price).label('min_price')
                     ).join(ProductPrice).filter(
-                        ProductPrice.catalog_id == cordoba_capital_catalog_id
+                        ProductPrice.catalog_id == cordoba_capital_catalog_id,
+                        product_price_transfer_filter(),
                     ).group_by(ProductVariant.product_id).subquery()
                 else:
                     # Si no existe el catálogo, ordenar por precio mínimo general
                     subquery = db.session.query(
                         ProductVariant.product_id,
                         func.min(ProductPrice.price).label('min_price')
-                    ).join(ProductPrice).group_by(ProductVariant.product_id).subquery()
+                    ).join(ProductPrice).filter(product_price_transfer_filter()).group_by(ProductVariant.product_id).subquery()
                 
                 query = query.join(subquery, Product.id == subquery.c.product_id).order_by(
                     subquery.c.min_price.asc()
@@ -347,7 +351,7 @@ def get_products():
                         func.max(ProductPrice.price).label('max_price')
                     ).join(
                         ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-                    )
+                    ).filter(product_price_transfer_filter())
                     if locality_catalog:
                         # Filtrar por catalog_id (nuevo sistema)
                         subquery = subquery.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
@@ -371,14 +375,15 @@ def get_products():
                         ProductVariant.product_id,
                         func.max(ProductPrice.price).label('max_price')
                     ).join(ProductPrice).filter(
-                        ProductPrice.catalog_id == cordoba_capital_catalog_id
+                        ProductPrice.catalog_id == cordoba_capital_catalog_id,
+                        product_price_transfer_filter(),
                     ).group_by(ProductVariant.product_id).subquery()
                 else:
                     # Si no existe el catálogo, ordenar por precio máximo general
                     subquery = db.session.query(
                         ProductVariant.product_id,
                         func.max(ProductPrice.price).label('max_price')
-                    ).join(ProductPrice).group_by(ProductVariant.product_id).subquery()
+                    ).join(ProductPrice).filter(product_price_transfer_filter()).group_by(ProductVariant.product_id).subquery()
                 
                 query = query.join(subquery, Product.id == subquery.c.product_id).order_by(
                     subquery.c.max_price.desc()
@@ -421,6 +426,7 @@ def get_products():
         # Pre-calcular min/max prices y promociones para todos los productos de una vez (optimización)
         product_ids = [p.id for p in products]
         price_map = {}  # {product_id: {'min': float, 'max': float}}
+        card_price_map = {}
         promo_map = (
             _build_promo_map_for_product_ids(product_ids)
             if include_promos and product_ids
@@ -439,11 +445,31 @@ def get_products():
                 ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
             ).filter(
                 ProductVariant.product_id.in_(product_ids),
-                ProductPrice.catalog_id == target_catalog_id
+                ProductPrice.catalog_id == target_catalog_id,
+                product_price_transfer_filter(),
             ).group_by(ProductVariant.product_id).all()
             
             for result in price_results:
                 price_map[result.product_id] = {
+                    'min': float(result.min_price) if result.min_price else 0.0,
+                    'max': float(result.max_price) if result.max_price else 0.0
+                }
+
+            card_results = db.session.query(
+                ProductVariant.product_id,
+                func.min(ProductPrice.price).label('min_price'),
+                func.max(ProductPrice.price).label('max_price')
+            ).join(
+                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+            ).join(
+                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+            ).filter(
+                ProductVariant.product_id.in_(product_ids),
+                ProductPrice.catalog_id == target_catalog_id,
+                ProductPrice.price_kind == PRICE_KIND_CARD,
+            ).group_by(ProductVariant.product_id).all()
+            for result in card_results:
+                card_price_map[result.product_id] = {
                     'min': float(result.min_price) if result.min_price else 0.0,
                     'max': float(result.max_price) if result.max_price else 0.0
                 }
@@ -462,7 +488,8 @@ def get_products():
                         ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
                     ).filter(
                         ProductVariant.product_id.in_(product_ids),
-                        ProductPrice.locality_id == locality_uuid
+                        ProductPrice.locality_id == locality_uuid,
+                        product_price_transfer_filter(),
                     ).group_by(ProductVariant.product_id).all()
                     
                     for result in price_results:
@@ -509,6 +536,16 @@ def get_products():
                         product_dict['promos'] = promo_map[product.id]
                     else:
                         product_dict['promos'] = []
+
+                tmin = product_dict.get('min_price') or 0
+                tmax = product_dict.get('max_price') or 0
+                cslot = card_price_map.get(product.id)
+                if cslot and cslot.get('min', 0) > 0:
+                    product_dict['min_card_price'] = cslot['min']
+                    product_dict['max_card_price'] = cslot.get('max') or cslot['min']
+                else:
+                    product_dict['min_card_price'] = tmin
+                    product_dict['max_card_price'] = tmax
                 
                 products_data.append(product_dict)
             except Exception as e:
@@ -622,6 +659,7 @@ def get_product(product_id):
                 .filter(
                     ProductVariant.product_id == product.id,
                     ProductPrice.catalog_id == target_catalog_id,
+                    product_price_transfer_filter(),
                 )
                 .first()
             )
@@ -652,6 +690,7 @@ def get_product(product_id):
                 .filter(
                     ProductVariant.product_id == product.id,
                     ProductPrice.locality_id == locality_uuid,
+                    product_price_transfer_filter(),
                 )
                 .first()
             )
@@ -663,6 +702,40 @@ def get_product(product_id):
                 )
                 precalc_max_price = (
                     float(price_row.max_price) if price_row.max_price is not None else 0.0
+                )
+
+        precalc_min_card_price = None
+        precalc_max_card_price = None
+        if target_catalog_id:
+            card_row = (
+                db.session.query(
+                    func.min(ProductPrice.price).label('min_price'),
+                    func.max(ProductPrice.price).label('max_price'),
+                )
+                .select_from(ProductVariant)
+                .join(
+                    ProductVariantOption,
+                    ProductVariantOption.product_variant_id == ProductVariant.id,
+                )
+                .join(
+                    ProductPrice,
+                    ProductPrice.product_variant_id == ProductVariantOption.id,
+                )
+                .filter(
+                    ProductVariant.product_id == product.id,
+                    ProductPrice.catalog_id == target_catalog_id,
+                    ProductPrice.price_kind == PRICE_KIND_CARD,
+                )
+                .first()
+            )
+            if card_row is not None and (
+                card_row.min_price is not None or card_row.max_price is not None
+            ):
+                precalc_min_card_price = (
+                    float(card_row.min_price) if card_row.min_price is not None else 0.0
+                )
+                precalc_max_card_price = (
+                    float(card_row.max_price) if card_row.max_price is not None else 0.0
                 )
 
         promo_map = (
@@ -684,6 +757,14 @@ def get_product(product_id):
 
         has_crm_stock = check_crm_stock(product.crm_product_id)
         product_dict['has_crm_stock'] = has_crm_stock
+        mp = product_dict.get('min_price') or 0
+        xp = product_dict.get('max_price') or 0
+        if precalc_min_card_price is not None and precalc_min_card_price > 0:
+            product_dict['min_card_price'] = precalc_min_card_price
+            product_dict['max_card_price'] = precalc_max_card_price if precalc_max_card_price else precalc_min_card_price
+        else:
+            product_dict['min_card_price'] = mp
+            product_dict['max_card_price'] = xp
         
         return jsonify({
             'success': True,
@@ -937,6 +1018,8 @@ def create_complete_product():
         for _f in _optional_product_fields:
             if _f in data:
                 setattr(product, _f, data[_f])
+        if "show_transfer_price_highlight" in data:
+            product.show_transfer_price_highlight = bool(data.get("show_transfer_price_highlight"))
         
         # Crear variantes con sus precios
         variants_data = data.get('variants', [])
@@ -946,6 +1029,27 @@ def create_complete_product():
         for idx, variant_data in enumerate(variants_data):
             attributes = variant_data.get('attributes', {})
             prices_data = variant_data.get('prices', [])
+            if isinstance(prices_data, dict):
+                prices_data = [
+                    {"catalog_id": k, "price": v}
+                    for k, v in prices_data.items()
+                    if v and k
+                ]
+            elif not isinstance(prices_data, list):
+                prices_data = []
+            card_raw = variant_data.get("card_prices", [])
+            if isinstance(card_raw, dict):
+                for ck, cv in card_raw.items():
+                    if ck and cv:
+                        prices_data.append(
+                            {"catalog_id": ck, "price": cv, "price_kind": PRICE_KIND_CARD}
+                        )
+            elif isinstance(card_raw, list):
+                for cp in card_raw:
+                    if isinstance(cp, dict) and cp.get("price") is not None:
+                        prices_data.append(
+                            {**cp, "price_kind": cp.get("price_kind") or PRICE_KIND_CARD}
+                        )
             stock = variant_data.get('stock', 0)
             
             # Para cada atributo en esta variant_data
@@ -982,73 +1086,63 @@ def create_complete_product():
                     existing_option = variants_dict[attr_name]['options'][attr_value]['option']
                     existing_option.stock += stock
         
-        # Ahora crear los precios para cada variant (compartidos entre todas las options)
+        # Precios por opción (FK a product_variant_options.id)
         created_variants = []
         for attr_name, variant_info in variants_dict.items():
             variant = variant_info['variant']
-            created_prices = []
-            prices_added = set()  # Para evitar duplicados en la misma transacción
-            
-            # Agrupar precios únicos de todas las options de esta variant
-            # Recopilar todos los precios únicos de todas las options
-            all_prices_data = []
+            all_prices = []
             for option_data in variant_info['options'].values():
+                option = option_data['option']
+                prices_added = set()
                 for price_data in option_data['prices']:
                     catalog_id = price_data.get('catalog_id')
-                    locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
+                    locality_id = price_data.get('locality_id')
                     price_value = price_data.get('price')
+                    pk_raw = price_data.get('price_kind') or PRICE_KIND_TRANSFER
+                    price_kind = (
+                        PRICE_KIND_CARD
+                        if str(pk_raw).lower().strip() == 'card'
+                        else PRICE_KIND_TRANSFER
+                    )
                     price_key_id = catalog_id or locality_id
-                    if price_key_id and price_value is not None:
-                        price_key = (price_key_id, float(price_value))
-                        if price_key not in prices_added:
-                            all_prices_data.append(price_data)
-                            prices_added.add(price_key)
-            
-            # Crear los precios únicos
-            for price_data in all_prices_data:
-                catalog_id = price_data.get('catalog_id')
-                locality_id = price_data.get('locality_id')  # Compatibilidad hacia atrás
-                price_value = price_data.get('price')
-                
-                if not price_value or price_value is None:
-                    continue
-                
-                # Preferir catalog_id, pero mantener compatibilidad con locality_id
-                if catalog_id:
-                    from models.catalog import Catalog
-                    catalog = Catalog.query.get(catalog_id)
-                    if not catalog:
+                    if not price_key_id or price_value is None:
                         continue
-                    price = ProductPrice(
-                        product_variant_id=variant.id,
-                        catalog_id=catalog_id,
-                        price=price_value
-                    )
-                elif locality_id:
-                    locality = Locality.query.get(locality_id)
-                    if not locality:
+                    dedupe_key = (str(price_key_id), float(price_value), price_kind)
+                    if dedupe_key in prices_added:
                         continue
-                    price = ProductPrice(
-                        product_variant_id=variant.id,
-                        locality_id=locality_id,
-                        price=price_value
-                    )
-                else:
-                    continue
-                
-                db.session.add(price)
-            
-            # Hacer flush para obtener los IDs de los precios creados
-            db.session.flush()
-            
-            # Ahora obtener los precios creados para el response
-            prices_query = ProductPrice.query.filter_by(product_variant_id=variant.id).all()
-            created_prices = [p.to_dict() for p in prices_query]
-            
-            created_variants.append({
-                **variant.to_dict(),
-                'prices': created_prices
-            })
+                    prices_added.add(dedupe_key)
+                    if catalog_id:
+                        from models.catalog import Catalog
+                        catalog = Catalog.query.get(catalog_id)
+                        if not catalog:
+                            continue
+                        db.session.add(
+                            ProductPrice(
+                                product_variant_id=option.id,
+                                catalog_id=catalog_id,
+                                price=price_value,
+                                price_kind=price_kind,
+                            )
+                        )
+                    elif locality_id:
+                        locality = Locality.query.get(locality_id)
+                        if not locality:
+                            continue
+                        db.session.add(
+                            ProductPrice(
+                                product_variant_id=option.id,
+                                locality_id=locality_id,
+                                price=price_value,
+                                price_kind=price_kind,
+                            )
+                        )
+                db.session.flush()
+                option_prices = ProductPrice.query.filter_by(
+                    product_variant_id=option.id
+                ).all()
+                all_prices.extend([p.to_dict() for p in option_prices])
+
+            created_variants.append({**variant.to_dict(), 'prices': all_prices})
         
         db.session.commit()
         
@@ -1093,6 +1187,8 @@ def update_product(product_id):
             product.category_id = data.get('category_id')
         if 'is_active' in data:
             product.is_active = data.get('is_active')
+        if 'show_transfer_price_highlight' in data:
+            product.show_transfer_price_highlight = bool(data.get('show_transfer_price_highlight'))
         
         db.session.commit()
         

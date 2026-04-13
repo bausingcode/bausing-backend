@@ -11,8 +11,11 @@ from datetime import datetime, timedelta
 import uuid
 import csv
 import io
+import logging
 from routes.admin import admin_required
 from routes.auth import user_required
+
+logger = logging.getLogger(__name__)
 
 wallet_bp = Blueprint('wallet', __name__)
 
@@ -128,8 +131,8 @@ def calculate_wallet_balance(wallet_id, include_expired=False):
     
     # El balance es créditos válidos más débitos (débitos ya son negativos)
     balance = credits + debits
-    
-    return balance
+    # 2 decimales ARS: evita residuos de Decimal/float en comparaciones (ej. 1 peso vs 1 peso)
+    return round(float(balance), 2)
 
 # Helper function to create audit log
 def create_audit_log(admin_user_id, action, entity, entity_id, details=None):
@@ -1065,18 +1068,31 @@ def detect_anomalies():
 @user_required
 def get_user_wallet_balance():
     """
-    Obtener el balance de la billetera del usuario autenticado
-    El balance ya está calculado correctamente en la DB (excluyendo créditos vencidos)
+    Saldo mostrado al usuario: columna wallets.balance.
+    Si la suma de movimientos difiere, solo se registra en log (no se pisa la columna).
     """
     try:
         user = request.user
         wallet = get_or_create_wallet(user.id)
-        
-        # Usar el balance guardado en la DB (ya excluye créditos vencidos)
+
+        try:
+            stored = float(wallet.balance) if wallet.balance is not None else 0.0
+        except (TypeError, ValueError):
+            stored = 0.0
+        computed = float(calculate_wallet_balance(wallet.id, include_expired=False))
+        if abs(stored - computed) > 0.005:
+            logger.info(
+                "[wallet/balance] drift user_id=%s wallet_id=%s wallets.balance=%.2f sum(movements)=%.2f (responde column)",
+                user.id,
+                wallet.id,
+                stored,
+                computed,
+            )
+
         return jsonify({
             'success': True,
             'data': {
-                'balance': float(wallet.balance) if wallet.balance else 0.0,
+                'balance': round(stored, 2),
                 'is_blocked': wallet.is_blocked
             }
         }), 200
