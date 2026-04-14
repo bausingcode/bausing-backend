@@ -1020,6 +1020,9 @@ def create_complete_product():
                 setattr(product, _f, data[_f])
         if "show_transfer_price_highlight" in data:
             product.show_transfer_price_highlight = bool(data.get("show_transfer_price_highlight"))
+        if "display_reference_price" in data:
+            v = data.get("display_reference_price")
+            product.display_reference_price = float(v) if v is not None and v != "" else None
         
         # Crear variantes con sus precios
         variants_data = data.get('variants', [])
@@ -1189,6 +1192,9 @@ def update_product(product_id):
             product.is_active = data.get('is_active')
         if 'show_transfer_price_highlight' in data:
             product.show_transfer_price_highlight = bool(data.get('show_transfer_price_highlight'))
+        if 'display_reference_price' in data:
+            v = data.get('display_reference_price')
+            product.display_reference_price = float(v) if v is not None and v != '' else None
         
         db.session.commit()
         

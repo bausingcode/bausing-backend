@@ -19,6 +19,7 @@ def register_routes(app):
     from .crm_products import crm_products_bp
     from .orders import orders_bp
     from .homepage_distribution import homepage_distribution_bp
+    from .club_beneficios import club_beneficios_bp
     from .locality_detection import locality_detection_bp
     from .catalogs import catalogs_bp
     from .carts import carts_bp
@@ -50,6 +51,7 @@ def register_routes(app):
     app.register_blueprint(crm_products_bp, url_prefix='')
     app.register_blueprint(orders_bp, url_prefix='/api')
     app.register_blueprint(homepage_distribution_bp, url_prefix='')
+    app.register_blueprint(club_beneficios_bp, url_prefix='')
     app.register_blueprint(locality_detection_bp, url_prefix='/')
     app.register_blueprint(carts_bp, url_prefix='/carts')
     app.register_blueprint(events_bp, url_prefix='')

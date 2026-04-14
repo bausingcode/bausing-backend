@@ -439,7 +439,12 @@ def complete_crm_product(product_id):
                 category_id=(uuid.UUID(str(data['category_id'])) if not isinstance(data['category_id'], uuid.UUID) else data['category_id']) if data.get('category_id') else None,
                 category_option_id=(uuid.UUID(str(data['category_option_id'])) if not isinstance(data['category_option_id'], uuid.UUID) else data['category_option_id']) if data.get('category_option_id') else None,
                 is_combo=is_combo,
-                is_active=data.get('is_active', True)
+                is_active=data.get('is_active', True),
+                display_reference_price=(
+                    float(data['display_reference_price'])
+                    if data.get('display_reference_price') not in (None, '')
+                    else None
+                ),
             )
             db.session.add(product)
         

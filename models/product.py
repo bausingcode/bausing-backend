@@ -146,6 +146,8 @@ class Product(db.Model):
     is_combo = db.Column(db.Boolean, default=False, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     show_transfer_price_highlight = db.Column(db.Boolean, default=False, nullable=False)
+    # Solo vitrina: precio "tachado" de referencia (no entra en checkout ni cálculos). Si hay promo con descuento, prevalece el tachado de la promo.
+    display_reference_price = db.Column(db.Numeric(12, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -300,6 +302,7 @@ class Product(db.Model):
             'subcategories': [assoc.to_dict() for assoc in self.subcategory_associations] if hasattr(self, 'subcategory_associations') else [],
             'is_active': self.is_active,
             'show_transfer_price_highlight': bool(self.show_transfer_price_highlight),
+            'display_reference_price': float(self.display_reference_price) if self.display_reference_price is not None else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_inventory:

@@ -18,6 +18,7 @@ from .referral import Referral
 from .cart import Cart
 from .test_table import TestTable
 from .homepage_distribution import HomepageProductDistribution
+from .club_beneficios_item import ClubBeneficiosItem
 from .crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 from .crm_sale_type import CrmSaleType
 from .crm_province import CrmProvince, CrmProvinceMap
@@ -66,6 +67,7 @@ __all__ = [
     'Cart',
     'TestTable',
     'HomepageProductDistribution',
+    'ClubBeneficiosItem',
     'CrmDeliveryZone',
     'CrmZoneLocality',
     'CrmSaleType',
