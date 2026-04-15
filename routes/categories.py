@@ -4,6 +4,7 @@ from models.category import Category, CategoryOption
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from routes.admin import admin_required
+import uuid as uuid_lib
 
 categories_bp = Blueprint('categories', __name__)
 
@@ -155,29 +156,42 @@ def update_category(category_id):
             'error': str(e)
         }), 500
 
-@categories_bp.route('/<uuid:category_id>', methods=['DELETE'])
+@categories_bp.route('/<string:category_id>', methods=['DELETE'])
 @admin_required
 def delete_category(category_id):
     """Eliminar una categoría"""
     try:
-        category = Category.query.get_or_404(category_id)
-        
+        try:
+            cid = uuid_lib.UUID(category_id.strip())
+        except (ValueError, AttributeError):
+            return jsonify({
+                'success': False,
+                'error': 'ID de categoría inválido'
+            }), 400
+
+        category = db.session.get(Category, cid)
+        if not category:
+            return jsonify({
+                'success': False,
+                'error': 'Categoría no encontrada'
+            }), 404
+
         # Verificar si tiene productos o categorías hijas
         if category.products:
             return jsonify({
                 'success': False,
                 'error': 'No se puede eliminar una categoría que tiene productos asociados'
             }), 400
-        
+
         if category.children:
             return jsonify({
                 'success': False,
                 'error': 'No se puede eliminar una categoría que tiene subcategorías'
             }), 400
-        
+
         db.session.delete(category)
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': 'Categoría eliminada correctamente'
