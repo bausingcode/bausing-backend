@@ -29,6 +29,7 @@ from .card_type import CardType
 from .bank import Bank
 from .card_bank_installment import CardBankInstallment
 from .faq_item import FaqItem
+from .coupon import Coupon
 
 __all__ = [
     'Category',
@@ -80,5 +81,6 @@ __all__ = [
     'Bank',
     'CardBankInstallment',
     'FaqItem',
+    'Coupon',
 ]
 
