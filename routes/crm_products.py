@@ -20,7 +20,7 @@ def _price_kind_from_payload(price_data):
 from models.locality import Locality
 from models.catalog import Catalog
 from models.category import Category, CategoryOption
-from sqlalchemy import text
+from sqlalchemy import delete, text
 from sqlalchemy.exc import IntegrityError
 from routes.admin import admin_required
 import uuid
@@ -42,12 +42,14 @@ def list_crm_products():
     - page: número de página (default: 1)
     - per_page: items por página (default: 20, max: 100)
     - hidden_only: solo aplica con status=not_completed; true = solo ocultos, false = excluir ocultos (default)
+    - category_id: solo aplica con status=completed; UUID de categoría o subcategoría (filtra por producto vinculado)
     """
     try:
         status = request.args.get('status', 'all')
         combo_filter = request.args.get('combo')
         search = request.args.get('search', '').strip()
         hidden_only = request.args.get('hidden_only', 'false').lower() == 'true'
+        category_id_raw = request.args.get('category_id', '').strip()
         
         # Paginación
         page = request.args.get('page', 1, type=int)
@@ -122,6 +124,22 @@ def list_crm_products():
             ]
             conditions.append(f"({' OR '.join(search_conditions)})")
             params['search'] = f'%{search}%'
+
+        if category_id_raw and status == 'completed':
+            try:
+                filter_cat_uuid = uuid.UUID(category_id_raw)
+                category_scope = (
+                    "(p.category_id = :filter_category_id OR EXISTS ("
+                    "SELECT 1 FROM product_subcategories ps WHERE ps.product_id = p.id "
+                    "AND ps.subcategory_id = :filter_category_id) OR EXISTS ("
+                    "SELECT 1 FROM product_subcategories ps "
+                    "INNER JOIN categories sub ON sub.id = ps.subcategory_id "
+                    "WHERE ps.product_id = p.id AND sub.parent_id = :filter_category_id))"
+                )
+                conditions.append(category_scope)
+                params['filter_category_id'] = filter_cat_uuid
+            except (ValueError, TypeError):
+                pass
         
         where_clause = ""
         if conditions:
@@ -449,6 +467,64 @@ def complete_crm_product(product_id):
             db.session.add(product)
         
         db.session.flush()  # Para obtener el ID del producto
+
+        # Sincronizar product_subcategories en creación y actualización (antes solo corría en is_update).
+        if 'subcategory_ids' in data and isinstance(data['subcategory_ids'], list):
+            from models.product import ProductSubcategory
+
+            db.session.execute(
+                delete(ProductSubcategory).where(ProductSubcategory.product_id == product.id)
+            )
+            # Quitar filas puente del identity map (evita UPDATE con FKs NULL al hacer flush).
+            db.session.expire(product)
+
+            for subcat_item in data['subcategory_ids']:
+                if isinstance(subcat_item, dict):
+                    # No usar "id": en to_dict() es el PK de la fila puente, no la categoría.
+                    subcat_id = subcat_item.get('subcategory_id') or subcat_item.get('category_id')
+                else:
+                    subcat_id = subcat_item
+
+                if not subcat_id:
+                    continue
+
+                subcat_id_str = str(subcat_id)
+                try:
+                    subcat_id_uuid = uuid.UUID(subcat_id_str)
+                except (ValueError, TypeError):
+                    continue
+
+                selected_opts = []
+                if 'subcategory_options' in data and isinstance(data['subcategory_options'], dict):
+                    selected_opts = data['subcategory_options'].get(subcat_id_str, [])
+                    if not isinstance(selected_opts, list):
+                        selected_opts = [selected_opts] if selected_opts else []
+
+                if selected_opts:
+                    subcat = Category.query.get(subcat_id_uuid)
+                    if subcat:
+                        for opt_value in selected_opts:
+                            option_obj = CategoryOption.query.filter_by(
+                                category_id=subcat_id_uuid,
+                                value=str(opt_value),
+                            ).first()
+                            if option_obj:
+                                db.session.add(
+                                    ProductSubcategory(
+                                        product_id=product.id,
+                                        subcategory_id=subcat_id_uuid,
+                                        category_option_id=option_obj.id,
+                                    )
+                                )
+                else:
+                    db.session.add(
+                        ProductSubcategory(
+                            product_id=product.id,
+                            subcategory_id=subcat_id_uuid,
+                            category_option_id=None,
+                        )
+                    )
+            db.session.flush()
         
         # Eliminar variantes existentes si es actualización
         if is_update:
@@ -493,69 +569,6 @@ def complete_crm_product(product_id):
                     db.session.delete(opt)
                 db.session.delete(v)
             db.session.flush()
-            
-            # Manejar subcategorías si vienen en el request
-            if 'subcategory_ids' in data and isinstance(data['subcategory_ids'], list):
-                # Eliminar subcategorías existentes PRIMERO para evitar conflictos
-                from models.product import ProductSubcategory
-                existing_assocs = ProductSubcategory.query.filter_by(product_id=product.id).all()
-                for assoc in existing_assocs:
-                    db.session.delete(assoc)
-                db.session.flush()
-                
-                # Crear nuevas subcategorías
-                # Para cada subcategoría, crear un registro por cada opción seleccionada
-                subcategories_to_create = []
-                for subcat_item in data['subcategory_ids']:
-                    # Puede ser un string (id) o un objeto con subcategory_id y category_option_id
-                    if isinstance(subcat_item, dict):
-                        subcat_id = subcat_item.get('subcategory_id') or subcat_item.get('id')
-                    else:
-                        subcat_id = subcat_item
-                    
-                    if subcat_id:
-                        # Convertir a string si es UUID y luego a UUID para asegurar el formato correcto
-                        subcat_id_str = str(subcat_id)
-                        subcat_id_uuid = uuid.UUID(subcat_id_str) if subcat_id_str else None
-                        
-                        # Obtener TODAS las opciones seleccionadas para esta subcategoría
-                        selected_opts = []
-                        if 'subcategory_options' in data and isinstance(data['subcategory_options'], dict):
-                            # Usar el string para buscar en el dict
-                            selected_opts = data['subcategory_options'].get(subcat_id_str, [])
-                            if not isinstance(selected_opts, list):
-                                selected_opts = [selected_opts] if selected_opts else []
-                        
-                        # Si hay opciones seleccionadas, crear un registro por cada opción
-                        if selected_opts and len(selected_opts) > 0:
-                            subcat = Category.query.get(subcat_id_uuid)
-                            if subcat:
-                                for opt_value in selected_opts:
-                                    # Buscar el ID de la opción por su valor
-                                    option_obj = CategoryOption.query.filter_by(
-                                        category_id=subcat_id_uuid,
-                                        value=str(opt_value)
-                                    ).first()
-                                    
-                                    if option_obj:
-                                        # Crear la asociación (ya eliminamos todas las anteriores con flush)
-                                        subcategory_assoc = ProductSubcategory(
-                                            product_id=product.id,
-                                            subcategory_id=subcat_id_uuid,
-                                            category_option_id=option_obj.id
-                                        )
-                                        db.session.add(subcategory_assoc)
-                        else:
-                            # Si no hay opciones, crear un registro sin opción (solo uno por subcategoría)
-                            if subcat_id_uuid:
-                                # Crear la asociación sin opción (ya eliminamos todas las anteriores con flush)
-                                subcategory_assoc = ProductSubcategory(
-                                    product_id=product.id,
-                                    subcategory_id=subcat_id_uuid,
-                                    category_option_id=None
-                                )
-                                db.session.add(subcategory_assoc)
-                db.session.flush()
             
             # Si hay category_id que es una categoría padre, actualizarla
             # (las subcategorías ya se manejaron arriba)

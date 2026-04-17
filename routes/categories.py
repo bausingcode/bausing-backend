@@ -1,12 +1,39 @@
 from flask import Blueprint, request, jsonify
+from sqlalchemy import delete
 from database import db
 from models.category import Category, CategoryOption
+from models.product import ProductSubcategory
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from routes.admin import admin_required
 import uuid as uuid_lib
 
 categories_bp = Blueprint('categories', __name__)
+
+
+def _resolve_parent_category_id(raw_parent_id):
+    """
+    Normaliza parent_id (string/UUID) para categorías hijas.
+    Solo se permiten padres que sean categorías principales (sin parent_id).
+    Retorna (uuid_obj | None, error_message | None).
+    """
+    if raw_parent_id is None or raw_parent_id == '':
+        return None, None
+    try:
+        pid = (
+            raw_parent_id
+            if isinstance(raw_parent_id, uuid_lib.UUID)
+            else uuid_lib.UUID(str(raw_parent_id).strip())
+        )
+    except (ValueError, TypeError, AttributeError):
+        return None, 'parent_id no es un UUID válido'
+    parent = db.session.get(Category, pid)
+    if not parent:
+        return None, 'La categoría padre no existe'
+    if parent.parent_id is not None:
+        return None, 'Solo se pueden crear subcategorías bajo una categoría principal'
+    return pid, None
+
 
 @categories_bp.route('', methods=['GET'])
 def get_categories():
@@ -88,11 +115,15 @@ def create_category():
                 'success': False,
                 'error': 'El nombre es requerido'
             }), 400
+
+        parent_uuid, parent_err = _resolve_parent_category_id(data.get('parent_id'))
+        if parent_err:
+            return jsonify({'success': False, 'error': parent_err}), 400
         
         category = Category(
             name=data['name'],
             description=data.get('description'),
-            parent_id=data.get('parent_id'),
+            parent_id=parent_uuid,
             navbar_image_url=data.get('navbar_image_url'),
         )
         
@@ -129,11 +160,19 @@ def update_category(category_id):
         if 'description' in data:
             category.description = data.get('description')
         if 'parent_id' in data:
-            # Evitar referencia circular
-            if data['parent_id'] and data['parent_id'] != str(category_id):
-                category.parent_id = data['parent_id']
-            elif data['parent_id'] is None:
+            raw = data['parent_id']
+            if raw is None or raw == '':
                 category.parent_id = None
+            else:
+                if str(raw) == str(category_id):
+                    return jsonify({
+                        'success': False,
+                        'error': 'Una categoría no puede ser padre de sí misma',
+                    }), 400
+                parent_uuid, parent_err = _resolve_parent_category_id(raw)
+                if parent_err:
+                    return jsonify({'success': False, 'error': parent_err}), 400
+                category.parent_id = parent_uuid
         if 'navbar_image_url' in data:
             category.navbar_image_url = data.get('navbar_image_url') or None
         
@@ -189,6 +228,8 @@ def delete_category(category_id):
                 'error': 'No se puede eliminar una categoría que tiene subcategorías'
             }), 400
 
+        # Evitar que el ORM emita UPDATE con FKs NULL (passive_deletes no cubre todos los casos).
+        db.session.execute(delete(ProductSubcategory).where(ProductSubcategory.subcategory_id == cid))
         db.session.delete(category)
         db.session.commit()
 

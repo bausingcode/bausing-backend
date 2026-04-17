@@ -154,7 +154,13 @@ class Product(db.Model):
     variants = db.relationship('ProductVariant', backref='product', lazy=True, cascade='all, delete-orphan')
     category_option = db.relationship('CategoryOption', backref='products', lazy=True)
     # Relación con subcategorías a través de la tabla de relación
-    subcategory_associations = db.relationship('ProductSubcategory', backref='product', lazy=True, cascade='all, delete-orphan')
+    subcategory_associations = db.relationship(
+        'ProductSubcategory',
+        backref='product',
+        lazy=True,
+        cascade='all, delete-orphan',
+        passive_deletes=True,  # la BD hace ON DELETE CASCADE sobre product_id
+    )
     
     def get_subcategories(self):
         """Obtiene las subcategorías asociadas al producto"""
@@ -502,9 +508,10 @@ class ProductSubcategory(db.Model):
     category_option_id = db.Column(UUID(as_uuid=True), db.ForeignKey('category_options.id', ondelete='SET NULL'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
-    # Relaciones
-    subcategory = db.relationship('Category', backref='product_subcategories', lazy=True)
-    category_option = db.relationship('CategoryOption', backref='product_subcategories', lazy=True)
+    # Relaciones: passive_deletes para que la BD aplique ON DELETE CASCADE / SET NULL
+    # sin emitir UPDATE ... SET subcategory_id=NULL (rompe NOT NULL en subcategory_id).
+    subcategory = db.relationship('Category', backref='product_subcategories', lazy=True, passive_deletes=True)
+    category_option = db.relationship('CategoryOption', backref='product_subcategories', lazy=True, passive_deletes=True)
 
     # Constraint único para evitar duplicados
     # Permite múltiples opciones para la misma subcategoría: (product_id, subcategory_id, category_option_id)
