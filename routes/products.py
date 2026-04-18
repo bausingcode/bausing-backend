@@ -7,6 +7,7 @@ from models.product import (
     ProductPrice,
     ProductSubcategory,
     product_price_transfer_filter,
+    product_price_card_filter,
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
 )
@@ -427,6 +428,7 @@ def get_products():
         product_ids = [p.id for p in products]
         price_map = {}  # {product_id: {'min': float, 'max': float}}
         card_price_map = {}
+        transfer_only_map = {}  # solo filas transfer/efectivo (para mostrar ambos precios en tienda)
         promo_map = (
             _build_promo_map_for_product_ids(product_ids)
             if include_promos and product_ids
@@ -434,27 +436,7 @@ def get_products():
         )
         
         if product_ids and target_catalog_id:
-            # Query optimizado: obtener min/max price por producto en una sola consulta
-            price_results = db.session.query(
-                ProductVariant.product_id,
-                func.min(ProductPrice.price).label('min_price'),
-                func.max(ProductPrice.price).label('max_price')
-            ).join(
-                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
-            ).join(
-                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-            ).filter(
-                ProductVariant.product_id.in_(product_ids),
-                ProductPrice.catalog_id == target_catalog_id,
-                product_price_transfer_filter(),
-            ).group_by(ProductVariant.product_id).all()
-            
-            for result in price_results:
-                price_map[result.product_id] = {
-                    'min': float(result.min_price) if result.min_price else 0.0,
-                    'max': float(result.max_price) if result.max_price else 0.0
-                }
-
+            # Tarjeta primero (precio de lista); si no hay filas card, usar transfer (legacy).
             card_results = db.session.query(
                 ProductVariant.product_id,
                 func.min(ProductPrice.price).label('min_price'),
@@ -469,7 +451,34 @@ def get_products():
                 ProductPrice.price_kind == PRICE_KIND_CARD,
             ).group_by(ProductVariant.product_id).all()
             for result in card_results:
-                card_price_map[result.product_id] = {
+                slot = {
+                    'min': float(result.min_price) if result.min_price else 0.0,
+                    'max': float(result.max_price) if result.max_price else 0.0
+                }
+                price_map[result.product_id] = slot
+                card_price_map[result.product_id] = slot
+
+            transfer_results = db.session.query(
+                ProductVariant.product_id,
+                func.min(ProductPrice.price).label('min_price'),
+                func.max(ProductPrice.price).label('max_price')
+            ).join(
+                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+            ).join(
+                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+            ).filter(
+                ProductVariant.product_id.in_(product_ids),
+                ProductPrice.catalog_id == target_catalog_id,
+                product_price_transfer_filter(),
+            ).group_by(ProductVariant.product_id).all()
+            for result in transfer_results:
+                transfer_only_map[result.product_id] = {
+                    'min': float(result.min_price) if result.min_price else 0.0,
+                    'max': float(result.max_price) if result.max_price else 0.0
+                }
+                if result.product_id in price_map:
+                    continue
+                price_map[result.product_id] = {
                     'min': float(result.min_price) if result.min_price else 0.0,
                     'max': float(result.max_price) if result.max_price else 0.0
                 }
@@ -478,7 +487,28 @@ def get_products():
             if locality_id:
                 try:
                     locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                    price_results = db.session.query(
+                    card_loc_results = db.session.query(
+                        ProductVariant.product_id,
+                        func.min(ProductPrice.price).label('min_price'),
+                        func.max(ProductPrice.price).label('max_price')
+                    ).join(
+                        ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
+                    ).join(
+                        ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
+                    ).filter(
+                        ProductVariant.product_id.in_(product_ids),
+                        ProductPrice.locality_id == locality_uuid,
+                        ProductPrice.price_kind == PRICE_KIND_CARD,
+                    ).group_by(ProductVariant.product_id).all()
+                    for result in card_loc_results:
+                        slot = {
+                            'min': float(result.min_price) if result.min_price else 0.0,
+                            'max': float(result.max_price) if result.max_price else 0.0
+                        }
+                        price_map[result.product_id] = slot
+                        card_price_map[result.product_id] = slot
+
+                    transfer_results = db.session.query(
                         ProductVariant.product_id,
                         func.min(ProductPrice.price).label('min_price'),
                         func.max(ProductPrice.price).label('max_price')
@@ -491,8 +521,13 @@ def get_products():
                         ProductPrice.locality_id == locality_uuid,
                         product_price_transfer_filter(),
                     ).group_by(ProductVariant.product_id).all()
-                    
-                    for result in price_results:
+                    for result in transfer_results:
+                        transfer_only_map[result.product_id] = {
+                            'min': float(result.min_price) if result.min_price else 0.0,
+                            'max': float(result.max_price) if result.max_price else 0.0
+                        }
+                        if result.product_id in price_map:
+                            continue
                         price_map[result.product_id] = {
                             'min': float(result.min_price) if result.min_price else 0.0,
                             'max': float(result.max_price) if result.max_price else 0.0
@@ -546,6 +581,11 @@ def get_products():
                 else:
                     product_dict['min_card_price'] = tmin
                     product_dict['max_card_price'] = tmax
+
+                xslot = transfer_only_map.get(product.id)
+                if xslot and xslot.get('min', 0) > 0:
+                    product_dict['min_transfer_price'] = xslot['min']
+                    product_dict['max_transfer_price'] = xslot.get('max') or xslot['min']
                 
                 products_data.append(product_dict)
             except Exception as e:
@@ -659,10 +699,34 @@ def get_product(product_id):
                 .filter(
                     ProductVariant.product_id == product.id,
                     ProductPrice.catalog_id == target_catalog_id,
-                    product_price_transfer_filter(),
+                    product_price_card_filter(),
                 )
                 .first()
             )
+            if price_row is None or (
+                price_row.min_price is None and price_row.max_price is None
+            ):
+                price_row = (
+                    db.session.query(
+                        func.min(ProductPrice.price).label('min_price'),
+                        func.max(ProductPrice.price).label('max_price'),
+                    )
+                    .select_from(ProductVariant)
+                    .join(
+                        ProductVariantOption,
+                        ProductVariantOption.product_variant_id == ProductVariant.id,
+                    )
+                    .join(
+                        ProductPrice,
+                        ProductPrice.product_variant_id == ProductVariantOption.id,
+                    )
+                    .filter(
+                        ProductVariant.product_id == product.id,
+                        ProductPrice.catalog_id == target_catalog_id,
+                        product_price_transfer_filter(),
+                    )
+                    .first()
+                )
             if price_row is not None and (
                 price_row.min_price is not None or price_row.max_price is not None
             ):
@@ -690,10 +754,34 @@ def get_product(product_id):
                 .filter(
                     ProductVariant.product_id == product.id,
                     ProductPrice.locality_id == locality_uuid,
-                    product_price_transfer_filter(),
+                    ProductPrice.price_kind == PRICE_KIND_CARD,
                 )
                 .first()
             )
+            if price_row is None or (
+                price_row.min_price is None and price_row.max_price is None
+            ):
+                price_row = (
+                    db.session.query(
+                        func.min(ProductPrice.price).label('min_price'),
+                        func.max(ProductPrice.price).label('max_price'),
+                    )
+                    .select_from(ProductVariant)
+                    .join(
+                        ProductVariantOption,
+                        ProductVariantOption.product_variant_id == ProductVariant.id,
+                    )
+                    .join(
+                        ProductPrice,
+                        ProductPrice.product_variant_id == ProductVariantOption.id,
+                    )
+                    .filter(
+                        ProductVariant.product_id == product.id,
+                        ProductPrice.locality_id == locality_uuid,
+                        product_price_transfer_filter(),
+                    )
+                    .first()
+                )
             if price_row is not None and (
                 price_row.min_price is not None or price_row.max_price is not None
             ):
@@ -706,6 +794,8 @@ def get_product(product_id):
 
         precalc_min_card_price = None
         precalc_max_card_price = None
+        precalc_min_transfer_price = None
+        precalc_max_transfer_price = None
         if target_catalog_id:
             card_row = (
                 db.session.query(
@@ -738,6 +828,153 @@ def get_product(product_id):
                     float(card_row.max_price) if card_row.max_price is not None else 0.0
                 )
 
+            transfer_row = (
+                db.session.query(
+                    func.min(ProductPrice.price).label('min_price'),
+                    func.max(ProductPrice.price).label('max_price'),
+                )
+                .select_from(ProductVariant)
+                .join(
+                    ProductVariantOption,
+                    ProductVariantOption.product_variant_id == ProductVariant.id,
+                )
+                .join(
+                    ProductPrice,
+                    ProductPrice.product_variant_id == ProductVariantOption.id,
+                )
+                .filter(
+                    ProductVariant.product_id == product.id,
+                    ProductPrice.catalog_id == target_catalog_id,
+                    product_price_transfer_filter(),
+                )
+                .first()
+            )
+            if transfer_row is not None and (
+                transfer_row.min_price is not None or transfer_row.max_price is not None
+            ):
+                precalc_min_transfer_price = (
+                    float(transfer_row.min_price)
+                    if transfer_row.min_price is not None
+                    else 0.0
+                )
+                precalc_max_transfer_price = (
+                    float(transfer_row.max_price)
+                    if transfer_row.max_price is not None
+                    else 0.0
+                )
+        elif locality_uuid is not None:
+            transfer_row_loc = (
+                db.session.query(
+                    func.min(ProductPrice.price).label('min_price'),
+                    func.max(ProductPrice.price).label('max_price'),
+                )
+                .select_from(ProductVariant)
+                .join(
+                    ProductVariantOption,
+                    ProductVariantOption.product_variant_id == ProductVariant.id,
+                )
+                .join(
+                    ProductPrice,
+                    ProductPrice.product_variant_id == ProductVariantOption.id,
+                )
+                .filter(
+                    ProductVariant.product_id == product.id,
+                    ProductPrice.locality_id == locality_uuid,
+                    product_price_transfer_filter(),
+                )
+                .first()
+            )
+            if transfer_row_loc is not None and (
+                transfer_row_loc.min_price is not None
+                or transfer_row_loc.max_price is not None
+            ):
+                precalc_min_transfer_price = (
+                    float(transfer_row_loc.min_price)
+                    if transfer_row_loc.min_price is not None
+                    else 0.0
+                )
+                precalc_max_transfer_price = (
+                    float(transfer_row_loc.max_price)
+                    if transfer_row_loc.max_price is not None
+                    else 0.0
+                )
+
+        # Algunos precios se guardan con locality_id y sin catalog_id; el listado ya mezcla catálogo.
+        # En detalle, si el agregado por catalog_id no encontró filas, completar desde la localidad.
+        if locality_uuid is not None:
+            if precalc_min_card_price is None or precalc_min_card_price <= 0:
+                card_row_fb = (
+                    db.session.query(
+                        func.min(ProductPrice.price).label('min_price'),
+                        func.max(ProductPrice.price).label('max_price'),
+                    )
+                    .select_from(ProductVariant)
+                    .join(
+                        ProductVariantOption,
+                        ProductVariantOption.product_variant_id == ProductVariant.id,
+                    )
+                    .join(
+                        ProductPrice,
+                        ProductPrice.product_variant_id == ProductVariantOption.id,
+                    )
+                    .filter(
+                        ProductVariant.product_id == product.id,
+                        ProductPrice.locality_id == locality_uuid,
+                        ProductPrice.price_kind == PRICE_KIND_CARD,
+                    )
+                    .first()
+                )
+                if card_row_fb is not None and (
+                    card_row_fb.min_price is not None or card_row_fb.max_price is not None
+                ):
+                    precalc_min_card_price = (
+                        float(card_row_fb.min_price)
+                        if card_row_fb.min_price is not None
+                        else 0.0
+                    )
+                    precalc_max_card_price = (
+                        float(card_row_fb.max_price)
+                        if card_row_fb.max_price is not None
+                        else precalc_min_card_price
+                    )
+
+            if precalc_min_transfer_price is None or precalc_min_transfer_price <= 0:
+                transfer_row_fb = (
+                    db.session.query(
+                        func.min(ProductPrice.price).label('min_price'),
+                        func.max(ProductPrice.price).label('max_price'),
+                    )
+                    .select_from(ProductVariant)
+                    .join(
+                        ProductVariantOption,
+                        ProductVariantOption.product_variant_id == ProductVariant.id,
+                    )
+                    .join(
+                        ProductPrice,
+                        ProductPrice.product_variant_id == ProductVariantOption.id,
+                    )
+                    .filter(
+                        ProductVariant.product_id == product.id,
+                        ProductPrice.locality_id == locality_uuid,
+                        product_price_transfer_filter(),
+                    )
+                    .first()
+                )
+                if transfer_row_fb is not None and (
+                    transfer_row_fb.min_price is not None
+                    or transfer_row_fb.max_price is not None
+                ):
+                    precalc_min_transfer_price = (
+                        float(transfer_row_fb.min_price)
+                        if transfer_row_fb.min_price is not None
+                        else 0.0
+                    )
+                    precalc_max_transfer_price = (
+                        float(transfer_row_fb.max_price)
+                        if transfer_row_fb.max_price is not None
+                        else precalc_min_transfer_price
+                    )
+
         promo_map = (
             _build_promo_map_for_product_ids([product.id]) if include_promos else {}
         )
@@ -765,6 +1002,14 @@ def get_product(product_id):
         else:
             product_dict['min_card_price'] = mp
             product_dict['max_card_price'] = xp
+
+        if precalc_min_transfer_price is not None and precalc_min_transfer_price > 0:
+            product_dict['min_transfer_price'] = precalc_min_transfer_price
+            product_dict['max_transfer_price'] = (
+                precalc_max_transfer_price
+                if precalc_max_transfer_price
+                else precalc_min_transfer_price
+            )
         
         return jsonify({
             'success': True,

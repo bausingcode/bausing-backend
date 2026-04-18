@@ -21,6 +21,81 @@ def price_row_kind_matches(row, kind: str) -> bool:
     pk = getattr(row, "price_kind", None) or PRICE_KIND_TRANSFER
     return pk == kind
 
+
+def product_price_card_filter():
+    """Filas explícitas de precio con tarjeta."""
+    return ProductPrice.price_kind == PRICE_KIND_CARD
+
+
+def _pick_listing_price_row_for_catalog(option_prices, catalog_uuid):
+    """Vitrina: tarjeta si existe; si no, transferencia (datos viejos)."""
+    card = next(
+        (
+            p
+            for p in option_prices
+            if p.catalog_id == catalog_uuid and price_row_kind_matches(p, PRICE_KIND_CARD)
+        ),
+        None,
+    )
+    if card:
+        return card
+    return next(
+        (
+            p
+            for p in option_prices
+            if p.catalog_id == catalog_uuid and price_row_kind_matches(p, PRICE_KIND_TRANSFER)
+        ),
+        None,
+    )
+
+
+def _pick_listing_price_row_for_locality(option_prices, locality_uuid):
+    card = next(
+        (
+            p
+            for p in option_prices
+            if p.locality_id == locality_uuid and price_row_kind_matches(p, PRICE_KIND_CARD)
+        ),
+        None,
+    )
+    if card:
+        return card
+    return next(
+        (
+            p
+            for p in option_prices
+            if p.locality_id == locality_uuid and price_row_kind_matches(p, PRICE_KIND_TRANSFER)
+        ),
+        None,
+    )
+
+
+def _min_listing_price_from_price_dicts(rows):
+    if not rows:
+        return 0.0
+    card_vals = []
+    transfer_vals = []
+    for p in rows:
+        pv = p.get("price")
+        if pv is None:
+            continue
+        try:
+            fv = float(pv)
+        except (TypeError, ValueError):
+            continue
+        if fv <= 0:
+            continue
+        kind = p.get("price_kind") or PRICE_KIND_TRANSFER
+        if kind == PRICE_KIND_CARD:
+            card_vals.append(fv)
+        elif kind == PRICE_KIND_TRANSFER:
+            transfer_vals.append(fv)
+    if card_vals:
+        return min(card_vals)
+    if transfer_vals:
+        return min(transfer_vals)
+    return 0.0
+
 # Cache para el catálogo "Cordoba capital" (se actualiza en cada request si es necesario)
 _cordoba_capital_catalog_id = None
 
@@ -168,81 +243,81 @@ class Product(db.Model):
 
     def get_min_price(self, locality_id=None):
         """Obtiene el precio mínimo del producto, opcionalmente filtrado por localidad (busca por catálogo).
-        Si no hay locality_id, usa el catálogo 'Cordoba capital' por defecto."""
+        Si no hay locality_id, usa el catálogo 'Cordoba capital' por defecto.
+        Usa precio tarjeta si existe; si no, transferencia (datos guardados antes del cambio de modelo)."""
         from sqlalchemy import func
         import uuid as uuid_lib
         from models.catalog import LocalityCatalog, Catalog
-        
-        query = db.session.query(func.min(ProductPrice.price)).join(
-            ProductVariantOption, ProductPrice.product_variant_id == ProductVariantOption.id
-        ).join(
-            ProductVariant, ProductVariantOption.product_variant_id == ProductVariant.id
-        ).filter(
-            ProductVariant.product_id == self.id,
-            product_price_transfer_filter(),
-        )
-        
-        if locality_id:
-            # Convertir locality_id a UUID si es string
-            try:
-                locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                # Buscar el catálogo de esta localidad
-                locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
-                if locality_catalog:
-                    # Filtrar por catalog_id (nuevo sistema)
-                    query = query.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
-                else:
-                    # Compatibilidad hacia atrás: filtrar por locality_id
-                    query = query.filter(ProductPrice.locality_id == locality_uuid)
-            except (ValueError, TypeError) as e:
-                return 0.0
-        else:
-            # Si no hay localidad, usar el catálogo "Cordoba capital" por defecto
-            cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
-            if cordoba_capital_catalog_id:
-                query = query.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
-        
-        result = query.scalar()
-        return float(result) if result else 0.0
-    
+
+        def _run(kind_filter):
+            q = db.session.query(func.min(ProductPrice.price)).join(
+                ProductVariantOption, ProductPrice.product_variant_id == ProductVariantOption.id
+            ).join(
+                ProductVariant, ProductVariantOption.product_variant_id == ProductVariant.id
+            ).filter(
+                ProductVariant.product_id == self.id,
+                kind_filter,
+            )
+            if locality_id:
+                try:
+                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                    locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                    if locality_catalog:
+                        q = q.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                    else:
+                        q = q.filter(ProductPrice.locality_id == locality_uuid)
+                except (ValueError, TypeError):
+                    return None
+            else:
+                cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                if cordoba_capital_catalog_id:
+                    q = q.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
+            return q.scalar()
+
+        r = _run(product_price_card_filter())
+        if r is not None:
+            return float(r)
+        r = _run(product_price_transfer_filter())
+        return float(r) if r is not None else 0.0
+
     def get_max_price(self, locality_id=None):
         """Obtiene el precio máximo del producto, opcionalmente filtrado por localidad (busca por catálogo).
-        Si no hay locality_id, usa el catálogo 'Cordoba capital' por defecto."""
+        Si no hay locality_id, usa el catálogo 'Cordoba capital' por defecto.
+        Usa precio tarjeta si existe; si no, transferencia (legacy)."""
         from sqlalchemy import func
         import uuid as uuid_lib
         from models.catalog import LocalityCatalog, Catalog
-        
-        query = db.session.query(func.max(ProductPrice.price)).join(
-            ProductVariantOption, ProductPrice.product_variant_id == ProductVariantOption.id
-        ).join(
-            ProductVariant, ProductVariantOption.product_variant_id == ProductVariant.id
-        ).filter(
-            ProductVariant.product_id == self.id,
-            product_price_transfer_filter(),
-        )
-        
-        if locality_id:
-            # Convertir locality_id a UUID si es string
-            try:
-                locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                # Buscar el catálogo de esta localidad
-                locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
-                if locality_catalog:
-                    # Filtrar por catalog_id (nuevo sistema)
-                    query = query.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
-                else:
-                    # Compatibilidad hacia atrás: filtrar por locality_id
-                    query = query.filter(ProductPrice.locality_id == locality_uuid)
-            except (ValueError, TypeError) as e:
-                return 0.0
-        else:
-            # Si no hay localidad, usar el catálogo "Cordoba capital" por defecto
-            cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
-            if cordoba_capital_catalog_id:
-                query = query.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
-        
-        result = query.scalar()
-        return float(result) if result else 0.0
+
+        def _run(kind_filter):
+            q = db.session.query(func.max(ProductPrice.price)).join(
+                ProductVariantOption, ProductPrice.product_variant_id == ProductVariantOption.id
+            ).join(
+                ProductVariant, ProductVariantOption.product_variant_id == ProductVariant.id
+            ).filter(
+                ProductVariant.product_id == self.id,
+                kind_filter,
+            )
+            if locality_id:
+                try:
+                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                    locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                    if locality_catalog:
+                        q = q.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                    else:
+                        q = q.filter(ProductPrice.locality_id == locality_uuid)
+                except (ValueError, TypeError):
+                    return None
+            else:
+                cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                if cordoba_capital_catalog_id:
+                    q = q.filter(ProductPrice.catalog_id == cordoba_capital_catalog_id)
+            return q.scalar()
+
+        r = _run(product_price_card_filter())
+        if r is not None:
+            return float(r)
+        r = _run(product_price_transfer_filter())
+        return float(r) if r is not None else 0.0
     
     def has_stock(self):
         """Verifica si el producto tiene stock disponible"""
@@ -583,10 +658,7 @@ class ProductVariantOption(db.Model):
                         # Agregar precio específico del catálogo (para fácil acceso)
                         import uuid as uuid_lib
                         catalog_uuid = uuid_lib.UUID(catalog_id) if isinstance(catalog_id, str) else catalog_id
-                        price_for_catalog = next(
-                            (p for p in self.prices if p.catalog_id == catalog_uuid and price_row_kind_matches(p, PRICE_KIND_TRANSFER)),
-                            None,
-                        )
+                        price_for_catalog = _pick_listing_price_row_for_catalog(self.prices, catalog_uuid)
                         data['price'] = float(price_for_catalog.price) if price_for_catalog else 0.0
                     else:
                         from models.catalog import LocalityCatalog
@@ -608,39 +680,25 @@ class ProductVariantOption(db.Model):
                                     }]
                             data['prices'] = filtered_prices
                             # Agregar precio específico del catálogo (para fácil acceso)
-                            price_for_catalog = next(
-                                (
-                                    p
-                                    for p in self.prices
-                                    if p.catalog_id == locality_catalog.catalog_id
-                                    and price_row_kind_matches(p, PRICE_KIND_TRANSFER)
-                                ),
-                                None,
+                            price_for_catalog = _pick_listing_price_row_for_catalog(
+                                self.prices, locality_catalog.catalog_id
                             )
                             data['price'] = float(price_for_catalog.price) if price_for_catalog else 0.0
                         else:
                             # Si no hay catálogo para esta localidad, usar precios por localidad (compatibilidad)
                             filtered_prices = [p for p in locality_prices if p.get('locality_id') == str(locality_uuid)]
-                        if not filtered_prices:
-                            filtered_prices = [{
-                                'id': None,
-                                'product_variant_id': str(self.id),
-                                'product_variant_option_id': str(self.id),
-                                'locality_id': str(locality_uuid),
-                                'locality_name': None,
-                                'price': 0.0
-                            }]
-                        data['prices'] = filtered_prices
-                        # Agregar precio específico de la localidad (para fácil acceso)
-                        price_for_locality = next(
-                            (
-                                p
-                                for p in self.prices
-                                if p.locality_id == locality_uuid and price_row_kind_matches(p, PRICE_KIND_TRANSFER)
-                            ),
-                            None,
-                        )
-                        data['price'] = float(price_for_locality.price) if price_for_locality else 0.0
+                            if not filtered_prices:
+                                filtered_prices = [{
+                                    'id': None,
+                                    'product_variant_id': str(self.id),
+                                    'product_variant_option_id': str(self.id),
+                                    'locality_id': str(locality_uuid),
+                                    'locality_name': None,
+                                    'price': 0.0
+                                }]
+                            data['prices'] = filtered_prices
+                            price_for_locality = _pick_listing_price_row_for_locality(self.prices, locality_uuid)
+                            data['price'] = float(price_for_locality.price) if price_for_locality else 0.0
                 except (ValueError, TypeError) as e:
                     # Mostrar todos los precios por catálogo, o por localidad si no hay catálogos
                     data['prices'] = catalog_prices if catalog_prices else locality_prices
@@ -653,28 +711,23 @@ class ProductVariantOption(db.Model):
                     filtered_prices = [p for p in catalog_prices if p.get('catalog_id') == str(cordoba_capital_catalog_id)]
                     if filtered_prices:
                         data['prices'] = filtered_prices
-                        trows = [p for p in filtered_prices if p.get('price_kind', PRICE_KIND_TRANSFER) == PRICE_KIND_TRANSFER]
-                        data['price'] = min(float(p.get('price', 0)) for p in (trows or filtered_prices) if p.get('price'))
+                        data['price'] = _min_listing_price_from_price_dicts(filtered_prices)
                     else:
                         # Si no hay precios para "Cordoba capital", mostrar todos los precios por catálogo
                         data['prices'] = catalog_prices + locality_prices
                         if catalog_prices:
-                            tc = [p for p in catalog_prices if p.get('price_kind', PRICE_KIND_TRANSFER) == PRICE_KIND_TRANSFER]
-                            data['price'] = min(float(p.get('price', 0)) for p in (tc or catalog_prices) if p.get('price'))
+                            data['price'] = _min_listing_price_from_price_dicts(catalog_prices)
                         elif locality_prices:
-                            tl = [p for p in locality_prices if p.get('price_kind', PRICE_KIND_TRANSFER) == PRICE_KIND_TRANSFER]
-                            data['price'] = min(float(p.get('price', 0)) for p in (tl or locality_prices) if p.get('price'))
+                            data['price'] = _min_listing_price_from_price_dicts(locality_prices)
                         else:
                             data['price'] = 0.0
                 else:
                     # Si no existe el catálogo "Cordoba capital", mostrar todos los precios
                     data['prices'] = catalog_prices + locality_prices
                     if catalog_prices:
-                        tc = [p for p in catalog_prices if p.get('price_kind', PRICE_KIND_TRANSFER) == PRICE_KIND_TRANSFER]
-                        data['price'] = min(float(p.get('price', 0)) for p in (tc or catalog_prices) if p.get('price'))
+                        data['price'] = _min_listing_price_from_price_dicts(catalog_prices)
                     elif locality_prices:
-                        tl = [p for p in locality_prices if p.get('price_kind', PRICE_KIND_TRANSFER) == PRICE_KIND_TRANSFER]
-                        data['price'] = min(float(p.get('price', 0)) for p in (tl or locality_prices) if p.get('price'))
+                        data['price'] = _min_listing_price_from_price_dicts(locality_prices)
                     else:
                         data['price'] = 0.0
         return data
