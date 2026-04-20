@@ -120,11 +120,15 @@ def create_category():
         if parent_err:
             return jsonify({'success': False, 'error': parent_err}), 400
         
+        raw_icon = data.get('navbar_icon_key')
+        icon_key = (raw_icon.strip() or None) if isinstance(raw_icon, str) else None
+
         category = Category(
             name=data['name'],
             description=data.get('description'),
             parent_id=parent_uuid,
             navbar_image_url=data.get('navbar_image_url'),
+            navbar_icon_key=icon_key,
         )
         
         db.session.add(category)
@@ -175,7 +179,19 @@ def update_category(category_id):
                 category.parent_id = parent_uuid
         if 'navbar_image_url' in data:
             category.navbar_image_url = data.get('navbar_image_url') or None
-        
+        if 'order' in data:
+            raw_order = data.get('order')
+            if raw_order is None:
+                category.order = 0
+            else:
+                try:
+                    category.order = int(raw_order)
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': 'order inválido'}), 400
+        if 'navbar_icon_key' in data:
+            raw_icon = data.get('navbar_icon_key')
+            category.navbar_icon_key = (raw_icon.strip() or None) if isinstance(raw_icon, str) else None
+
         db.session.commit()
         
         return jsonify({
@@ -294,10 +310,14 @@ def create_category_option(category_id):
                 'error': 'El valor es requerido'
             }), 400
         
+        raw_opt_icon = data.get('navbar_icon_key')
+        opt_icon = (raw_opt_icon.strip() or None) if isinstance(raw_opt_icon, str) else None
+
         option = CategoryOption(
             category_id=category_id,
             value=data['value'],
-            position=data.get('position', 0)
+            position=data.get('position', 0),
+            navbar_icon_key=opt_icon,
         )
         
         db.session.add(option)
@@ -350,7 +370,10 @@ def update_category_option(category_id, option_id):
             option.value = data['value']
         if 'position' in data:
             option.position = data['position']
-        
+        if 'navbar_icon_key' in data:
+            raw_opt_icon = data.get('navbar_icon_key')
+            option.navbar_icon_key = (raw_opt_icon.strip() or None) if isinstance(raw_opt_icon, str) else None
+
         db.session.commit()
         
         return jsonify({

@@ -12,6 +12,8 @@ class Category(db.Model):
     parent_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=True)
     order = db.Column(db.Integer, nullable=False, default=0)
     navbar_image_url = db.Column(db.Text, nullable=True)
+    # Clave del icono del mega menú (lucide / mapa en frontend), p. ej. "Package", "Refrigerator"
+    navbar_icon_key = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -28,6 +30,7 @@ class Category(db.Model):
             'parent_name': self.parent.name if self.parent else None,
             'order': self.order,
             'navbar_image_url': self.navbar_image_url,
+            'navbar_icon_key': self.navbar_icon_key,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
         if include_options:
@@ -42,6 +45,7 @@ class CategoryOption(db.Model):
     category_id = db.Column(UUID(as_uuid=True), db.ForeignKey('categories.id'), nullable=False)
     value = db.Column(db.String(255), nullable=False)
     position = db.Column(db.Integer, nullable=False, default=0)
+    navbar_icon_key = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def to_dict(self):
@@ -50,6 +54,7 @@ class CategoryOption(db.Model):
             'category_id': str(self.category_id),
             'value': self.value,
             'position': self.position,
+            'navbar_icon_key': self.navbar_icon_key,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
