@@ -2846,6 +2846,19 @@ def crear_venta():
                         # Actualizar referral_code_used si viene en el payload
                         if data.get('referral_code_used'):
                             existing_order.referral_code_used = data.get('referral_code_used', '').strip().upper()
+                        if data.get('coupon_id'):
+                            try:
+                                import uuid as _uuid
+                                existing_order.coupon_id = _uuid.UUID(str(data['coupon_id']))
+                            except Exception:
+                                pass
+                        if data.get('coupon_code'):
+                            existing_order.coupon_code = str(data.get('coupon_code', '')).strip().upper()[:64]
+                        if data.get('coupon_discount_amount') is not None:
+                            try:
+                                existing_order.coupon_discount_amount = float(data.get('coupon_discount_amount'))
+                            except (TypeError, ValueError):
+                                pass
                         # Actualizar payment_processed (importante: hacerlo al final para procesar referido)
                         was_paid = existing_order.payment_processed
                         existing_order.payment_processed = payment_processed
@@ -2883,6 +2896,22 @@ def crear_venta():
                     else:
                         # Crear la orden
                         referral_code_used = data.get('referral_code_used', '').strip().upper() if data.get('referral_code_used') else None
+                        _coupon_id = None
+                        if data.get('coupon_id'):
+                            try:
+                                import uuid as _uuid
+                                _coupon_id = _uuid.UUID(str(data['coupon_id']))
+                            except Exception:
+                                _coupon_id = None
+                        _coupon_code = None
+                        if data.get('coupon_code'):
+                            _coupon_code = str(data.get('coupon_code', '')).strip().upper()[:64]
+                        _coupon_disc = None
+                        if data.get('coupon_discount_amount') is not None:
+                            try:
+                                _coupon_disc = float(data.get('coupon_discount_amount'))
+                            except (TypeError, ValueError):
+                                _coupon_disc = None
                         order = Order(
                             user_id=user_id,
                             crm_order_id=crm_order_id,
@@ -2892,7 +2921,10 @@ def crear_venta():
                             payment_method=payment_method,
                             payment_processed=payment_processed,
                             used_wallet_amount=float(used_wallet_amount) if used_wallet_amount else None,
-                            referral_code_used=referral_code_used
+                            referral_code_used=referral_code_used,
+                            coupon_id=_coupon_id,
+                            coupon_code=_coupon_code,
+                            coupon_discount_amount=_coupon_disc,
                         )
                         db.session.add(order)
                         db.session.flush()

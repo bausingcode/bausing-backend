@@ -684,6 +684,10 @@ def order_to_dict_optimized(order, shipping_address=None, receipt_number=None, i
         'payment_processed': order.payment_processed if hasattr(order, 'payment_processed') else False,
         'pay_on_delivery': pay_on_delivery,
         'total_amount': float(order.total) if order.total else 0.0,
+        'coupon_code': getattr(order, 'coupon_code', None),
+        'coupon_discount_amount': float(order.coupon_discount_amount)
+        if getattr(order, 'coupon_discount_amount', None) is not None
+        else None,
         'shipping_address': shipping_address,
         'items': items or [],
         'tracking_number': None,  # Por ahora None, se puede agregar después
@@ -781,6 +785,10 @@ def order_to_dict(order):
         'payment_processed': order.payment_processed if hasattr(order, 'payment_processed') else False,
         'pay_on_delivery': pay_on_delivery,
         'total_amount': float(order.total) if order.total else 0.0,
+        'coupon_code': getattr(order, 'coupon_code', None),
+        'coupon_discount_amount': float(order.coupon_discount_amount)
+        if getattr(order, 'coupon_discount_amount', None) is not None
+        else None,
         'shipping_address': shipping_address,
         'items': items,
         'tracking_number': None,  # Por ahora None, se puede agregar después
@@ -1000,9 +1008,15 @@ def create_order():
                     'error': f'La localidad "{city}" no se encontró. Por favor, verifica que la localidad sea correcta.'
                 }), 400
         
-        # Preparar items para la orden (guardaremos los precios ajustados después de calcular el descuento)
-        # Por ahora solo guardamos la información básica, los precios se ajustarán después
-        items_info = []
+        # Preparar líneas del pedido (misma validación CRM para ítems y precios)
+        from utils.coupon_order import (
+            compute_coupon_discount_amount,
+            load_coupon_for_update,
+            normalize_coupon_code,
+            validate_coupon_row,
+        )
+
+        order_lines = []
         for item in items:
             product_id = uuid.UUID(item['product_id']) if isinstance(item['product_id'], str) else item['product_id']
             product = Product.query.get(product_id)
@@ -1013,38 +1027,96 @@ def create_order():
                     'success': False,
                     'error': 'Hay productos en el pedido que ya no están disponibles en el catálogo.'
                 }), 400
-            
+
             variant = ProductVariant.query.filter_by(product_id=product_id).first()
             if not variant:
                 continue
-            
+
             option = ProductVariantOption.query.filter_by(product_variant_id=variant.id).first()
             if not option:
                 continue
-            
+
             item_id = getattr(option, 'crm_item_id', None) or getattr(variant, 'crm_item_id', None)
             if not item_id and product.crm_product_id:
                 item_id = product.crm_product_id
-            
+
             if not item_id:
                 continue
-            
-            # Precio unitario original
+
             precio_unitario_original = float(item.get('price', 0))
             cantidad = item.get('quantity', 1)
-            
+
             variant_id = None
             if item.get('variant_id'):
                 variant_id = uuid.UUID(item['variant_id']) if isinstance(item['variant_id'], str) else item['variant_id']
-            
-            items_info.append({
-                'product_id': str(product_id),
-                'variant_id': str(variant_id) if variant_id else None,
+
+            order_lines.append({
+                'item': item,
+                'product_id': product_id,
+                'variant_id': variant_id,
                 'quantity': cantidad,
                 'precio_unitario_original': precio_unitario_original,
-                'precio_total_original': precio_unitario_original * cantidad
+                'precio_total_original': precio_unitario_original * cantidad,
             })
-        
+
+        if not order_lines:
+            return jsonify({
+                'success': False,
+                'error': 'No se pudieron validar los productos del pedido para el CRM'
+            }), 400
+
+        coupon_row = None
+        coupon_discount_total = 0.0
+        line_coupon_discounts = [0.0] * len(order_lines)
+        raw_coupon = data.get('coupon_code') or data.get('coupon')
+        code_norm = normalize_coupon_code(raw_coupon)
+        if code_norm:
+            coupon_row = load_coupon_for_update(code_norm)
+            if not coupon_row:
+                return jsonify({'success': False, 'error': 'Cupón no encontrado'}), 400
+            vmsg = validate_coupon_row(coupon_row)
+            if vmsg:
+                return jsonify({'success': False, 'error': vmsg}), 400
+            from utils.coupon_order import get_club_beneficios_product_id_set
+
+            club_ids = get_club_beneficios_product_id_set()
+            disc_lines = [
+                {'product_id': ol['product_id'], 'precio_total_original': ol['precio_total_original']}
+                for ol in order_lines
+            ]
+            total_disc, discounts, cerr = compute_coupon_discount_amount(
+                coupon_row, disc_lines, club_ids
+            )
+            if cerr:
+                return jsonify({'success': False, 'error': cerr}), 400
+            line_coupon_discounts = discounts
+            coupon_discount_total = total_disc
+
+        items_con_precios = []
+        for i, ol in enumerate(order_lines):
+            cd = line_coupon_discounts[i] if i < len(line_coupon_discounts) else 0.0
+            pt = round(max(0.0, ol['precio_total_original'] - cd), 2)
+            qty = ol['quantity']
+            pu = round(pt / qty, 2) if qty else 0.0
+            items_con_precios.append({
+                'item': ol['item'],
+                'precio_total_original': ol['precio_total_original'],
+                'precio_unitario_original': ol['precio_unitario_original'],
+                'cantidad': qty,
+                'precio_total_after_coupon': pt,
+                'precio_unitario_after_coupon': pu,
+            })
+
+        items_info = []
+        for ol in order_lines:
+            items_info.append({
+                'product_id': str(ol['product_id']),
+                'variant_id': str(ol['variant_id']) if ol['variant_id'] else None,
+                'quantity': ol['quantity'],
+                'precio_unitario_original': ol['precio_unitario_original'],
+                'precio_total_original': ol['precio_total_original'],
+            })
+
         # Formatear documento
         document_number = formData.get('dni') or formData.get('document_number') or user.dni or ''
         formatted_document = format_document_number(str(doc_type.id), document_number, crm_sale_type_id)
@@ -1071,24 +1143,15 @@ def create_order():
         # Calcular el total a pagar (después del descuento de billetera)
         total_a_pagar = float(total)  # Este es el total después del descuento (lo que realmente se paga)
         
-        # Calcular el total de productos (sin descuento de billetera)
-        # El total que viene del frontend ya tiene el descuento aplicado, así que necesitamos calcular el total original
-        # Sumar todos los items: precio unitario * cantidad
-        total_productos_original = 0.0
-        items_con_precios = []  # Guardar información de cada item para calcular descuento proporcional
-        
-        for item in items:
-            precio_unitario = float(item.get('price', 0))
-            cantidad = item.get('quantity', 1)
-            precio_total_item = precio_unitario * cantidad
-            total_productos_original += precio_total_item
-            
-            items_con_precios.append({
-                'item': item,
-                'precio_total_original': precio_total_item,
-                'precio_unitario_original': precio_unitario,
-                'cantidad': cantidad
-            })
+        # Total de productos después del cupón (base para repartir billetera / CRM)
+        total_productos_original = sum(
+            float(icp['precio_total_after_coupon']) for icp in items_con_precios
+        )
+        if total_productos_original < 0.01:
+            return jsonify({
+                'success': False,
+                'error': 'El subtotal de productos después del cupón debe ser mayor a $0. Ajustá el carrito o el cupón.'
+            }), 400
         
         # Si hay descuento de billetera, dividirlo proporcionalmente entre los productos
         # EXCEPTO si se usan múltiples medios de pago (multi-payment) o es wallet completo
@@ -1096,14 +1159,21 @@ def create_order():
         es_multi_payment = len(frontend_payment_methods) > 1 if frontend_payment_methods else False
         descuento_total = float(used_wallet_amount) if used_wallet_amount and used_wallet_amount > 0 and not es_multi_payment else 0.0
         es_pago_wallet_completo = payment_method == 'wallet' or (es_multi_payment and len(frontend_payment_methods) == 1 and frontend_payment_methods[0].get('method') == 'wallet')
+
+        if used_wallet_amount and float(used_wallet_amount) > 0:
+            if float(used_wallet_amount) > total_productos_original + 0.02:
+                return jsonify({
+                    'success': False,
+                    'error': 'El monto de billetera no puede superar el subtotal de productos (después del cupón).'
+                }), 400
         
         # Ajustar precios de los items proporcionalmente para el CRM
         # Si es pago completo con wallet, NO ajustar precios (enviar precios originales)
         js_items = []
         for item_info in items_con_precios:
             item = item_info['item']
-            precio_total_original = item_info['precio_total_original']
-            precio_unitario_original = item_info['precio_unitario_original']
+            precio_total_base = float(item_info['precio_total_after_coupon'])
+            precio_unitario_base = float(item_info['precio_unitario_after_coupon'])
             cantidad = item_info['cantidad']
             
             product_id = uuid.UUID(item['product_id']) if isinstance(item['product_id'], str) else item['product_id']
@@ -1126,24 +1196,24 @@ def create_order():
             if not item_id:
                 continue
             
-            # Si es pago completo con wallet, usar precios originales (sin ajuste)
+            # Si es pago completo con wallet, usar precios post-cupón (sin reparto de billetera)
             if es_pago_wallet_completo:
-                precio_total_ajustado = precio_total_original
-                precio_unitario_ajustado = precio_unitario_original
+                precio_total_ajustado = precio_total_base
+                precio_unitario_ajustado = precio_unitario_base
             # Si hay descuento de billetera (pero no es pago completo), calcular descuento proporcional
             elif descuento_total > 0 and total_productos_original > 0:
-                # Porcentaje que representa este producto del total
-                porcentaje_producto = precio_total_original / total_productos_original
+                # Porcentaje que representa este producto del total (post-cupón)
+                porcentaje_producto = precio_total_base / total_productos_original
                 # Descuento que le corresponde a este producto
                 descuento_producto = descuento_total * porcentaje_producto
-                # Precio ajustado: precio original - descuento proporcional
-                precio_total_ajustado = precio_total_original - descuento_producto
+                # Precio ajustado: base post-cupón - descuento proporcional de billetera
+                precio_total_ajustado = precio_total_base - descuento_producto
                 precio_unitario_ajustado = precio_total_ajustado / cantidad if cantidad > 0 else 0
                 
             else:
-                # No hay descuento, usar precios originales
-                precio_total_ajustado = precio_total_original
-                precio_unitario_ajustado = precio_unitario_original
+                # No hay billetera, usar precios post-cupón
+                precio_total_ajustado = precio_total_base
+                precio_unitario_ajustado = precio_unitario_base
             
             js_items.append({
                 "id": None,
@@ -1166,18 +1236,21 @@ def create_order():
         # Si es descuento parcial, usar precios ajustados
         order_items_for_payload = []
         for idx, item_info in enumerate(items_info):
+            icp = items_con_precios[idx]
+            precio_total_base = float(icp['precio_total_after_coupon'])
+            precio_unitario_base = float(icp['precio_unitario_after_coupon'])
             if es_pago_wallet_completo:
-                # Pago completo con wallet: usar precios originales
-                precio_unitario_final = item_info['precio_unitario_original']
+                # Pago completo con wallet: precio unitario post-cupón
+                precio_unitario_final = precio_unitario_base
             elif descuento_total > 0 and total_productos_original > 0:
-                # Descuento parcial: calcular precio ajustado
-                porcentaje_item = item_info['precio_total_original'] / total_productos_original
+                # Descuento parcial de billetera sobre base post-cupón
+                porcentaje_item = precio_total_base / total_productos_original
                 descuento_item = descuento_total * porcentaje_item
-                precio_total_ajustado = item_info['precio_total_original'] - descuento_item
+                precio_total_ajustado = precio_total_base - descuento_item
                 precio_unitario_final = precio_total_ajustado / item_info['quantity'] if item_info['quantity'] > 0 else 0
             else:
-                # Sin descuento: usar precios originales
-                precio_unitario_final = item_info['precio_unitario_original']
+                # Sin billetera: precio post-cupón
+                precio_unitario_final = precio_unitario_base
             
             order_items_for_payload.append({
                 'product_id': item_info['product_id'],
@@ -1357,7 +1430,10 @@ def create_order():
             "payment_processed": any(fp.get('procesado', False) for fp in forma_pagos_array),  # True si al menos un pago fue procesado
             "used_wallet_amount": used_wallet_amount,
             "order_items": order_items_for_payload,
-            "referral_code_used": referral_code  # Código de referido usado en esta orden
+            "referral_code_used": referral_code,  # Código de referido usado en esta orden
+            "coupon_id": str(coupon_row.id) if coupon_row else None,
+            "coupon_code": coupon_row.code if coupon_row else None,
+            "coupon_discount_amount": float(coupon_discount_total) if coupon_row else None,
         }
         
         # Llamar a /api/ventas/crear
@@ -1397,6 +1473,12 @@ def create_order():
                         if order:
                             # Refrescar para asegurar que tenemos todos los datos actualizados
                             db.session.refresh(order)
+                            if coupon_row:
+                                from models.coupon import Coupon as CouponModel
+                                c_up = db.session.get(CouponModel, coupon_row.id)
+                                if c_up:
+                                    c_up.uses_count = int(c_up.uses_count or 0) + 1
+                                    db.session.commit()
                         else:
                             return jsonify({
                                 'success': False,

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from database import db
 from models.coupon import Coupon
 from routes.admin import admin_required
+from routes.auth import user_required
 
 coupons_bp = Blueprint("coupons", __name__)
 
@@ -40,6 +41,86 @@ def _parse_bool_query(raw):
     if s in ("0", "false", "no"):
         return False
     return None
+
+
+@coupons_bp.route("/api/coupons/preview", methods=["POST"])
+@user_required
+def preview_coupon_checkout():
+    """
+    Calcula el descuento esperado para el carrito actual (sin reservar el cupón).
+    Requiere usuario autenticado (mismo criterio que crear orden).
+    """
+    from utils.coupon_order import (
+        compute_coupon_discount_amount,
+        get_club_beneficios_product_id_set,
+        normalize_coupon_code,
+        validate_coupon_row,
+    )
+
+    try:
+        body = request.get_json() or {}
+        code = normalize_coupon_code(body.get("code") or body.get("coupon_code"))
+        if not code:
+            return jsonify({"success": False, "error": "Código de cupón requerido"}), 400
+        items = body.get("items")
+        if not isinstance(items, list) or len(items) == 0:
+            return jsonify({"success": False, "error": "items es requerido"}), 400
+
+        c = Coupon.query.filter(func.lower(Coupon.code) == code.lower()).first()
+        if not c:
+            return jsonify({"success": False, "error": "Cupón no encontrado"}), 400
+        vmsg = validate_coupon_row(c)
+        if vmsg:
+            return jsonify({"success": False, "error": vmsg}), 400
+
+        disc_lines = []
+        for it in items:
+            pid = it.get("product_id")
+            if not pid:
+                continue
+            try:
+                price = float(it.get("price", 0))
+                qty = int(it.get("quantity", 1))
+            except (TypeError, ValueError):
+                continue
+            if price <= 0 or qty <= 0:
+                continue
+            disc_lines.append(
+                {
+                    "product_id": pid,
+                    "precio_total_original": price * qty,
+                }
+            )
+
+        if not disc_lines:
+            return jsonify(
+                {"success": False, "error": "No hay líneas válidas para calcular el descuento"}
+            ), 400
+
+        club_ids = get_club_beneficios_product_id_set()
+        total_disc, _discounts, cerr = compute_coupon_discount_amount(c, disc_lines, club_ids)
+        if cerr:
+            return jsonify({"success": False, "error": cerr}), 400
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "data": {
+                        "code": c.code,
+                        "discount_amount": round(float(total_disc), 2),
+                        "club_beneficios_only": bool(c.club_beneficios_only),
+                        "discount_type": c.discount_type,
+                        "discount_value": float(c.discount_value)
+                        if c.discount_value is not None
+                        else 0.0,
+                    },
+                }
+            ),
+            200,
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @coupons_bp.route("/admin/coupons", methods=["GET"])

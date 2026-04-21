@@ -583,8 +583,9 @@ def get_products_prices():
         else:
             target_catalog_id = get_cordoba_capital_catalog_id()
         
-        # Pre-calcular precios (transfer) y tarjeta
-        price_map = {}
+        # Precios por catálogo: transferencia y tarjeta por separado (igual que GET /products).
+        # min_price de la respuesta debe ser el precio "disponible": tarjeta si existe; si no, transferencia.
+        transfer_map = {}
         card_price_map = {}
         if target_catalog_id:
             price_results = db.session.query(
@@ -602,7 +603,7 @@ def get_products_prices():
             ).group_by(ProductVariant.product_id).all()
             
             for result in price_results:
-                price_map[result.product_id] = {
+                transfer_map[result.product_id] = {
                     'min': float(result.min_price) if result.min_price else 0.0,
                     'max': float(result.max_price) if result.max_price else 0.0
                 }
@@ -684,15 +685,24 @@ def get_products_prices():
         result = {}
         for pid in product_uuids:
             pid_str = str(pid)
-            tmin = price_map.get(pid, {}).get('min', 0.0)
-            tmax = price_map.get(pid, {}).get('max', 0.0)
+            tmin = transfer_map.get(pid, {}).get('min', 0.0)
+            tmax = transfer_map.get(pid, {}).get('max', 0.0)
             cmin = card_price_map.get(pid, {}).get('min', 0.0)
             cmax = card_price_map.get(pid, {}).get('max', 0.0)
+            if cmin > 0:
+                listing_min = cmin
+                listing_max = cmax if cmax > 0 else cmin
+            elif tmin > 0:
+                listing_min = tmin
+                listing_max = tmax if tmax > 0 else tmin
+            else:
+                listing_min = 0.0
+                listing_max = 0.0
             result[pid_str] = {
-                'min_price': tmin,
-                'max_price': tmax,
-                'min_card_price': cmin if cmin > 0 else tmin,
-                'max_card_price': cmax if cmax > 0 else tmax,
+                'min_price': listing_min,
+                'max_price': listing_max,
+                'min_card_price': cmin if cmin > 0 else listing_min,
+                'max_card_price': cmax if cmax > 0 else listing_max,
                 'show_transfer_price_highlight': highlight_map.get(pid, False),
                 'promos': promo_map.get(pid, [])
             }
