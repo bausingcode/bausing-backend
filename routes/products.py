@@ -1,5 +1,8 @@
+import logging
 from flask import Blueprint, request, jsonify
 from database import db
+
+logger = logging.getLogger(__name__)
 from models.product import (
     Product,
     ProductVariant,
@@ -620,6 +623,8 @@ def get_product(product_id):
     - include_images: incluir todas las imágenes (default: true)
     - include_promos: incluir promociones aplicables (default: true)
     - locality_id: filtrar precios por localidad
+    - include_all_variant_prices: si true, en cada opción se devuelven todas las filas de precio (todos los catálogos);
+      si false (default), sin locality_id se filtra al catálogo Córdoba capital para la vitrina.
     """
     # Limpiar cualquier transacción abortada antes de comenzar
     try:
@@ -632,6 +637,8 @@ def get_product(product_id):
         include_images = request.args.get('include_images', 'true').lower() == 'true'
         include_promos = request.args.get('include_promos', 'true').lower() == 'true'
         locality_id = request.args.get('locality_id')
+        # Incluir todas las filas de precio por catálogo/localidad (admin/edición; evita filtrar solo a Córdoba capital)
+        include_all_variant_prices = request.args.get('include_all_variant_prices', 'false').lower() == 'true'
 
         import uuid as uuid_lib
         from models.catalog import LocalityCatalog
@@ -988,7 +995,19 @@ def get_product(product_id):
             precalculated_min_price=precalc_min_price,
             precalculated_max_price=precalc_max_price,
             include_inventory=False,
+            include_all_variant_prices=include_all_variant_prices,
         )
+        if include_all_variant_prices and product_dict.get("variants"):
+            price_rows = 0
+            for v in product_dict["variants"]:
+                for o in v.get("options") or []:
+                    price_rows += len(o.get("prices") or [])
+            logger.info(
+                "[get_product] include_all_variant_prices product_id=%s options=%s price_rows_in_json=%s",
+                product_id,
+                sum(len(v.get("options") or []) for v in product_dict["variants"]),
+                price_rows,
+            )
         if include_promos:
             product_dict['promos'] = promo_map.get(product.id, [])
 

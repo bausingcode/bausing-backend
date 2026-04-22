@@ -2,7 +2,10 @@ from database import db
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import or_
 from datetime import datetime, timezone
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 # Precio lista tarjeta vs efectivo/transferencia
 PRICE_KIND_TRANSFER = "transfer"
@@ -354,7 +357,7 @@ class Product(db.Model):
                     return img.image_url
         return None
     
-    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True):
+    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False):
         data = {
             'id': str(self.id),
             'name': self.name,
@@ -433,7 +436,16 @@ class Product(db.Model):
         
         # Variantes
         if include_variants:
-            data['variants'] = [variant.to_dict(include_prices=True, include_options=True, locality_id=locality_id, locality_to_catalog_map=locality_to_catalog_map) for variant in self.variants]
+            data['variants'] = [
+                variant.to_dict(
+                    include_prices=True,
+                    include_options=True,
+                    locality_id=locality_id,
+                    locality_to_catalog_map=locality_to_catalog_map,
+                    include_all_variant_prices=include_all_variant_prices,
+                )
+                for variant in self.variants
+            ]
         
         # Promociones aplicables
         if include_promos:
@@ -494,7 +506,7 @@ class ProductVariant(db.Model):
     # Se mantiene esta relación por compatibilidad, pero debería deprecarse
     options = db.relationship('ProductVariantOption', backref='product_variant', lazy=True, cascade='all, delete-orphan')
 
-    def to_dict(self, include_prices=False, include_options=False, locality_id=None, locality_to_catalog_map=None):
+    def to_dict(self, include_prices=False, include_options=False, locality_id=None, locality_to_catalog_map=None, include_all_variant_prices=False):
         data = {
             'id': str(self.id),
             'product_id': str(self.product_id),
@@ -565,7 +577,15 @@ class ProductVariant(db.Model):
                     all_prices.extend(option_prices)
             data['prices'] = all_prices
         if include_options:
-            data['options'] = [option.to_dict(include_prices=include_prices, locality_id=locality_id, locality_to_catalog_map=locality_to_catalog_map) for option in self.options]
+            data['options'] = [
+                option.to_dict(
+                    include_prices=include_prices,
+                    locality_id=locality_id,
+                    locality_to_catalog_map=locality_to_catalog_map,
+                    include_all_variant_prices=include_all_variant_prices,
+                )
+                for option in self.options
+            ]
         return data
     
     def get_display_name(self):
@@ -616,7 +636,7 @@ class ProductVariantOption(db.Model):
     # Relación con precios
     prices = db.relationship('ProductPrice', backref='product_variant_option', lazy=True, cascade='all, delete-orphan')
 
-    def to_dict(self, include_prices=False, locality_id=None, locality_to_catalog_map=None):
+    def to_dict(self, include_prices=False, locality_id=None, locality_to_catalog_map=None, include_all_variant_prices=False):
         data = {
             'id': str(self.id),
             'product_variant_id': str(self.product_variant_id),
@@ -629,7 +649,21 @@ class ProductVariantOption(db.Model):
             # Priorizar precios por catálogo sobre precios por localidad
             catalog_prices = [price.to_dict() for price in self.prices if price.catalog_id]
             locality_prices = [price.to_dict() for price in self.prices if price.locality_id and not price.catalog_id]
-            
+
+            # Admin / edición: todas las filas de precio por catálogo y localidad (no filtrar a un solo catálogo)
+            if include_all_variant_prices:
+                combined = catalog_prices + locality_prices
+                data['prices'] = combined
+                data['price'] = _min_listing_price_from_price_dicts(combined) if combined else 0.0
+                logger.debug(
+                    "[product_prices] option_id=%s include_all_variant_prices rows=%s catalog=%s locality=%s",
+                    self.id,
+                    len(combined),
+                    len(catalog_prices),
+                    len(locality_prices),
+                )
+                return data
+
             if locality_id:
                 # Filtrar precios por localidad (buscar su catálogo)
                 try:
