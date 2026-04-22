@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from flask import Blueprint, request, jsonify
 from database import db
 
@@ -18,11 +20,130 @@ from models.image import ProductImage
 from models.category import Category
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, and_, func, text, bindparam
+from sqlalchemy import or_, and_, func, text, bindparam, literal
 from sqlalchemy.orm import joinedload
 from routes.admin import admin_required, verify_token
 
 products_bp = Blueprint('products', __name__)
+
+# pg_trgm (fuzzy); se prueba una sola vez por proceso
+_trgm_available = None
+
+# Reemplazos tras lower() para igualar términos con/sin tilde (sin depender de unaccent)
+_FOLD_ACCENTS_SQL = (
+    ("á", "a"), ("à", "a"), ("ä", "a"), ("â", "a"), ("ã", "a"), ("å", "a"),
+    ("é", "e"), ("è", "e"), ("ë", "e"), ("ê", "e"),
+    ("í", "i"), ("ì", "i"), ("ï", "i"), ("î", "i"),
+    ("ó", "o"), ("ò", "o"), ("ö", "o"), ("ô", "o"), ("õ", "o"),
+    ("ú", "u"), ("ù", "u"), ("ü", "u"), ("û", "u"),
+    ("ñ", "n"),
+    ("ç", "c"),
+    ("ß", "ss"),
+)
+
+
+def _escape_ilike_pattern(s: str) -> str:
+    """Escapa %, _ y \\ para usar con ILIKE ... ESCAPE '\\'."""
+    if not s:
+        return s
+    return (
+        s.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
+def _py_fold(s: str) -> str:
+    """Quita marcas diacríticas (NFD) y pasa a minúsculas (misma idea que unaccent)."""
+    if not s:
+        return ""
+    nfd = unicodedata.normalize("NFD", s)
+    stripped = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+    return stripped.lower()
+
+
+def _sql_fold_accents(column):
+    """Expresión SQL: lower + quitar tildes letra por letra (PostgreSQL)."""
+    x = func.lower(column)
+    for old, new in _FOLD_ACCENTS_SQL:
+        x = func.replace(x, old, new)
+    return x
+
+
+def _trgm_works() -> bool:
+    global _trgm_available
+    if _trgm_available is not None:
+        return _trgm_available
+    try:
+        row = db.session.execute(text("SELECT similarity('a', 'a')")).fetchone()
+        _trgm_available = row is not None and row[0] is not None
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        _trgm_available = False
+    return _trgm_available
+
+
+def product_text_search_filter(search: str):
+    """
+    Búsqueda tolerante: ILIKE literal, ILIKE sin tildes (colchon ≈ colchón),
+    nombre de categoría, y opcionalmente similarity (pg_trgm) para typos leves.
+    Varias palabras: deben cumplirse todas (AND), cada una en nombre/desc/SKU/categoría.
+    """
+    q = (search or "").strip()
+    if not q:
+        return None
+    words = [w for w in re.split(r"\s+", q) if w]
+    if not words:
+        return None
+
+    use_trgm = _trgm_works()
+
+    def one_word_clause(word: str):
+        w_esc = _escape_ilike_pattern(word)
+        pat = f"%{w_esc}%"
+        w_fold = _py_fold(word)
+        pat_fold = f"%{_escape_ilike_pattern(w_fold)}%"
+        parts = []
+
+        text_cols = (
+            Product.name,
+            Product.description,
+            Product.technical_description,
+            Product.sku,
+        )
+        for col in text_cols:
+            parts.append(col.ilike(pat, escape="\\"))
+            parts.append(_sql_fold_accents(col).like(pat_fold, escape="\\"))
+
+        parts.append(Product.category.has(Category.name.ilike(pat, escape="\\")))
+        parts.append(
+            Product.category.has(_sql_fold_accents(Category.name).like(pat_fold, escape="\\"))
+        )
+
+        if use_trgm and len(w_fold) >= 4:
+            parts.append(
+                func.similarity(
+                    _sql_fold_accents(func.coalesce(Product.name, literal(""))),
+                    literal(w_fold),
+                )
+                > 0.34
+            )
+            parts.append(
+                func.similarity(
+                    _sql_fold_accents(func.coalesce(Product.sku, literal(""))),
+                    literal(w_fold),
+                )
+                > 0.5
+            )
+
+        return or_(*parts)
+
+    if len(words) == 1:
+        return one_word_clause(words[0])
+    return and_(*[one_word_clause(w) for w in words])
 
 
 def _storefront_may_view_product_detail(product):
@@ -216,14 +337,11 @@ def get_products():
             eager = (joinedload(Product.images),) + eager
         query = Product.query.options(*eager)
         
-        # Búsqueda por texto
+        # Búsqueda por texto (tildes, categoría, palabras múltiples, fuzzy si hay pg_trgm)
         if search:
-            search_filter = or_(
-                Product.name.ilike(f'%{search}%'),
-                Product.description.ilike(f'%{search}%'),
-                Product.sku.ilike(f'%{search}%')
-            )
-            query = query.filter(search_filter)
+            search_filter = product_text_search_filter(search)
+            if search_filter is not None:
+                query = query.filter(search_filter)
         
         # Filtro por categoría única (incluyendo subcategorías)
         if category_id:
@@ -1699,13 +1817,11 @@ def get_search_suggestions():
                 'error': 'El parámetro "q" es requerido'
             }), 400
         
-        # Buscar productos que coincidan con el término
+        # Buscar productos que coincidan con el término (misma lógica que listado)
+        sf = product_text_search_filter(search_term)
         products = Product.query.filter(
             Product.is_active == True,
-            or_(
-                Product.name.ilike(f'%{search_term}%'),
-                Product.sku.ilike(f'%{search_term}%')
-            )
+            sf,
         ).limit(limit).all()
         
         suggestions = [
