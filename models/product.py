@@ -357,7 +357,7 @@ class Product(db.Model):
                     return img.image_url
         return None
     
-    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False):
+    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None):
         data = {
             'id': str(self.id),
             'name': self.name,
@@ -424,15 +424,17 @@ class Product(db.Model):
         else:
             data['price_range'] = "0"
         
-        # Imagen principal (siempre incluir)
-        main_image = self.get_main_image()
-        if main_image:
-            data['main_image'] = main_image
-        
-        # Todas las imágenes
+        # Imagen principal + galería (listados: precalculated_main_image evita joinedload de todas las imágenes)
         if include_images:
             sorted_images = sorted(self.images, key=lambda x: x.position)
             data['images'] = [img.to_dict() for img in sorted_images]
+            main_image = self.get_main_image()
+        else:
+            pm = (precalculated_main_image or "").strip() if precalculated_main_image else ""
+            main_image = pm or None
+
+        if main_image:
+            data['main_image'] = main_image
         
         # Variantes
         if include_variants:

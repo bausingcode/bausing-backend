@@ -39,27 +39,82 @@ def _storefront_may_view_product_detail(product):
     return verify_token(token) is not None
 
 
-def _build_promo_map_for_product_ids(product_ids):
-    """Pre-calculates applicable promos for many products without per-row Promo queries."""
+def _batch_main_product_image_urls(product_ids):
+    """Primera imagen por producto (listado) sin cargar todas las filas en memoria por ítem."""
+    if not product_ids:
+        return {}
+    from models.image import ProductImage
+
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=ProductImage.product_id,
+            order_by=(
+                ProductImage.position.asc().nulls_last(),
+                ProductImage.created_at.asc(),
+            ),
+        )
+        .label("rn")
+    )
+    subq = (
+        db.session.query(ProductImage.product_id, ProductImage.image_url, rn).filter(
+            ProductImage.product_id.in_(product_ids)
+        )
+    ).subquery()
+    rows = (
+        db.session.query(subq.c.product_id, subq.c.image_url)
+        .filter(subq.c.rn == 1)
+        .all()
+    )
+    out = {}
+    for pid, url in rows:
+        if url and str(url).strip():
+            out[pid] = str(url).strip()
+    return out
+
+
+def _build_promo_map_for_product_ids(product_ids, category_id_by_product=None):
+    """Pre-calculates applicable promos for many products; solo applicability relevante (no toda la tabla)."""
     promo_map = {}
     if not product_ids:
         return promo_map
     from models.promo import Promo, PromoApplicability
     from datetime import datetime
 
-    category_map = {}
-    for p in db.session.query(Product.id, Product.category_id).filter(
-        Product.id.in_(product_ids)
-    ).all():
-        category_map[p.id] = p.category_id
+    if category_id_by_product is None:
+        category_id_by_product = {
+            row.id: row.category_id
+            for row in db.session.query(Product.id, Product.category_id).filter(
+                Product.id.in_(product_ids)
+            ).all()
+        }
 
+    category_map = category_id_by_product
     now = datetime.utcnow()
+    unique_category_ids = list({cid for cid in category_map.values() if cid is not None})
+
+    applicability_conds = [
+        PromoApplicability.applies_to == "all",
+        and_(
+            PromoApplicability.applies_to == "product",
+            PromoApplicability.product_id.in_(product_ids),
+        ),
+    ]
+    if unique_category_ids:
+        applicability_conds.append(
+            and_(
+                PromoApplicability.applies_to == "category",
+                PromoApplicability.category_id.in_(unique_category_ids),
+            )
+        )
+
     all_promo_applicabilities = (
         PromoApplicability.query.join(Promo, PromoApplicability.promo_id == Promo.id)
         .filter(
             Promo.is_active == True,
             Promo.start_at <= now,
             Promo.end_at >= now,
+            or_(*applicability_conds),
         )
         .options(joinedload(PromoApplicability.promo))
         .all()
@@ -149,15 +204,17 @@ def get_products():
         include_images = request.args.get('include_images', 'false').lower() == 'true'
         include_promos = request.args.get('include_promos', 'false').lower() == 'true'
         
-        # Construir query base - cargar imágenes y subcategorías asociadas
+        # Construir query base (imágenes: solo joinedload si hace falta la galería completa)
         from models.category import Category, CategoryOption
-        query = Product.query.options(
-            joinedload(Product.images),
+        eager = (
             joinedload(Product.category),
             joinedload(Product.category_option),
             joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
             joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
         )
+        if include_images:
+            eager = (joinedload(Product.images),) + eager
+        query = Product.query.options(*eager)
         
         # Búsqueda por texto
         if search:
@@ -434,11 +491,17 @@ def get_products():
         
         # Pre-calcular min/max prices y promociones para todos los productos de una vez (optimización)
         product_ids = [p.id for p in products]
+        main_image_by_pid = (
+            _batch_main_product_image_urls(product_ids)
+            if product_ids and not include_images
+            else {}
+        )
         price_map = {}  # {product_id: {'min': float, 'max': float}}
         card_price_map = {}
         transfer_only_map = {}  # solo filas transfer/efectivo (para mostrar ambos precios en tienda)
+        category_id_by_product = {p.id: p.category_id for p in products}
         promo_map = (
-            _build_promo_map_for_product_ids(product_ids)
+            _build_promo_map_for_product_ids(product_ids, category_id_by_product)
             if include_promos and product_ids
             else {}
         )
@@ -571,6 +634,7 @@ def get_products():
                     precalculated_min_price=precalc_min_price,
                     precalculated_max_price=precalc_max_price,
                     include_inventory=False,
+                    precalculated_main_image=main_image_by_pid.get(product.id),
                 )
                 
                 # Agregar promociones pre-calculadas
@@ -988,7 +1052,11 @@ def get_product(product_id):
                     )
 
         promo_map = (
-            _build_promo_map_for_product_ids([product.id]) if include_promos else {}
+            _build_promo_map_for_product_ids(
+                [product.id], {product.id: product.category_id}
+            )
+            if include_promos
+            else {}
         )
 
         product_dict = product.to_dict(
