@@ -470,6 +470,10 @@ def complete_crm_product(product_id):
                     if data.get('display_reference_price') not in (None, '')
                     else None
                 ),
+                viacargo_height_cm=data.get('viacargo_height_cm'),
+                viacargo_width_cm=data.get('viacargo_width_cm'),
+                viacargo_depth_cm=data.get('viacargo_depth_cm'),
+                viacargo_weight_kg=data.get('viacargo_weight_kg'),
             )
             db.session.add(product)
         

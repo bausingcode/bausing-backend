@@ -1469,6 +1469,7 @@ def create_complete_product():
             'mattress_firmness', 'mattress_height_cm', 'mattress_fabric_type',
             'has_double_pillow', 'has_moisture_breathers', 'has_side_handles',
             'size_label',
+            'viacargo_height_cm', 'viacargo_width_cm', 'viacargo_depth_cm', 'viacargo_weight_kg',
         )
         for _f in _optional_product_fields:
             if _f in data:

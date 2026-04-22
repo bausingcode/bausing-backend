@@ -226,6 +226,11 @@ class Product(db.Model):
     show_transfer_price_highlight = db.Column(db.Boolean, default=False, nullable=False)
     # Solo vitrina: precio "tachado" de referencia (no entra en checkout ni cálculos). Si hay promo con descuento, prevalece el tachado de la promo.
     display_reference_price = db.Column(db.Numeric(12, 2), nullable=True)
+    # Viacargo: alto / ancho / profundidad (cm) y peso (kg) — carga en admin
+    viacargo_height_cm = db.Column(db.Numeric(10, 2), nullable=True)
+    viacargo_width_cm = db.Column(db.Numeric(10, 2), nullable=True)
+    viacargo_depth_cm = db.Column(db.Numeric(10, 2), nullable=True)
+    viacargo_weight_kg = db.Column(db.Numeric(10, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -387,6 +392,10 @@ class Product(db.Model):
             'is_active': self.is_active,
             'show_transfer_price_highlight': bool(self.show_transfer_price_highlight),
             'display_reference_price': float(self.display_reference_price) if self.display_reference_price is not None else None,
+            'viacargo_height_cm': float(self.viacargo_height_cm) if self.viacargo_height_cm is not None else None,
+            'viacargo_width_cm': float(self.viacargo_width_cm) if self.viacargo_width_cm is not None else None,
+            'viacargo_depth_cm': float(self.viacargo_depth_cm) if self.viacargo_depth_cm is not None else None,
+            'viacargo_weight_kg': float(self.viacargo_weight_kg) if self.viacargo_weight_kg is not None else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_inventory:

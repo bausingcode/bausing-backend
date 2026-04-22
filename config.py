@@ -44,6 +44,12 @@ class Config:
     # Configuración de Backend URL (para webhooks)
     BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:5000')
     
+    # Busplus / Vía Cargo — cotizar envío (catálogo país). Opcional: BUSPLUS_COTIZAR_URL
+    # (default https://ws.busplus.com.ar/alerce/cotizar), BUSPLUS_ID_CLIENTE_REMITENTE,
+    # BUSPLUS_ID_CENTRO_REMITENTE (en prod suelen ser distintos de 99999999/99), BUSPLUS_CODIGO_POSTAL_REMITENTE (origen; default 5000),
+    # destino = CP de la dirección del cliente en /public/viacargo-cotizar.
+    # Si Busplus rechaza un CP (p. ej. 404 "Codigo Postal No Valido"), la ruta responde 400 con el mensaje; 502 = red/5xx Busplus o parseo inesperado.
+
     # Configuración del pool de conexiones para Supabase
     # Transaction mode (puerto 6543) permite más conexiones que Session mode
     SQLALCHEMY_ENGINE_OPTIONS = {
