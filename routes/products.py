@@ -120,6 +120,7 @@ def get_products():
     - include_variants: incluir variantes (true/false)
     - include_images: incluir todas las imágenes (true/false)
     - include_promos: incluir promociones aplicables (true/false)
+    - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
     """
     try:
         # Pre-cargar el catálogo "Cordoba capital" para optimizar (si no hay locality_id)
@@ -212,6 +213,10 @@ def get_products():
         else:
             # Por defecto, solo productos activos para ecommerce
             query = query.filter_by(is_active=True)
+
+        # Solo productos con vínculo CRM (vitrina / catálogo público)
+        if request.args.get('require_crm_product_id', '').lower() in ('1', 'true', 'yes'):
+            query = query.filter(Product.crm_product_id.isnot(None))
         
         # Excluir filas con stock explícito false en crm (subquery, sin materializar todos los ids)
         try:

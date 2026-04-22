@@ -344,6 +344,13 @@ def complete_crm_product(product_id):
                 'success': False,
                 'error': 'Producto CRM no encontrado'
             }), 404
+
+        # Bloquear la fila CRM en la transacción para evitar dos completados en paralelo
+        # (doble clic / reintentos) que intenten crear el mismo vínculo.
+        db.session.execute(
+            text('SELECT 1 FROM crm_products WHERE id = :crm_row_id FOR UPDATE'),
+            {'crm_row_id': str(product_id)},
+        )
         
         crm_product_id_int = crm_row.crm_product_id
         
