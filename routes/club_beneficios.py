@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from sqlalchemy import func
 import uuid
 
@@ -165,7 +165,8 @@ def get_admin_club_beneficios():
         )
         return jsonify({'success': True, 'data': _items_to_payload(items)}), 200
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        current_app.logger.error("Error al obtener club beneficios: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 
 @club_beneficios_bp.route('/admin/club-beneficios', methods=['PUT', 'POST'])
@@ -187,7 +188,8 @@ def save_admin_club_beneficios():
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        current_app.logger.error("Error al guardar club beneficios: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 
 @club_beneficios_bp.route('/admin/club-beneficios/publish', methods=['POST'])
@@ -241,4 +243,5 @@ def get_public_club_beneficios_quick():
         resp.headers['Cache-Control'] = 'public, max-age=20'
         return resp, 200
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        current_app.logger.error("Error en club beneficios quick: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500

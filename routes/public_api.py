@@ -116,7 +116,7 @@ def mi_endpoint():
         return server_error(f"Error del servidor: {str(e)}")
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from functools import wraps
 from config import Config
 from database import db
@@ -276,8 +276,8 @@ def health_check():
         db_status = 'connected'
     except Exception as e:
         db_status = 'disconnected'
-        # Si hay un error crítico, retornar error 500
-        return server_error(f"Error al conectar con la base de datos: {str(e)}")
+        current_app.logger.error("Error al conectar con la base de datos: %s", str(e), exc_info=True)
+        return server_error("Error al conectar con la base de datos")
     
     return success_response(
         data={
@@ -357,10 +357,12 @@ def sync_data():
             )
         except Exception as e:
             db.session.rollback()
-            return processing_error(f"No se pudo guardar los datos: {str(e)}")
-            
+            current_app.logger.error("Error al guardar datos de sincronización: %s", str(e), exc_info=True)
+            return processing_error("No se pudo guardar los datos")
+
     except Exception as e:
-        return server_error(f"Error del servidor: {str(e)}")
+        current_app.logger.error("Error del servidor en sincronización: %s", str(e), exc_info=True)
+        return server_error()
 
 
 @public_api_bp.route('/public/sincronizar', methods=['POST'])
@@ -570,7 +572,8 @@ def sync_data_new():
                 
             except Exception as e:
                 db.session.rollback()
-                return processing_error(f"Error al procesar sincronización de stock: {str(e)}")
+                current_app.logger.error("Error al procesar sincronización de stock: %s", str(e), exc_info=True)
+                return processing_error("Error al procesar sincronización de stock")
         else:
             return validation_error(f"Tipo '{tipo}' no soportado. Tipos válidos: productos, zonas, provincias, tipos_documento, tipos_venta, ventas, medios_pago, stock")
         
@@ -754,15 +757,12 @@ def sync_data_new():
         except Exception as e:
             db.session.rollback()
             import traceback
-            print(f"[DEBUG] Excepcion en /public/sincronizar: {str(e)}")
-            print(traceback.format_exc())
-            return processing_error(f"Error al sincronizar datos: {str(e)}")
-            
+            current_app.logger.error("Error en /public/sincronizar: %s", str(e), exc_info=True)
+            return processing_error("Error al sincronizar datos")
+
     except Exception as e:
-        import traceback
-        print(f"[DEBUG] Excepcion (server) en /public/sincronizar: {str(e)}")
-        print(traceback.format_exc())
-        return server_error(f"Error del servidor: {str(e)}")
+        current_app.logger.error("Error del servidor en /public/sincronizar: %s", str(e), exc_info=True)
+        return server_error()
 
 
 def obtener_estados_anteriores_ventas(datos_ventas):
@@ -3092,16 +3092,12 @@ def crear_venta():
             db.session.rollback()
             import traceback
             error_traceback = traceback.format_exc()
-            print(f"ERROR al crear la venta: {str(e)}")
-            print(f"Traceback completo:\n{error_traceback}")
-            return processing_error(f"Error al crear la venta: {str(e)}")
-            
+            current_app.logger.error("Error al crear la venta: %s", str(e), exc_info=True)
+            return processing_error("Error al crear la venta")
+
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"ERROR del servidor: {str(e)}")
-        print(f"Traceback completo:\n{error_traceback}")
-        return server_error(f"Error del servidor: {str(e)}")
+        current_app.logger.error("Error del servidor al crear venta: %s", str(e), exc_info=True)
+        return server_error()
 
 
 @public_api_bp.route('/public/wallet/expiring-balance-reminders', methods=['POST'])
@@ -3280,9 +3276,8 @@ def send_wallet_expiring_balance_reminders():
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        print(f"Error en send_wallet_expiring_balance_reminders: {str(e)}")
-        print(f"Traceback completo:\n{error_traceback}")
-        return server_error(f"Error al procesar los recordatorios: {str(e)}")
+        current_app.logger.error("Error en send_wallet_expiring_balance_reminders: %s", str(e), exc_info=True)
+        return server_error()
 
 
 @public_api_bp.route('/public/sale-retry/process', methods=['POST'])
@@ -3604,6 +3599,5 @@ def process_sale_retries():
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        print(f"Error en process_sale_retries: {str(e)}")
-        print(f"Traceback completo:\n{error_traceback}")
-        return server_error(f"Error al procesar los reintentos: {str(e)}")
+        current_app.logger.error("Error en process_sale_retries: %s", str(e), exc_info=True)
+        return server_error()
