@@ -18,7 +18,7 @@ class Category(db.Model):
 
     # Relaciones
     parent = db.relationship('Category', remote_side=[id], backref='children')
-    products = db.relationship('Product', backref='category', lazy=True)
+    products = db.relationship('Product', back_populates='category', lazy=True)
     options = db.relationship('CategoryOption', backref='category', lazy=True, cascade='all, delete-orphan', order_by='CategoryOption.position')
 
     def to_dict(self, include_options=False):

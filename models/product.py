@@ -235,6 +235,7 @@ class Product(db.Model):
 
     # Relaciones
     variants = db.relationship('ProductVariant', backref='product', lazy=True, cascade='all, delete-orphan')
+    category = db.relationship('Category', back_populates='products', lazy=True)
     category_option = db.relationship('CategoryOption', backref='products', lazy=True)
     # Relación con subcategorías a través de la tabla de relación
     subcategory_associations = db.relationship(

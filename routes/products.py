@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 import unicodedata
 from flask import Blueprint, request, jsonify
 from database import db
@@ -20,8 +21,8 @@ from models.image import ProductImage
 from models.category import Category
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, and_, func, text, bindparam, literal
-from sqlalchemy.orm import joinedload
+from sqlalchemy import or_, and_, func, not_, text, bindparam, literal
+from sqlalchemy.orm import joinedload, selectinload
 from routes.admin import admin_required, verify_token
 
 products_bp = Blueprint('products', __name__)
@@ -276,6 +277,56 @@ def _build_promo_map_for_product_ids(product_ids, category_id_by_product=None):
     return promo_map
 
 
+def _filling_type_slugs_or_condition(slugs):
+    """
+    OR entre slugs de Tecnología del catálogo (resortes-biconicos, espuma, etc.).
+    Usa filling_type y CategoryOption.value de la opción principal del producto.
+    """
+    if not slugs:
+        return None
+    from models.category import CategoryOption
+
+    b = func.lower(
+        func.concat(
+            func.coalesce(Product.filling_type, literal("")),
+            literal(" "),
+            func.coalesce(CategoryOption.value, literal("")),
+        )
+    )
+    ors = []
+    for raw in slugs:
+        s = (raw or "").strip().lower().replace("_", "-")
+        if s == "resortes-biconicos":
+            ors.append(or_(b.like("%bicon%"), b.like("%bicón%")))
+        elif s == "resortes-pocket":
+            ors.append(b.like("%pocket%"))
+        elif s in ("espuma-de-alta-densidad", "espuma-alta-densidad"):
+            ors.append(
+                and_(
+                    b.like("%espuma%"),
+                    b.like("%alta%"),
+                    or_(b.like("%dens%"), b.like("%densi%")),
+                )
+            )
+        elif s == "espuma":
+            ors.append(
+                and_(
+                    b.like("%espuma%"),
+                    not_(
+                        and_(
+                            b.like("%alta%"),
+                            or_(b.like("%dens%"), b.like("%densi%")),
+                        )
+                    ),
+                )
+            )
+    if not ors:
+        return None
+    if len(ors) == 1:
+        return ors[0]
+    return or_(*ors)
+
+
 @products_bp.route('', methods=['GET'])
 def get_products():
     """
@@ -297,13 +348,25 @@ def get_products():
     - include_images: incluir todas las imágenes (true/false)
     - include_promos: incluir promociones aplicables (true/false)
     - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
+    - filling_type_slugs: slugs de Tecnología separados por coma (resortes-biconicos,espuma,espuma-de-alta-densidad,resortes-pocket); filtra por filling_type y opción de categoría principal.
     """
+    _catalog_t0 = time.perf_counter()
+    _catalog_qs = (request.query_string or b'').decode('utf-8', errors='replace')
+    logger.info("[catalog] GET /products start qs=%s", _catalog_qs)
     try:
         # Pre-cargar el catálogo "Cordoba capital" para optimizar (si no hay locality_id)
         from models.product import get_cordoba_capital_catalog_id
+        from models.catalog import LocalityCatalog
         locality_id = request.args.get('locality_id')
+        cached_locality_catalog = None
+        if locality_id:
+            try:
+                import uuid as _uuid
+                _lu = _uuid.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                cached_locality_catalog = LocalityCatalog.query.filter_by(locality_id=_lu).first()
+            except Exception:
+                pass
         if not locality_id:
-            # Pre-cargar el cache del catálogo por defecto
             get_cordoba_capital_catalog_id()
         
         # Parámetros de búsqueda
@@ -326,12 +389,14 @@ def get_products():
         include_promos = request.args.get('include_promos', 'false').lower() == 'true'
         
         # Construir query base (imágenes: solo joinedload si hace falta la galería completa)
+        # selectinload en subcategorías: evita multiplicar filas en el SELECT principal; COUNT/ OFFSET
+        # son sobre productos reales (joinedload+LIMIT antes podía "gastar" el límite en filas duplicadas).
         from models.category import Category, CategoryOption
         eager = (
             joinedload(Product.category),
             joinedload(Product.category_option),
-            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
-            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
+            selectinload(Product.subcategory_associations).selectinload(ProductSubcategory.subcategory),
+            selectinload(Product.subcategory_associations).selectinload(ProductSubcategory.category_option),
         )
         if include_images:
             eager = (joinedload(Product.images),) + eager
@@ -392,6 +457,18 @@ def get_products():
         # Solo productos con vínculo CRM (vitrina / catálogo público)
         if request.args.get('require_crm_product_id', '').lower() in ('1', 'true', 'yes'):
             query = query.filter(Product.crm_product_id.isnot(None))
+
+        # Tecnología (colchones): slugs canónicos separados por coma, mismo criterio que el catálogo en frontend
+        filling_raw = request.args.get('filling_type_slugs', '').strip()
+        if filling_raw:
+            slug_list = [x.strip() for x in filling_raw.split(',') if x.strip()]
+            if slug_list:
+                fcond = _filling_type_slugs_or_condition(slug_list)
+                if fcond is not None:
+                    query = query.outerjoin(
+                        CategoryOption, Product.category_option_id == CategoryOption.id
+                    )
+                    query = query.filter(fcond)
         
         # Excluir filas con stock explícito false en crm (subquery, sin materializar todos los ids)
         try:
@@ -424,13 +501,13 @@ def get_products():
                 # Determinar catálogo para filtrar precios
                 try:
                     import uuid as uuid_lib
-                    from models.catalog import LocalityCatalog
 
                     if locality_id:
                         locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                        locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
-                        if locality_catalog:
-                            query = query.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                        if cached_locality_catalog:
+                            query = query.filter(
+                                ProductPrice.catalog_id == cached_locality_catalog.catalog_id
+                            )
                         else:
                             query = query.filter(ProductPrice.locality_id == locality_uuid)
                     else:
@@ -471,9 +548,7 @@ def get_products():
                     import uuid as uuid_lib
                     locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
                     
-                    # Buscar el catálogo de esta localidad
-                    from models.catalog import LocalityCatalog
-                    locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                    locality_catalog = cached_locality_catalog
                     
                     subquery = db.session.query(
                         ProductVariantOption.product_variant_id,
@@ -526,9 +601,7 @@ def get_products():
                     import uuid as uuid_lib
                     locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
                     
-                    # Buscar el catálogo de esta localidad
-                    from models.catalog import LocalityCatalog
-                    locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+                    locality_catalog = cached_locality_catalog
                     
                     subquery = db.session.query(
                         ProductVariantOption.product_variant_id,
@@ -589,22 +662,14 @@ def get_products():
             }), 500
         
         # Pre-calcular precios mínimos y máximos para todos los productos de una vez (optimización)
-        # Esto evita llamar get_min_price/get_max_price para cada producto individualmente
         from models.product import get_cordoba_capital_catalog_id
-        from models.catalog import LocalityCatalog
         import uuid as uuid_lib
         
-        # Determinar el catalog_id a usar
+        # Determinar el catalog_id a usar (misma fila localidad→catálogo que arriba)
         target_catalog_id = None
-        if locality_id:
-            try:
-                locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
-                if locality_catalog:
-                    target_catalog_id = locality_catalog.catalog_id
-            except:
-                pass
-        else:
+        if locality_id and cached_locality_catalog:
+            target_catalog_id = cached_locality_catalog.catalog_id
+        elif not locality_id:
             target_catalog_id = get_cordoba_capital_catalog_id()
         
         # Pre-calcular min/max prices y promociones para todos los productos de una vez (optimización)
@@ -782,7 +847,16 @@ def get_products():
                 # Log error but continue with other products
                 import traceback
                 continue
-        
+
+        _elapsed_ms = (time.perf_counter() - _catalog_t0) * 1000.0
+        logger.info(
+            "[catalog] GET /products ok page=%d/%d items=%d total=%d %.0fms",
+            pagination.page,
+            pagination.pages,
+            len(products_data),
+            pagination.total,
+            _elapsed_ms,
+        )
         return jsonify({
             'success': True,
             'data': {
@@ -794,7 +868,13 @@ def get_products():
             }
         }), 200
     except Exception as e:
-        import traceback
+        _elapsed_ms = (time.perf_counter() - _catalog_t0) * 1000.0
+        logger.exception(
+            "[catalog] GET /products error after %.0fms qs=%s: %s",
+            _elapsed_ms,
+            _catalog_qs,
+            e,
+        )
         return jsonify({
             'success': False,
             'error': str(e)
