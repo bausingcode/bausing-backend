@@ -475,10 +475,11 @@ def get_public_homepage_distribution_quick():
                 # Agregar a productos usados
                 used_product_ids.add(str(product.id))
                 
-                # Solo datos básicos, sin precios ni promociones para carga rápida
+                # Sin precios ni promociones (esos vienen en /prices), pero con imágenes
+                # para que el home muestre fotos (include_images=False omitía main_image/images).
                 product_dict = product.to_dict(
                     include_variants=False,
-                    include_images=False,
+                    include_images=True,
                     include_promos=False,
                     locality_id=None,
                     precalculated_min_price=0.0,  # Placeholder
