@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
@@ -120,7 +120,8 @@ def preview_coupon_checkout():
             200,
         )
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error al validar cupón: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @coupons_bp.route("/admin/coupons", methods=["GET"])
@@ -143,7 +144,8 @@ def admin_list_coupons():
             {"success": True, "data": {"coupons": [c.to_dict() for c in rows]}}
         ), 200
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error al listar cupones: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @coupons_bp.route("/admin/coupons", methods=["POST"])
@@ -245,7 +247,8 @@ def admin_create_coupon():
         return jsonify({"success": False, "error": f"Fecha inválida: {e}"}), 400
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error al crear cupón: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 def _validate_coupon_fields(data, *, require_code=False):
@@ -388,7 +391,8 @@ def admin_update_coupon(coupon_id):
         ), 400
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error al actualizar cupón: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @coupons_bp.route("/admin/coupons/<uuid:coupon_id>", methods=["DELETE"])
@@ -403,4 +407,5 @@ def admin_delete_coupon(coupon_id):
         return jsonify({"success": True, "message": "Eliminado"}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error al eliminar cupón: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500

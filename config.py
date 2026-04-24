@@ -12,8 +12,13 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-    API_KEY = os.getenv('API_KEY', 'dev-api-key-change-in-production')
+    SECRET_KEY = os.getenv('SECRET_KEY')
+    API_KEY = os.getenv('API_KEY')
+
+    if not SECRET_KEY:
+        raise ValueError("SECRET_KEY no está configurada en las variables de entorno")
+    if not API_KEY:
+        raise ValueError("API_KEY no está configurada en las variables de entorno")
     VENDEDOR_ID = int(os.getenv('VENDEDOR_ID', '1'))
     
     # Configuración de Resend para emails

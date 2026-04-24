@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.homepage_distribution import HomepageProductDistribution
 from models.product import Product
@@ -220,10 +220,8 @@ def get_homepage_distribution():
             },
         }), 200
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        current_app.logger.error("Error al obtener homepage distribution: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 @homepage_distribution_bp.route('/admin/homepage-distribution', methods=['POST'])
 @admin_required
@@ -338,16 +336,12 @@ def set_homepage_distribution():
             
     except IntegrityError as e:
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': 'Error de integridad: ' + str(e)
-        }), 400
+        current_app.logger.error("Error de integridad en homepage distribution: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error de integridad en los datos'}), 400
     except Exception as e:
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        current_app.logger.error("Error al guardar homepage distribution: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 
 @homepage_distribution_bp.route('/admin/homepage-distribution/publish', methods=['POST'])
@@ -388,10 +382,8 @@ def publish_homepage_distribution():
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': str(e),
-        }), 500
+        current_app.logger.error("Error al publicar homepage distribution: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 
 @homepage_distribution_bp.route('/admin/homepage-distribution/draft', methods=['DELETE'])
@@ -406,7 +398,8 @@ def discard_homepage_draft():
         return jsonify({'success': True, 'message': 'Borrador descartado'}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 500
+        current_app.logger.error("Error al descartar borrador: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 
 @homepage_distribution_bp.route('/homepage-distribution/quick', methods=['GET'])
@@ -509,11 +502,8 @@ def get_public_homepage_distribution_quick():
         resp.headers['Cache-Control'] = 'public, max-age=20'
         return resp, 200
     except Exception as e:
-        import traceback
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        current_app.logger.error("Error en homepage distribution quick: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 @homepage_distribution_bp.route('/homepage-distribution/prices', methods=['POST'])
 def get_products_prices():
@@ -720,11 +710,8 @@ def get_products_prices():
             'data': result
         }), 200
     except Exception as e:
-        import traceback
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        current_app.logger.error("Error en homepage distribution prices: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 @homepage_distribution_bp.route('/homepage-distribution', methods=['GET'])
 def get_public_homepage_distribution():
@@ -950,8 +937,5 @@ def get_public_homepage_distribution():
             'data': result
         }), 200
     except Exception as e:
-        import traceback
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        current_app.logger.error("Error en homepage distribution pública: %s", str(e), exc_info=True)
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500

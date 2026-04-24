@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.faq_item import FaqItem
 from routes.admin import admin_required
@@ -30,7 +30,8 @@ def public_list_faq_items():
             }
         ), 200
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @faq_items_bp.route("/admin/faq-items", methods=["GET"])
@@ -40,7 +41,8 @@ def admin_list_faq_items():
         rows = FaqItem.query.order_by(FaqItem.sort_order.asc(), FaqItem.created_at.asc()).all()
         return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @faq_items_bp.route("/admin/faq-items", methods=["POST"])
@@ -71,7 +73,8 @@ def admin_create_faq_item():
         return jsonify({"success": True, "data": item.to_dict()}), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @faq_items_bp.route("/admin/faq-items/<uuid:item_id>", methods=["PUT"])
@@ -104,7 +107,8 @@ def admin_update_faq_item(item_id):
         return jsonify({"success": True, "data": item.to_dict()}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @faq_items_bp.route("/admin/faq-items/<uuid:item_id>", methods=["DELETE"])
@@ -119,7 +123,8 @@ def admin_delete_faq_item(item_id):
         return jsonify({"success": True}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
 @faq_items_bp.route("/admin/faq-items/reorder", methods=["PUT"])
@@ -155,4 +160,5 @@ def admin_reorder_faq_items():
         return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "error": str(e)}), 500
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
