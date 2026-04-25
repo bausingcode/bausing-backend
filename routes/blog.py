@@ -151,6 +151,8 @@ def create_blog_post():
             slug=slug,
             excerpt=data.get('excerpt'),
             content=data.get('content'),
+            cta_label=data.get('cta_label'),
+            cta_url=data.get('cta_url'),
             cover_image_url=data.get('cover_image_url'),
             meta_title=data.get('meta_title'),
             meta_description=data.get('meta_description'),
@@ -242,6 +244,10 @@ def update_blog_post(post_id):
             post.excerpt = data.get('excerpt')
         if 'content' in data:
             post.content = data.get('content')
+        if 'cta_label' in data:
+            post.cta_label = data.get('cta_label')
+        if 'cta_url' in data:
+            post.cta_url = data.get('cta_url')
         if 'cover_image_url' in data:
             post.cover_image_url = data.get('cover_image_url')
         if 'meta_title' in data:

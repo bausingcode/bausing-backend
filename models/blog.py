@@ -12,6 +12,8 @@ class BlogPost(db.Model):
     slug = db.Column(db.String(255), nullable=False, unique=True)
     excerpt = db.Column(db.Text)
     content = db.Column(db.Text)
+    cta_label = db.Column(db.String(255))
+    cta_url = db.Column(db.Text)
     cover_image_url = db.Column(db.Text)
     meta_title = db.Column(db.String(255))
     meta_description = db.Column(db.Text)
@@ -34,6 +36,8 @@ class BlogPost(db.Model):
             'slug': self.slug,
             'excerpt': self.excerpt,
             'content': self.content,
+            'cta_label': self.cta_label,
+            'cta_url': self.cta_url,
             'cover_image_url': self.cover_image_url,
             'meta_title': self.meta_title,
             'meta_description': self.meta_description,

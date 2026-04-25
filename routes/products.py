@@ -349,6 +349,7 @@ def get_products():
     - include_promos: incluir promociones aplicables (true/false)
     - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
     - filling_type_slugs: slugs de Tecnología separados por coma (resortes-biconicos,espuma,espuma-de-alta-densidad,resortes-pocket); filtra por filling_type y opción de categoría principal.
+    - subcategory_ids: UUIDs de filas de categoría (hijos) separados por coma; productos con asociación en product_subcategories (OR).
     """
     _catalog_t0 = time.perf_counter()
     _catalog_qs = (request.query_string or b'').decode('utf-8', errors='replace')
@@ -446,6 +447,28 @@ def get_products():
         if category_ids:
             cat_ids_list = [cat_id.strip() for cat_id in category_ids.split(',')]
             query = query.filter(Product.category_id.in_(cat_ids_list))
+
+        # Filtro por subcategoría(s) – tabla product_subcategories (mismo criterio que el catálogo)
+        subcategory_ids_param = request.args.get('subcategory_ids', '').strip()
+        if subcategory_ids_param:
+            sub_parts = [x.strip() for x in subcategory_ids_param.split(',') if x.strip()]
+            if sub_parts:
+                try:
+                    import uuid as _uuid
+                    sub_uuids = [
+                        _uuid.UUID(x) if isinstance(x, str) else x
+                        for x in sub_parts
+                    ]
+                    query = (
+                        query.join(
+                            ProductSubcategory,
+                            Product.id == ProductSubcategory.product_id,
+                        )
+                        .filter(ProductSubcategory.subcategory_id.in_(sub_uuids))
+                        .distinct()
+                    )
+                except Exception as e:
+                    logger.warning("subcategory_ids filter skipped: %s", e)
         
         # Filtro por estado activo
         if is_active is not None:
