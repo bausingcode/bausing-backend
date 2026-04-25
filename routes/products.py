@@ -22,7 +22,7 @@ from models.category import Category
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_, func, not_, text, bindparam, literal
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import joinedload, selectinload, aliased
 from routes.admin import admin_required, verify_token
 
 products_bp = Blueprint('products', __name__)
@@ -564,9 +564,18 @@ def get_products():
                         subquery = subquery.filter(ProductPrice.locality_id == locality_uuid)
                     subquery = subquery.group_by(ProductVariantOption.product_variant_id).subquery()
                     
-                    query = query.join(ProductVariant).join(
-                        subquery, ProductVariant.id == subquery.c.product_variant_id
-                    ).order_by(subquery.c.min_price.asc()).distinct()
+                    # Incluir min_price en el SELECT: PostgreSQL exige que ORDER BY aparezca en el
+                    # select list cuando se usa SELECT DISTINCT.
+                    # Alias: si ya hay JOIN a product_variants (stock, rango de precio), un segundo
+                    # .join(ProductVariant) es ambiguo; el alias fija el lado del FROM.
+                    pv_for_price_sort = aliased(ProductVariant)
+                    query = query.join(
+                        pv_for_price_sort, Product.id == pv_for_price_sort.product_id
+                    ).join(
+                        subquery, pv_for_price_sort.id == subquery.c.product_variant_id
+                    ).add_columns(subquery.c.min_price).order_by(
+                        subquery.c.min_price.asc()
+                    ).distinct()
                 except (ValueError, TypeError) as e:
                     # Continuar sin ordenar por precio si hay error
                     query = query.order_by(Product.created_at.desc())
@@ -589,9 +598,9 @@ def get_products():
                         func.min(ProductPrice.price).label('min_price')
                     ).join(ProductPrice).filter(product_price_transfer_filter()).group_by(ProductVariant.product_id).subquery()
                 
-                query = query.join(subquery, Product.id == subquery.c.product_id).order_by(
-                    subquery.c.min_price.asc()
-                )
+                query = query.join(subquery, Product.id == subquery.c.product_id).add_columns(
+                    subquery.c.min_price
+                ).order_by(subquery.c.min_price.asc())
         elif sort == 'price_desc':
             if locality_id:
                 # Ordenar por precio máximo en la localidad específica
@@ -617,9 +626,14 @@ def get_products():
                         subquery = subquery.filter(ProductPrice.locality_id == locality_uuid)
                     subquery = subquery.group_by(ProductVariantOption.product_variant_id).subquery()
                     
-                    query = query.join(ProductVariant).join(
-                        subquery, ProductVariant.id == subquery.c.product_variant_id
-                    ).order_by(subquery.c.max_price.desc()).distinct()
+                    pv_for_price_sort = aliased(ProductVariant)
+                    query = query.join(
+                        pv_for_price_sort, Product.id == pv_for_price_sort.product_id
+                    ).join(
+                        subquery, pv_for_price_sort.id == subquery.c.product_variant_id
+                    ).add_columns(subquery.c.max_price).order_by(
+                        subquery.c.max_price.desc()
+                    ).distinct()
                 except (ValueError, TypeError) as e:
                     # Continuar sin ordenar por precio si hay error
                     query = query.order_by(Product.created_at.desc())
@@ -642,9 +656,9 @@ def get_products():
                         func.max(ProductPrice.price).label('max_price')
                     ).join(ProductPrice).filter(product_price_transfer_filter()).group_by(ProductVariant.product_id).subquery()
                 
-                query = query.join(subquery, Product.id == subquery.c.product_id).order_by(
-                    subquery.c.max_price.desc()
-                )
+                query = query.join(subquery, Product.id == subquery.c.product_id).add_columns(
+                    subquery.c.max_price
+                ).order_by(subquery.c.max_price.desc())
         elif sort == 'created_at':
             query = query.order_by(Product.created_at.asc())
         else:  # created_at_desc (default)
@@ -653,7 +667,12 @@ def get_products():
         # Paginación
         try:
             pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-            products = pagination.items
+            _raw_items = pagination.items
+            # add_columns( precio agregado ) devuelve filas (Product, col); sino, modelos Product.
+            products = [
+                row[0] if not isinstance(row, Product) else row
+                for row in _raw_items
+            ]
         except Exception as e:
             import traceback
             return jsonify({
