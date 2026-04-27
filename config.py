@@ -55,17 +55,25 @@ class Config:
     # destino = CP de la dirección del cliente en /public/viacargo-cotizar.
     # Si Busplus rechaza un CP (p. ej. 404 "Codigo Postal No Valido"), la ruta responde 400 con el mensaje; 502 = red/5xx Busplus o parseo inesperado.
 
+    # Pool por proceso. Con Gunicorn/Hypercorn -w N: N procesos, cada uno con su pool.
+    # Límite aprox. de conexiones hacia Postgres ≈ N * (pool_size + max_overflow).
+    # Ajustar DB_POOL_SIZE / DB_MAX_OVERFLOW vía .env al subir workers.
+    _db_pool = int(os.getenv("DB_POOL_SIZE", "5"))
+    _db_overflow = int(os.getenv("DB_MAX_OVERFLOW", "3"))
+    _db_pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "20"))
+    _db_pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
+
     # Configuración del pool de conexiones para Supabase
     # Transaction mode (puerto 6543) permite más conexiones que Session mode
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_size': 5,  # Número de conexiones en el pool (Transaction mode permite más)
-        'max_overflow': 3,  # Máximo de conexiones adicionales
-        'pool_timeout': 20,  # Tiempo de espera para obtener una conexión
-        'pool_recycle': 3600,  # Reciclar conexiones después de 1 hora
-        'pool_pre_ping': True,  # Verificar que las conexiones estén vivas antes de usarlas
-        'connect_args': {
-            'connect_timeout': 10,
-            'application_name': 'bausing_backend'
-        }
+        "pool_size": _db_pool,
+        "max_overflow": _db_overflow,
+        "pool_timeout": _db_pool_timeout,
+        "pool_recycle": _db_pool_recycle,
+        "pool_pre_ping": True,
+        "connect_args": {
+            "connect_timeout": 10,
+            "application_name": "bausing_backend",
+        },
     }
 

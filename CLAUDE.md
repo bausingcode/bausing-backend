@@ -16,9 +16,22 @@ python run.py
 python init_db.py
 python init_admin_roles.py
 
-# Production
-hypercorn run:asgi_app --bind 0.0.0.0:8080
+# Production (elegir una)
+
+# WSGI — recomendada para Flask: un proceso = un worker; paralelismo real entre requests.
+# Ajusta -w según vCPU (p. ej. 2–4) y fija DB_POOL_SIZE en .env (ver "Concurrencia").
+gunicorn 'app:app' -b 0.0.0.0:8080 -w 4 --timeout 120
+
+# ASGI (misma app vía WsgiToAsgi)
+hypercorn run:asgi_app --bind 0.0.0.0:8080 -w 4
 ```
+
+## Concurrencia (multiproceso vs threads en Python)
+
+- **Varios workers (procesos)** es lo que más suele bajar la latencia bajo carga: cada `GET /products` corre en un proceso distinto y el GIL no los frena entre sí.
+- **Threads dentro de una misma request** no se combina bien con `db.session` de Flask-SQLAlchemy (no thread-safe). Para paralelizar consultas en un solo handler haría falta sesiones distintas por hilo; no es el patrón por defecto del proyecto.
+- **Pool de DB:** cada worker tiene su propio engine + pool. Con `-w 4` y `pool_size=5`, `max_overflow=3` → hasta ~4×8=32 conexiones al Postgres/Supabase. Ajusta `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` o el nº de workers según el límite de tu instancia.
+- Variables opcionales: `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, `DB_POOL_RECYCLE`.
 
 No test framework or linting tools are configured.
 
@@ -42,7 +55,7 @@ Flask REST API for an e-commerce furniture platform. Blueprint-based modular rou
 - `routes/orders.py` — Complex order processing with MercadoPago payment integration (~125KB)
 - `routes/admin_stats.py` — Admin analytics/dashboard (~41KB)
 
-**Database connection:** Configured for Supabase transaction mode (port 6543) with pooling (size=5, max_overflow=3, recycle=3600s, pre-ping=True).
+**Database connection:** Supabase transaction mode (port 6543) with SQLAlchemy pooling; defaults `DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=3`, `DB_POOL_RECYCLE=3600`, pre-ping on.
 
 **External integrations:**
 - **Supabase** — Image storage (`product-images` and `hero-images` buckets); client in `supabase_client.py`

@@ -6,7 +6,7 @@ import os
 asgi_app = WsgiToAsgi(app)
 
 if __name__ == '__main__':
-    # Si se ejecuta directamente, usar el servidor de desarrollo de Flask
-    # Para producción, usar: hypercorn run:asgi_app --bind 0.0.0.0:8080
+    # Si se ejecuta directamente, usar el servidor de desarrollo de Flask (un solo proceso).
+    # Producción: Gunicorn (varios workers) o Hypercorn -w N — ver CLAUDE.md sección Concurrencia.
     app.run(debug=True, host='0.0.0.0', port=5050)
 
