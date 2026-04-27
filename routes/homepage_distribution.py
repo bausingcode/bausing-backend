@@ -692,6 +692,10 @@ def get_products_prices():
             result[pid_str] = {
                 'min_price': listing_min,
                 'max_price': listing_max,
+                # Explícito para cards/listados: min_price suele ser lista (tarjeta) si existe;
+                # sin esto el front solo recibe un monto y no puede mostrar transferencia vs lista.
+                'min_transfer_price': tmin if tmin > 0 else None,
+                'max_transfer_price': tmax if tmax > 0 else None,
                 'min_card_price': cmin if cmin > 0 else listing_min,
                 'max_card_price': cmax if cmax > 0 else listing_max,
                 'show_transfer_price_highlight': highlight_map.get(pid, False),
