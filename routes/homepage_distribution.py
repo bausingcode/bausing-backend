@@ -402,74 +402,119 @@ def discard_homepage_draft():
         return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
 
+def _public_homepage_distribution_query_base(include_product_images: bool):
+    """Query de filas publicadas; sin imágenes en producto = menos join (para /product-ids)."""
+    from sqlalchemy.orm import joinedload
+    opts = []
+    if include_product_images:
+        opts.append(joinedload(HomepageProductDistribution.product).joinedload(Product.images))
+    opts.extend(
+        [
+            joinedload(HomepageProductDistribution.product).joinedload(Product.category),
+            joinedload(HomepageProductDistribution.product).joinedload(Product.category_option),
+            joinedload(HomepageProductDistribution.product).joinedload(
+                Product.subcategory_associations
+            ),
+        ]
+    )
+    return (
+        HomepageProductDistribution.query.filter(
+            HomepageProductDistribution.product_id.isnot(None),
+            _published_rows_filter(),
+        )
+        .options(*opts)
+        .order_by(
+            HomepageProductDistribution.section,
+            HomepageProductDistribution.position,
+        )
+    )
+
+
+def _public_homepage_distribution_slots(distributions):
+    """
+    Misma lógica de reemplazo/CRM que /quick, sin to_dict.
+    Devuelve por sección listas de { 'position', 'id', 'product' } (product = modelo al resolver).
+    """
+    from models.product import crm_id_has_stock, get_crm_stock_map
+
+    result = {
+        "featured": [],
+        "discounts": [],
+        "mattresses": [],
+        "complete_purchase": [],
+    }
+    crm_ids = [d.product.crm_product_id for d in distributions if d.product and d.product.crm_product_id]
+    stock_map = get_crm_stock_map(crm_ids)
+    used_product_ids = set()
+    for dist in distributions:
+        if dist.section not in result or not dist.product:
+            continue
+        product = dist.product
+        has_stock = crm_id_has_stock(product.crm_product_id, stock_map)
+        if not product.is_active or not has_stock:
+            section_used_ids = [item["id"] for item in result[dist.section]]
+            all_used_ids = list(used_product_ids) + section_used_ids
+            replacement = get_available_replacement_product(
+                all_used_ids,
+                [p.product for p in distributions if p.section == dist.section and p.product],
+            )
+            if replacement:
+                product = replacement
+                if replacement.crm_product_id:
+                    stock_map.update(get_crm_stock_map([replacement.crm_product_id]))
+            else:
+                continue
+        used_product_ids.add(str(product.id))
+        result[dist.section].append(
+            {
+                "position": dist.position,
+                "id": str(product.id),
+                "product": product,
+            }
+        )
+    for section in result:
+        result[section].sort(key=lambda x: x["position"])
+    return result
+
+
+def _public_homepage_flat_product_ids_in_order(slots):
+    order = ("featured", "discounts", "mattresses", "complete_purchase")
+    out = []
+    for sec in order:
+        for item in slots.get(sec) or []:
+            out.append(item["id"])
+    return list(dict.fromkeys(out))
+
+
+@homepage_distribution_bp.route("/homepage-distribution/product-ids", methods=["GET"])
+def get_public_homepage_distribution_product_ids():
+    """
+    Solo UUIDs de productos (mismo criterio de reemplazo/CRM que /quick), sin to_dict ni imágenes.
+    El front lanza POST /prices en paralelo con GET /quick.
+    """
+    try:
+        distributions = _public_homepage_distribution_query_base(include_product_images=False).all()
+        slots = _public_homepage_distribution_slots(distributions)
+        product_ids = _public_homepage_flat_product_ids_in_order(slots)
+        resp = jsonify({"success": True, "data": {"product_ids": product_ids}})
+        resp.headers["Cache-Control"] = "public, max-age=20"
+        return resp, 200
+    except Exception as e:
+        current_app.logger.error("Error en homepage distribution product-ids: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
+
+
 @homepage_distribution_bp.route('/homepage-distribution/quick', methods=['GET'])
 def get_public_homepage_distribution_quick():
     """Obtener la distribución de productos rápidamente (sin precios ni promociones)"""
     try:
-        # Usar eager loading solo para imágenes y categorías básicas
-        from sqlalchemy.orm import joinedload
-        distributions = HomepageProductDistribution.query.filter(
-            HomepageProductDistribution.product_id.isnot(None),
-            _published_rows_filter(),
-        ).options(
-            joinedload(HomepageProductDistribution.product).joinedload(Product.images),
-            joinedload(HomepageProductDistribution.product).joinedload(Product.category),
-            joinedload(HomepageProductDistribution.product).joinedload(Product.category_option),
-            joinedload(HomepageProductDistribution.product).joinedload(Product.subcategory_associations)
-        ).order_by(
-            HomepageProductDistribution.section,
-            HomepageProductDistribution.position
-        ).all()
+        distributions = _public_homepage_distribution_query_base(include_product_images=True).all()
+        slots = _public_homepage_distribution_slots(distributions)
 
-        from models.product import crm_id_has_stock, get_crm_stock_map
-        crm_ids = [
-            d.product.crm_product_id for d in distributions
-            if d.product and d.product.crm_product_id
-        ]
-        stock_map = get_crm_stock_map(crm_ids)
-        
-        # Organizar por sección - solo datos básicos, sin precios ni promociones
-        result = {
-            'featured': [],
-            'discounts': [],
-            'mattresses': [],
-            'complete_purchase': []
-        }
-        
-        # Track de productos usados para evitar duplicados al reemplazar
-        used_product_ids = set()
-        
-        for dist in distributions:
-            if dist.section in result and dist.product:
-                product = dist.product
-                
-                has_stock = crm_id_has_stock(product.crm_product_id, stock_map)
-                
-                # Inactivo o sin stock: intentar reemplazo (solo activos en catálogo)
-                if not product.is_active or not has_stock:
-                    # Obtener productos ya usados en esta sección
-                    section_used_ids = [item['product']['id'] for item in result[dist.section] if 'product' in item and 'id' in item['product']]
-                    all_used_ids = list(used_product_ids) + section_used_ids
-                    
-                    replacement = get_available_replacement_product(
-                        all_used_ids,
-                        [p.product for p in distributions if p.section == dist.section and p.product],
-                    )
-                    
-                    if replacement:
-                        product = replacement
-                        if replacement.crm_product_id:
-                            stock_map.update(
-                                get_crm_stock_map([replacement.crm_product_id])
-                            )
-                    else:
-                        continue  # Omitir este producto si no hay reemplazo
-                
-                # Agregar a productos usados
-                used_product_ids.add(str(product.id))
-                
-                # Sin precios ni promociones (esos vienen en /prices), pero con imágenes
-                # para que el home muestre fotos (include_images=False omitía main_image/images).
+        out = {k: [] for k in ("featured", "discounts", "mattresses", "complete_purchase")}
+        for section in out:
+            for item in slots[section]:
+                product = item["product"]
                 product_dict = product.to_dict(
                     include_variants=False,
                     include_images=True,
@@ -479,25 +524,15 @@ def get_public_homepage_distribution_quick():
                     precalculated_max_price=0.0,  # Placeholder
                     include_inventory=False,
                 )
-                # Remover precios para que el frontend sepa que debe cargarlos después
                 product_dict['min_price'] = None
                 product_dict['max_price'] = None
                 product_dict['price_range'] = None
                 product_dict['promos'] = []
-                
-                result[dist.section].append({
-                    'position': dist.position,
-                    'product': product_dict
-                })
-        
-        # Ordenar por posición y extraer solo los productos
-        for section in result:
-            result[section].sort(key=lambda x: x['position'])
-            result[section] = [item['product'] for item in result[section]]
+                out[section].append(product_dict)
         
         resp = jsonify({
             'success': True,
-            'data': result
+            'data': out
         })
         resp.headers['Cache-Control'] = 'public, max-age=20'
         return resp, 200
