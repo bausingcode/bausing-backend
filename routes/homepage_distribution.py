@@ -486,6 +486,261 @@ def _public_homepage_flat_product_ids_in_order(slots):
     return list(dict.fromkeys(out))
 
 
+def _homepage_quick_out_from_slots(slots):
+    out = {k: [] for k in ("featured", "discounts", "mattresses", "complete_purchase")}
+    for section in out:
+        for item in slots[section]:
+            product = item["product"]
+            product_dict = product.to_dict(
+                include_variants=False,
+                include_images=True,
+                include_promos=False,
+                locality_id=None,
+                precalculated_min_price=0.0,  # Placeholder
+                precalculated_max_price=0.0,  # Placeholder
+                include_inventory=False,
+            )
+            product_dict["min_price"] = None
+            product_dict["max_price"] = None
+            product_dict["price_range"] = None
+            product_dict["promos"] = []
+            out[section].append(product_dict)
+    return out
+
+
+def _build_homepage_prices_map(product_ids, locality_id):
+    """
+    Mismo payload que POST /homepage-distribution/prices (data = dict por id).
+    `product_ids`: lista de str UUID; `locality_id` opcional (str o None).
+    """
+    if not product_ids:
+        return {}
+
+    from models.product import get_cordoba_capital_catalog_id
+    from models.catalog import LocalityCatalog
+    from models.product import (
+        ProductVariant,
+        ProductVariantOption,
+        ProductPrice,
+        Product,
+        product_price_transfer_filter,
+        PRICE_KIND_CARD,
+    )
+    from models.promo import Promo, PromoApplicability
+    from sqlalchemy import func
+    from datetime import datetime
+    import uuid as uuid_lib
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import or_, and_
+
+    product_uuids = []
+    for pid in product_ids:
+        try:
+            product_uuids.append(uuid_lib.UUID(pid) if isinstance(pid, str) else pid)
+        except Exception:
+            continue
+
+    if not product_uuids:
+        return {}
+
+    product_uuids = [
+        row.id
+        for row in db.session.query(Product.id)
+        .filter(
+            Product.id.in_(product_uuids),
+            Product.is_active == True,  # noqa: E712
+        )
+        .all()
+    ]
+    if not product_uuids:
+        return {}
+
+    target_catalog_id = None
+    if locality_id:
+        try:
+            locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+            locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
+            if locality_catalog:
+                target_catalog_id = locality_catalog.catalog_id
+        except Exception:
+            pass
+    else:
+        target_catalog_id = get_cordoba_capital_catalog_id()
+
+    transfer_map = {}
+    card_price_map = {}
+    if target_catalog_id:
+        price_results = (
+            db.session.query(
+                ProductVariant.product_id,
+                func.min(ProductPrice.price).label("min_price"),
+                func.max(ProductPrice.price).label("max_price"),
+            )
+            .join(
+                ProductVariantOption,
+                ProductVariantOption.product_variant_id == ProductVariant.id,
+            )
+            .join(
+                ProductPrice,
+                ProductPrice.product_variant_id == ProductVariantOption.id,
+            )
+            .filter(
+                ProductVariant.product_id.in_(product_uuids),
+                ProductPrice.catalog_id == target_catalog_id,
+                product_price_transfer_filter(),
+            )
+            .group_by(ProductVariant.product_id)
+            .all()
+        )
+
+        for result in price_results:
+            transfer_map[result.product_id] = {
+                "min": float(result.min_price) if result.min_price else 0.0,
+                "max": float(result.max_price) if result.max_price else 0.0,
+            }
+
+        card_results = (
+            db.session.query(
+                ProductVariant.product_id,
+                func.min(ProductPrice.price).label("min_price"),
+                func.max(ProductPrice.price).label("max_price"),
+            )
+            .join(
+                ProductVariantOption,
+                ProductVariantOption.product_variant_id == ProductVariant.id,
+            )
+            .join(
+                ProductPrice,
+                ProductPrice.product_variant_id == ProductVariantOption.id,
+            )
+            .filter(
+                ProductVariant.product_id.in_(product_uuids),
+                ProductPrice.catalog_id == target_catalog_id,
+                ProductPrice.price_kind == PRICE_KIND_CARD,
+            )
+            .group_by(ProductVariant.product_id)
+            .all()
+        )
+        for result in card_results:
+            card_price_map[result.product_id] = {
+                "min": float(result.min_price) if result.min_price else 0.0,
+                "max": float(result.max_price) if result.max_price else 0.0,
+            }
+
+    category_map = {}
+    highlight_map = {}
+    for row in (
+        db.session.query(
+            Product.id,
+            Product.category_id,
+            Product.show_transfer_price_highlight,
+        )
+        .filter(Product.id.in_(product_uuids))
+        .all()
+    ):
+        category_map[row.id] = row.category_id
+        highlight_map[row.id] = bool(row.show_transfer_price_highlight)
+
+    promo_map = {}
+    now = datetime.utcnow()
+    category_ids_in_use = list({cid for cid in category_map.values() if cid is not None})
+    promo_scope_filters = [
+        PromoApplicability.applies_to == "all",
+        and_(
+            PromoApplicability.applies_to == "product",
+            PromoApplicability.product_id.in_(product_uuids),
+        ),
+    ]
+    if category_ids_in_use:
+        promo_scope_filters.append(
+            and_(
+                PromoApplicability.applies_to == "category",
+                PromoApplicability.category_id.in_(category_ids_in_use),
+            )
+        )
+    all_promo_applicabilities = (
+        PromoApplicability.query.join(
+            Promo,
+            PromoApplicability.promo_id == Promo.id,
+        )
+        .filter(
+            Promo.is_active == True,  # noqa: E712
+            Promo.start_at <= now,
+            Promo.end_at >= now,
+            or_(*promo_scope_filters),
+        )
+        .options(joinedload(PromoApplicability.promo))
+        .all()
+    )
+
+    promos_for_all = []
+    for app in all_promo_applicabilities:
+        promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
+        if not promo_dict:
+            continue
+
+        if app.applies_to == "all":
+            promos_for_all.append(promo_dict)
+        elif app.applies_to == "product" and app.product_id:
+            if app.product_id in product_uuids:
+                promo_map.setdefault(app.product_id, [])
+                if not any(p.get("id") == promo_dict.get("id") for p in promo_map[app.product_id]):
+                    promo_map[app.product_id].append(promo_dict)
+        elif app.applies_to == "category" and app.category_id:
+            for pid, cat_id in category_map.items():
+                if cat_id == app.category_id:
+                    promo_map.setdefault(pid, [])
+                    if not any(p.get("id") == promo_dict.get("id") for p in promo_map[pid]):
+                        promo_map[pid].append(promo_dict)
+
+    if promos_for_all:
+        for pid in product_uuids:
+            lst = promo_map.setdefault(pid, [])
+            seen = {p.get("id") for p in lst if p.get("id") is not None}
+            for pdict in promos_for_all:
+                iid = pdict.get("id")
+                if iid is None:
+                    lst.append(pdict)
+                elif iid not in seen:
+                    lst.append(pdict)
+                    seen.add(iid)
+
+    result = {}
+    for pid in product_uuids:
+        pid_str = str(pid)
+        tmin = transfer_map.get(pid, {}).get("min", 0.0)
+        tmax = transfer_map.get(pid, {}).get("max", 0.0)
+        cmin = card_price_map.get(pid, {}).get("min", 0.0)
+        cmax = card_price_map.get(pid, {}).get("max", 0.0)
+        if cmin > 0:
+            listing_min = cmin
+            listing_max = cmax if cmax > 0 else cmin
+        elif tmin > 0:
+            listing_min = tmin
+            listing_max = tmax if tmax > 0 else tmin
+        else:
+            listing_min = 0.0
+            listing_max = 0.0
+        result[pid_str] = {
+            "min_price": listing_min,
+            "max_price": listing_max,
+            "min_transfer_price": tmin if tmin > 0 else None,
+            "max_transfer_price": tmax if tmax > 0 else None,
+            "min_card_price": cmin if cmin > 0 else listing_min,
+            "max_card_price": cmax if cmax > 0 else listing_max,
+            "show_transfer_price_highlight": highlight_map.get(pid, False),
+            "promos": promo_map.get(pid, []),
+        }
+        min_p = result[pid_str]["min_price"]
+        max_p = result[pid_str]["max_price"]
+        if min_p > 0 or max_p > 0:
+            result[pid_str]["price_range"] = min_p if min_p == max_p else f"{min_p} - {max_p}"
+        else:
+            result[pid_str]["price_range"] = "0"
+
+    return result
+
+
 @homepage_distribution_bp.route("/homepage-distribution/product-ids", methods=["GET"])
 def get_public_homepage_distribution_product_ids():
     """
@@ -510,26 +765,7 @@ def get_public_homepage_distribution_quick():
     try:
         distributions = _public_homepage_distribution_query_base(include_product_images=True).all()
         slots = _public_homepage_distribution_slots(distributions)
-
-        out = {k: [] for k in ("featured", "discounts", "mattresses", "complete_purchase")}
-        for section in out:
-            for item in slots[section]:
-                product = item["product"]
-                product_dict = product.to_dict(
-                    include_variants=False,
-                    include_images=True,
-                    include_promos=False,
-                    locality_id=None,
-                    precalculated_min_price=0.0,  # Placeholder
-                    precalculated_max_price=0.0,  # Placeholder
-                    include_inventory=False,
-                )
-                product_dict['min_price'] = None
-                product_dict['max_price'] = None
-                product_dict['price_range'] = None
-                product_dict['promos'] = []
-                out[section].append(product_dict)
-        
+        out = _homepage_quick_out_from_slots(slots)
         resp = jsonify({
             'success': True,
             'data': out
@@ -540,238 +776,36 @@ def get_public_homepage_distribution_quick():
         current_app.logger.error("Error en homepage distribution quick: %s", str(e), exc_info=True)
         return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
 
+
+@homepage_distribution_bp.route("/homepage-distribution/ready", methods=["GET"])
+def get_public_homepage_distribution_ready():
+    """
+    Un solo round-trip: misma grilla que /quick + mapa de precios (equivalente a POST /prices).
+    `locality_id` (query) opcional; si falta, catálogo Córdoba como en POST /prices.
+    """
+    try:
+        locality_id = request.args.get("locality_id") or None
+        distributions = _public_homepage_distribution_query_base(include_product_images=True).all()
+        slots = _public_homepage_distribution_slots(distributions)
+        out = _homepage_quick_out_from_slots(slots)
+        flat_ids = _public_homepage_flat_product_ids_in_order(slots)
+        prices = _build_homepage_prices_map(flat_ids, locality_id)
+        resp = jsonify({"success": True, "data": {"distribution": out, "prices": prices}})
+        resp.headers["Cache-Control"] = "public, max-age=20"
+        return resp, 200
+    except Exception as e:
+        current_app.logger.error("Error en homepage distribution ready: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
+
+
 @homepage_distribution_bp.route('/homepage-distribution/prices', methods=['POST'])
 def get_products_prices():
     """Obtener precios y promociones para productos específicos"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         product_ids = data.get('product_ids', [])
         locality_id = data.get('locality_id', None)
-        
-        if not product_ids:
-            return jsonify({
-                'success': True,
-                'data': {}
-            }), 200
-        
-        # Pre-cargar el catálogo
-        from models.product import get_cordoba_capital_catalog_id
-        from models.catalog import LocalityCatalog
-        from models.product import (
-            ProductVariant,
-            ProductVariantOption,
-            ProductPrice,
-            Product,
-            product_price_transfer_filter,
-            PRICE_KIND_CARD,
-        )
-        from models.promo import Promo, PromoApplicability
-        from sqlalchemy import func
-        from datetime import datetime
-        import uuid as uuid_lib
-        
-        # Convertir product_ids a UUIDs
-        product_uuids = []
-        for pid in product_ids:
-            try:
-                product_uuids.append(uuid_lib.UUID(pid) if isinstance(pid, str) else pid)
-            except:
-                continue
-        
-        if not product_uuids:
-            return jsonify({
-                'success': True,
-                'data': {}
-            }), 200
-
-        product_uuids = [
-            row.id for row in db.session.query(Product.id).filter(
-                Product.id.in_(product_uuids),
-                Product.is_active == True,
-            ).all()
-        ]
-        if not product_uuids:
-            return jsonify({
-                'success': True,
-                'data': {}
-            }), 200
-        
-        # Determinar el catalog_id a usar
-        target_catalog_id = None
-        if locality_id:
-            try:
-                locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
-                if locality_catalog:
-                    target_catalog_id = locality_catalog.catalog_id
-            except:
-                pass
-        else:
-            target_catalog_id = get_cordoba_capital_catalog_id()
-        
-        # Precios por catálogo: transferencia y tarjeta por separado (igual que GET /products).
-        # min_price de la respuesta debe ser el precio "disponible": tarjeta si existe; si no, transferencia.
-        transfer_map = {}
-        card_price_map = {}
-        if target_catalog_id:
-            price_results = db.session.query(
-                ProductVariant.product_id,
-                func.min(ProductPrice.price).label('min_price'),
-                func.max(ProductPrice.price).label('max_price')
-            ).join(
-                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
-            ).join(
-                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-            ).filter(
-                ProductVariant.product_id.in_(product_uuids),
-                ProductPrice.catalog_id == target_catalog_id,
-                product_price_transfer_filter(),
-            ).group_by(ProductVariant.product_id).all()
-            
-            for result in price_results:
-                transfer_map[result.product_id] = {
-                    'min': float(result.min_price) if result.min_price else 0.0,
-                    'max': float(result.max_price) if result.max_price else 0.0
-                }
-
-            card_results = db.session.query(
-                ProductVariant.product_id,
-                func.min(ProductPrice.price).label('min_price'),
-                func.max(ProductPrice.price).label('max_price')
-            ).join(
-                ProductVariantOption, ProductVariantOption.product_variant_id == ProductVariant.id
-            ).join(
-                ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-            ).filter(
-                ProductVariant.product_id.in_(product_uuids),
-                ProductPrice.catalog_id == target_catalog_id,
-                ProductPrice.price_kind == PRICE_KIND_CARD,
-            ).group_by(ProductVariant.product_id).all()
-            for result in card_results:
-                card_price_map[result.product_id] = {
-                    'min': float(result.min_price) if result.min_price else 0.0,
-                    'max': float(result.max_price) if result.max_price else 0.0
-                }
-
-        # Categoría + flag highlight en una sola query
-        category_map = {}
-        highlight_map = {}
-        for row in (
-            db.session.query(
-                Product.id,
-                Product.category_id,
-                Product.show_transfer_price_highlight,
-            )
-            .filter(Product.id.in_(product_uuids))
-            .all()
-        ):
-            category_map[row.id] = row.category_id
-            highlight_map[row.id] = bool(row.show_transfer_price_highlight)
-        
-        # Pre-calcular promociones
-        promo_map = {}
-        
-        # Cargar promociones válidas (solo filas que pueden aplicar a estos productos)
-        from sqlalchemy.orm import joinedload
-        from sqlalchemy import or_, and_
-        now = datetime.utcnow()
-        category_ids_in_use = list({cid for cid in category_map.values() if cid is not None})
-        promo_scope_filters = [
-            PromoApplicability.applies_to == 'all',
-            and_(
-                PromoApplicability.applies_to == 'product',
-                PromoApplicability.product_id.in_(product_uuids),
-            ),
-        ]
-        if category_ids_in_use:
-            promo_scope_filters.append(
-                and_(
-                    PromoApplicability.applies_to == 'category',
-                    PromoApplicability.category_id.in_(category_ids_in_use),
-                )
-            )
-        all_promo_applicabilities = PromoApplicability.query.join(
-            Promo, PromoApplicability.promo_id == Promo.id
-        ).filter(
-            Promo.is_active == True,
-            Promo.start_at <= now,
-            Promo.end_at >= now,
-            or_(*promo_scope_filters),
-        ).options(
-            joinedload(PromoApplicability.promo)
-        ).all()
-        
-        # Misma estrategia que routes.products._build_promo_map_for_product_ids:
-        # promos "all" se acumulan y se aplican en un solo pase (evita O(promos × productos)).
-        promos_for_all = []
-        for app in all_promo_applicabilities:
-            promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
-            if not promo_dict:
-                continue
-            
-            if app.applies_to == 'all':
-                promos_for_all.append(promo_dict)
-            elif app.applies_to == 'product' and app.product_id:
-                if app.product_id in product_uuids:
-                    promo_map.setdefault(app.product_id, [])
-                    if not any(p.get('id') == promo_dict.get('id') for p in promo_map[app.product_id]):
-                        promo_map[app.product_id].append(promo_dict)
-            elif app.applies_to == 'category' and app.category_id:
-                for pid, cat_id in category_map.items():
-                    if cat_id == app.category_id:
-                        promo_map.setdefault(pid, [])
-                        if not any(p.get('id') == promo_dict.get('id') for p in promo_map[pid]):
-                            promo_map[pid].append(promo_dict)
-        
-        if promos_for_all:
-            for pid in product_uuids:
-                lst = promo_map.setdefault(pid, [])
-                seen = {p.get('id') for p in lst if p.get('id') is not None}
-                for pdict in promos_for_all:
-                    iid = pdict.get('id')
-                    if iid is None:
-                        lst.append(pdict)
-                    elif iid not in seen:
-                        lst.append(pdict)
-                        seen.add(iid)
-        
-        # Construir respuesta
-        result = {}
-        for pid in product_uuids:
-            pid_str = str(pid)
-            tmin = transfer_map.get(pid, {}).get('min', 0.0)
-            tmax = transfer_map.get(pid, {}).get('max', 0.0)
-            cmin = card_price_map.get(pid, {}).get('min', 0.0)
-            cmax = card_price_map.get(pid, {}).get('max', 0.0)
-            if cmin > 0:
-                listing_min = cmin
-                listing_max = cmax if cmax > 0 else cmin
-            elif tmin > 0:
-                listing_min = tmin
-                listing_max = tmax if tmax > 0 else tmin
-            else:
-                listing_min = 0.0
-                listing_max = 0.0
-            result[pid_str] = {
-                'min_price': listing_min,
-                'max_price': listing_max,
-                # Explícito para cards/listados: min_price suele ser lista (tarjeta) si existe;
-                # sin esto el front solo recibe un monto y no puede mostrar transferencia vs lista.
-                'min_transfer_price': tmin if tmin > 0 else None,
-                'max_transfer_price': tmax if tmax > 0 else None,
-                'min_card_price': cmin if cmin > 0 else listing_min,
-                'max_card_price': cmax if cmax > 0 else listing_max,
-                'show_transfer_price_highlight': highlight_map.get(pid, False),
-                'promos': promo_map.get(pid, [])
-            }
-            # Calcular price_range
-            min_p = result[pid_str]['min_price']
-            max_p = result[pid_str]['max_price']
-            if min_p > 0 or max_p > 0:
-                result[pid_str]['price_range'] = min_p if min_p == max_p else f"{min_p} - {max_p}"
-            else:
-                result[pid_str]['price_range'] = "0"
-        
+        result = _build_homepage_prices_map(product_ids, locality_id)
         return jsonify({
             'success': True,
             'data': result
