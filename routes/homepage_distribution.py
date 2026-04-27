@@ -618,20 +618,23 @@ def get_products_prices():
                     'max': float(result.max_price) if result.max_price else 0.0
                 }
 
-        highlight_rows = Product.query.filter(Product.id.in_(product_uuids)).all()
-        highlight_map = {p.id: bool(p.show_transfer_price_highlight) for p in highlight_rows}
+        # Categoría + flag highlight en una sola query
+        category_map = {}
+        highlight_map = {}
+        for row in (
+            db.session.query(
+                Product.id,
+                Product.category_id,
+                Product.show_transfer_price_highlight,
+            )
+            .filter(Product.id.in_(product_uuids))
+            .all()
+        ):
+            category_map[row.id] = row.category_id
+            highlight_map[row.id] = bool(row.show_transfer_price_highlight)
         
         # Pre-calcular promociones
         promo_map = {}
-        category_map = {}
-        
-        # Obtener categorías
-        products_with_categories = db.session.query(
-            Product.id, Product.category_id
-        ).filter(Product.id.in_(product_uuids)).all()
-        
-        for p in products_with_categories:
-            category_map[p.id] = p.category_id
         
         # Cargar promociones válidas (solo filas que pueden aplicar a estos productos)
         from sqlalchemy.orm import joinedload
@@ -663,31 +666,39 @@ def get_products_prices():
             joinedload(PromoApplicability.promo)
         ).all()
         
-        # Organizar promociones por producto
+        # Misma estrategia que routes.products._build_promo_map_for_product_ids:
+        # promos "all" se acumulan y se aplican en un solo pase (evita O(promos × productos)).
+        promos_for_all = []
         for app in all_promo_applicabilities:
             promo_dict = app.promo.to_dict() if app.promo and app.promo.is_valid() else None
             if not promo_dict:
                 continue
             
             if app.applies_to == 'all':
-                for pid in product_uuids:
-                    if pid not in promo_map:
-                        promo_map[pid] = []
-                    if not any(p.get('id') == promo_dict.get('id') for p in promo_map[pid]):
-                        promo_map[pid].append(promo_dict)
+                promos_for_all.append(promo_dict)
             elif app.applies_to == 'product' and app.product_id:
                 if app.product_id in product_uuids:
-                    if app.product_id not in promo_map:
-                        promo_map[app.product_id] = []
+                    promo_map.setdefault(app.product_id, [])
                     if not any(p.get('id') == promo_dict.get('id') for p in promo_map[app.product_id]):
                         promo_map[app.product_id].append(promo_dict)
             elif app.applies_to == 'category' and app.category_id:
                 for pid, cat_id in category_map.items():
                     if cat_id == app.category_id:
-                        if pid not in promo_map:
-                            promo_map[pid] = []
+                        promo_map.setdefault(pid, [])
                         if not any(p.get('id') == promo_dict.get('id') for p in promo_map[pid]):
                             promo_map[pid].append(promo_dict)
+        
+        if promos_for_all:
+            for pid in product_uuids:
+                lst = promo_map.setdefault(pid, [])
+                seen = {p.get('id') for p in lst if p.get('id') is not None}
+                for pdict in promos_for_all:
+                    iid = pdict.get('id')
+                    if iid is None:
+                        lst.append(pdict)
+                    elif iid not in seen:
+                        lst.append(pdict)
+                        seen.add(iid)
         
         # Construir respuesta
         result = {}

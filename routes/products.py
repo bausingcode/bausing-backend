@@ -2,6 +2,7 @@ import logging
 import re
 import time
 import unicodedata
+from collections import defaultdict
 from flask import Blueprint, request, jsonify
 from database import db
 
@@ -193,6 +194,35 @@ def _batch_main_product_image_urls(product_ids):
         if url and str(url).strip():
             out[pid] = str(url).strip()
     return out
+
+
+def _descendant_category_ids_including_root(root_id):
+    """
+    Raíz + todas las subcategorías. Una sola query a `categories` y recorrido en memoria.
+    Sustituye recursión con N round-trips (Category.query por nivel).
+    """
+    from models.category import Category
+
+    try:
+        rows = db.session.query(Category.id, Category.parent_id).all()
+    except Exception:
+        return [root_id]
+    by_parent = defaultdict(list)
+    for cid, pid in rows:
+        if pid is not None:
+            by_parent[pid].append(cid)
+    out = []
+    stack = [root_id]
+    seen = set()
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        out.append(cur)
+        for ch in by_parent.get(cur, ()):
+            stack.append(ch)
+    return out if out else [root_id]
 
 
 def _build_promo_map_for_product_ids(product_ids, category_id_by_product=None):
@@ -421,22 +451,7 @@ def get_products():
                 if not main_category:
                     query = query.filter_by(category_id=category_id)  # Filtrar por ID inexistente (devolverá 0)
                 else:
-                    
-                    # Obtener la categoría y todas sus subcategorías recursivamente
-                    def get_all_subcategory_ids(cat_id):
-                        """Obtiene todos los IDs de subcategorías (hijas) de una categoría"""
-                        subcategory_ids = [cat_id]
-                        # Buscar todas las categorías hijas directas
-                        children = Category.query.filter_by(parent_id=cat_id).all()
-                        for child in children:
-                            # Agregar el hijo y recursivamente sus hijos
-                            subcategory_ids.extend(get_all_subcategory_ids(child.id))
-                        return subcategory_ids
-                    
-                    # Obtener todos los IDs de categorías a incluir (la categoría principal + todas sus subcategorías)
-                    all_category_ids = get_all_subcategory_ids(category_uuid)
-                    
-                    # Filtrar productos que estén en cualquiera de estas categorías
+                    all_category_ids = _descendant_category_ids_including_root(category_uuid)
                     query = query.filter(Product.category_id.in_(all_category_ids))
             except Exception as e:
                 import traceback
