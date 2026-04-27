@@ -633,15 +633,32 @@ def get_products_prices():
         for p in products_with_categories:
             category_map[p.id] = p.category_id
         
-        # Cargar promociones válidas
+        # Cargar promociones válidas (solo filas que pueden aplicar a estos productos)
         from sqlalchemy.orm import joinedload
+        from sqlalchemy import or_, and_
         now = datetime.utcnow()
+        category_ids_in_use = list({cid for cid in category_map.values() if cid is not None})
+        promo_scope_filters = [
+            PromoApplicability.applies_to == 'all',
+            and_(
+                PromoApplicability.applies_to == 'product',
+                PromoApplicability.product_id.in_(product_uuids),
+            ),
+        ]
+        if category_ids_in_use:
+            promo_scope_filters.append(
+                and_(
+                    PromoApplicability.applies_to == 'category',
+                    PromoApplicability.category_id.in_(category_ids_in_use),
+                )
+            )
         all_promo_applicabilities = PromoApplicability.query.join(
             Promo, PromoApplicability.promo_id == Promo.id
         ).filter(
             Promo.is_active == True,
             Promo.start_at <= now,
-            Promo.end_at >= now
+            Promo.end_at >= now,
+            or_(*promo_scope_filters),
         ).options(
             joinedload(PromoApplicability.promo)
         ).all()
