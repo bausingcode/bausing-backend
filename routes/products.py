@@ -470,12 +470,12 @@ def get_products():
                 except Exception as e:
                     logger.warning("subcategory_ids filter skipped: %s", e)
         
-        # Filtro por estado activo
+        # Filtro por estado activo (Product.is_active: filter_by fallaría si el último join es otra entidad, ej. ProductSubcategory)
         if is_active is not None:
-            query = query.filter_by(is_active=is_active.lower() == 'true')
+            query = query.filter(Product.is_active == (is_active.lower() == 'true'))
         else:
             # Por defecto, solo productos activos para ecommerce
-            query = query.filter_by(is_active=True)
+            query = query.filter(Product.is_active.is_(True))
 
         # Solo productos con vínculo CRM (vitrina / catálogo público)
         if request.args.get('require_crm_product_id', '').lower() in ('1', 'true', 'yes'):
