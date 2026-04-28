@@ -39,6 +39,8 @@ def register_routes(app):
     app.register_blueprint(prices_bp, url_prefix='/product-prices')
     app.register_blueprint(localities_bp, url_prefix='/localities')
     app.register_blueprint(catalogs_bp, url_prefix='/catalogs')
+    # Antes que admin_bp: evita que cualquier regla /admin/* registrada antes sombra /admin/club-beneficios
+    app.register_blueprint(club_beneficios_bp, url_prefix='')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(admin_auth_bp, url_prefix='/admin/auth')
     app.register_blueprint(admin_stats_bp, url_prefix='/admin')
@@ -53,7 +55,6 @@ def register_routes(app):
     app.register_blueprint(crm_products_bp, url_prefix='')
     app.register_blueprint(orders_bp, url_prefix='/api')
     app.register_blueprint(homepage_distribution_bp, url_prefix='')
-    app.register_blueprint(club_beneficios_bp, url_prefix='')
     app.register_blueprint(locality_detection_bp, url_prefix='/')
     app.register_blueprint(carts_bp, url_prefix='/carts')
     app.register_blueprint(events_bp, url_prefix='')

@@ -363,7 +363,7 @@ class Product(db.Model):
                     return img.image_url
         return None
     
-    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None):
+    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None, precalculated_promos=None):
         data = {
             'id': str(self.id),
             'name': self.name,
@@ -461,45 +461,42 @@ class Product(db.Model):
         
         # Promociones aplicables
         if include_promos:
-            from models.promo import Promo, PromoApplicability
-            from datetime import datetime
-            
-            now = datetime.utcnow()
-            applicable_promos = []
-            
-            # Buscar promociones que aplican a este producto
-            # Construir la consulta de promociones con agrupación correcta
-            # Limpiar transacción abortada antes de consultar
-            try:
-                from database import db
-                db.session.rollback()
-            except:
-                pass
-            
-            
-            promo_applicabilities = PromoApplicability.query.filter(
-                db.or_(
-                    PromoApplicability.applies_to == 'all',
-                    db.and_(
-                        PromoApplicability.applies_to == 'product',
-                        PromoApplicability.product_id == self.id
-                    ),
-                    db.and_(
-                        PromoApplicability.applies_to == 'category',
-                        PromoApplicability.category_id == self.category_id
+            if precalculated_promos is not None:
+                data['promos'] = precalculated_promos
+            else:
+                from models.promo import Promo, PromoApplicability
+                
+                applicable_promos = []
+
+                try:
+                    from database import db
+                    db.session.rollback()
+                except Exception:
+                    pass
+                
+                promo_applicabilities = PromoApplicability.query.filter(
+                    db.or_(
+                        PromoApplicability.applies_to == 'all',
+                        db.and_(
+                            PromoApplicability.applies_to == 'product',
+                            PromoApplicability.product_id == self.id
+                        ),
+                        db.and_(
+                            PromoApplicability.applies_to == 'category',
+                            PromoApplicability.category_id == self.category_id
+                        )
                     )
-                )
-            ).all()
-            
-            
-            for app in promo_applicabilities:
-                promo = Promo.query.get(app.promo_id)
-                if promo:
-                    is_valid = promo.is_valid()
-                    if is_valid:
-                        applicable_promos.append(promo.to_dict())
-            
-            data['promos'] = applicable_promos
+                ).all()
+                
+                
+                for app in promo_applicabilities:
+                    promo = Promo.query.get(app.promo_id)
+                    if promo:
+                        is_valid = promo.is_valid()
+                        if is_valid:
+                            applicable_promos.append(promo.to_dict())
+                
+                data['promos'] = applicable_promos
         
         return data
 

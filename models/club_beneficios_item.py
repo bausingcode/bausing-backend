@@ -25,7 +25,7 @@ class ClubBeneficiosItem(db.Model):
 
     product = db.relationship('Product', backref='club_beneficios_items', lazy=True)
 
-    def to_dict(self, include_product=False, product_price_map=None):
+    def to_dict(self, include_product=False, product_price_map=None, product_promos_map=None):
         data = {
             'id': str(self.id),
             'position': int(self.position) if self.position is not None else 0,
@@ -50,6 +50,10 @@ class ClubBeneficiosItem(db.Model):
                     precalc_min = pair.get('min')
                     precalc_max = pair.get('max')
 
+                promos_kw = {}
+                if product_promos_map is not None:
+                    promos_kw['precalculated_promos'] = product_promos_map.get(prod.id, [])
+
                 data['product'] = prod.to_dict(
                     include_variants=False,
                     include_images=True,
@@ -57,6 +61,7 @@ class ClubBeneficiosItem(db.Model):
                     include_inventory=False,
                     precalculated_min_price=precalc_min,
                     precalculated_max_price=precalc_max,
+                    **promos_kw,
                 )
 
         return data
