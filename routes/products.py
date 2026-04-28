@@ -380,6 +380,8 @@ def get_products():
     - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
     - filling_type_slugs: slugs de Tecnología separados por coma (resortes-biconicos,espuma,espuma-de-alta-densidad,resortes-pocket); filtra por filling_type y opción de categoría principal.
     - subcategory_ids: UUIDs de filas de categoría (hijos) separados por coma; productos con asociación en product_subcategories (OR).
+
+    Cada ítem incluye has_crm_stock (bool): false si el CRM marca el producto sin stock; la vitrina puede listarlo para mostrar etiqueta y deshabilitar compra en el frontend.
     """
     _catalog_t0 = time.perf_counter()
     _catalog_qs = (request.query_string or b'').decode('utf-8', errors='replace')
@@ -507,16 +509,6 @@ def get_products():
                         CategoryOption, Product.category_option_id == CategoryOption.id
                     )
                     query = query.filter(fcond)
-        
-        # Excluir filas con stock explícito false en crm (subquery, sin materializar todos los ids)
-        try:
-            crm_no_stock = text(
-                "EXISTS (SELECT 1 FROM crm_products cp WHERE "
-                "cp.crm_product_id = products.crm_product_id AND cp.stock = false)"
-            )
-            query = query.filter(~crm_no_stock)
-        except Exception:
-            pass
         
         # Filtro por stock (stock en ProductVariantOption)
         if in_stock is not None and in_stock.lower() == 'true':
@@ -847,6 +839,11 @@ def get_products():
                     pass
         
         # Serializar productos
+        from models.product import get_crm_stock_map, crm_id_has_stock
+
+        _catalog_crm_ids = [p.crm_product_id for p in products if getattr(p, "crm_product_id", None)]
+        _catalog_stock_map = get_crm_stock_map(_catalog_crm_ids)
+
         products_data = []
         for product in products:
             try:
@@ -898,7 +895,9 @@ def get_products():
                 if xslot and xslot.get('min', 0) > 0:
                     product_dict['min_transfer_price'] = xslot['min']
                     product_dict['max_transfer_price'] = xslot.get('max') or xslot['min']
-                
+
+                product_dict['has_crm_stock'] = crm_id_has_stock(product.crm_product_id, _catalog_stock_map)
+
                 products_data.append(product_dict)
             except Exception as e:
                 # Log error but continue with other products

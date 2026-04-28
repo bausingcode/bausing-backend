@@ -32,6 +32,7 @@ class HeroImage(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     image_url = db.Column(db.Text, nullable=False)
+    image_url_mobile = db.Column(db.Text, nullable=True)
     title = db.Column(db.String(255))
     subtitle = db.Column(db.String(255))
     cta_text = db.Column(db.String(255))
@@ -44,6 +45,7 @@ class HeroImage(db.Model):
         return {
             'id': str(self.id),
             'image_url': self.image_url,
+            'image_url_mobile': self.image_url_mobile,
             'title': self.title,
             'subtitle': self.subtitle,
             'cta_text': self.cta_text,

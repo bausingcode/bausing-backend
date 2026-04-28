@@ -6,6 +6,50 @@ from routes.admin import admin_required
 
 images_bp = Blueprint('images', __name__)
 
+
+def _try_delete_supabase_hero_file(image_url):
+    """Elimina un objeto del bucket hero-images a partir de la URL pública (best-effort)."""
+    if not image_url:
+        return
+    try:
+        import os
+        import re
+        import ssl
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        bucket = 'hero-images'
+        if not supabase_url or not supabase_key:
+            return
+        match = re.search(r'/hero-images/(.+)$', image_url)
+        if not match:
+            return
+        file_path = match.group(1)
+        delete_url = f"{supabase_url}/storage/v1/object/{bucket}/{file_path}"
+        req = Request(
+            delete_url,
+            method='DELETE',
+            headers={
+                "Authorization": f"Bearer {supabase_key}",
+                "apikey": supabase_key
+            }
+        )
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        try:
+            with urlopen(req, context=ssl_context) as response:
+                if response.status not in [200, 204]:
+                    pass
+        except HTTPError as e:
+            if e.code not in [200, 204]:
+                pass
+    except Exception:
+        pass
+
+
 # ==================== PRODUCT IMAGES ====================
 
 @images_bp.route('/products/<uuid:product_id>/images', methods=['POST'])
@@ -157,7 +201,8 @@ def upload_hero_image():
         "cta_text": "Texto del botón",
         "cta_link": "https://...",
         "position": 0,
-        "is_active": true
+        "is_active": true,
+        "image_url_mobile": "https://... (opcional, solo móvil)"
     }
     """
     try:
@@ -169,8 +214,12 @@ def upload_hero_image():
                 'error': 'image_url es requerido'
             }), 400
         
+        mobile_raw = data.get('image_url_mobile')
+        image_url_mobile = None if mobile_raw in (None, '') else mobile_raw
+
         hero_image = HeroImage(
             image_url=data['image_url'],
+            image_url_mobile=image_url_mobile,
             title=data.get('title'),
             subtitle=data.get('subtitle'),
             cta_text=data.get('cta_text'),
@@ -199,7 +248,8 @@ def get_hero_images():
     """
     Listar hero images
     Query params:
-    - position: 1 (hero), 2 (info), 3 (discount), 4 (product banner), 5 (local page), 6 (video) para filtrar por posición
+    - position: 1 (hero), 2 (info), 3 (discount), 4 (product banner), 5 (local page), 6 (video) para filtrar por posición.
+      Cada ítem puede incluir image_url_mobile (imagen vertical opcional solo para móvil en position 1).
     - active: true/false para filtrar solo activas
     """
     try:
@@ -260,7 +310,17 @@ def update_hero_image(image_id):
         data = request.get_json()
         
         if data.get('image_url'):
-            hero_image.image_url = data['image_url']
+            new_main = data['image_url']
+            if hero_image.image_url and hero_image.image_url != new_main:
+                _try_delete_supabase_hero_file(hero_image.image_url)
+            hero_image.image_url = new_main
+        if 'image_url_mobile' in data:
+            raw = data.get('image_url_mobile')
+            new_mobile = None if raw in (None, '') else raw
+            old_mobile = hero_image.image_url_mobile
+            if old_mobile and old_mobile != new_mobile:
+                _try_delete_supabase_hero_file(old_mobile)
+            hero_image.image_url_mobile = new_mobile
         if data.get('title') is not None:
             hero_image.title = data['title']
         if data.get('subtitle') is not None:
@@ -297,52 +357,8 @@ def delete_hero_image(image_id):
     """
     try:
         hero_image = HeroImage.query.get_or_404(image_id)
-        image_url = hero_image.image_url
-        
-        # Intentar eliminar el archivo de Supabase Storage usando API REST
-        try:
-            import os
-            import re
-            import ssl
-            from urllib.request import Request, urlopen
-            from urllib.error import HTTPError, URLError
-            
-            SUPABASE_URL = os.getenv('SUPABASE_URL')
-            SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-            HERO_IMAGES_BUCKET = 'hero-images'
-            
-            if SUPABASE_URL and SUPABASE_KEY:
-                # Extraer la ruta del archivo desde la URL
-                # Formato esperado: https://...supabase.co/storage/v1/object/public/hero-images/position-X/filename
-                match = re.search(r'/hero-images/(.+)$', image_url)
-                if match:
-                    file_path = match.group(1)
-                    # Eliminar el archivo usando la API REST de Supabase
-                    delete_url = f"{SUPABASE_URL}/storage/v1/object/{HERO_IMAGES_BUCKET}/{file_path}"
-                    req = Request(
-                        delete_url,
-                        method='DELETE',
-                        headers={
-                            "Authorization": f"Bearer {SUPABASE_KEY}",
-                            "apikey": SUPABASE_KEY
-                        }
-                    )
-                    # Crear contexto SSL que no verifica certificados (solo para desarrollo)
-                    # En producción, deberías usar certificados válidos
-                    ssl_context = ssl.create_default_context()
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl.CERT_NONE
-                    
-                    try:
-                        with urlopen(req, context=ssl_context) as response:
-                            if response.status not in [200, 204]:
-                                pass
-                    except HTTPError as e:
-                        if e.code not in [200, 204]:
-                            pass
-        except Exception:
-            # Si falla la eliminación del storage, continuar para eliminar el registro de la base de datos
-            pass
+        _try_delete_supabase_hero_file(hero_image.image_url)
+        _try_delete_supabase_hero_file(hero_image.image_url_mobile)
         
         # Eliminar el registro de la base de datos
         db.session.delete(hero_image)

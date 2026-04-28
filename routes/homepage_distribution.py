@@ -451,7 +451,7 @@ def _public_homepage_distribution_slots(distributions):
             continue
         product = dist.product
         has_stock = crm_id_has_stock(product.crm_product_id, stock_map)
-        if not product.is_active or not has_stock:
+        if not product.is_active:
             section_used_ids = [item["id"] for item in result[dist.section]]
             all_used_ids = list(used_product_ids) + section_used_ids
             replacement = get_available_replacement_product(
@@ -464,6 +464,7 @@ def _public_homepage_distribution_slots(distributions):
                     stock_map.update(get_crm_stock_map([replacement.crm_product_id]))
             else:
                 continue
+        # Activo pero sin stock CRM: mostrar el producto elegido (sin reemplazo)
         used_product_ids.add(str(product.id))
         result[dist.section].append(
             {
@@ -487,6 +488,16 @@ def _public_homepage_flat_product_ids_in_order(slots):
 
 
 def _homepage_quick_out_from_slots(slots):
+    from models.product import crm_id_has_stock, get_crm_stock_map
+
+    crm_ids = []
+    for section_key in ("featured", "discounts", "mattresses", "complete_purchase"):
+        for item in slots.get(section_key) or []:
+            p = item.get("product")
+            if p and getattr(p, "crm_product_id", None):
+                crm_ids.append(p.crm_product_id)
+    sm = get_crm_stock_map(crm_ids)
+
     out = {k: [] for k in ("featured", "discounts", "mattresses", "complete_purchase")}
     for section in out:
         for item in slots[section]:
@@ -504,6 +515,7 @@ def _homepage_quick_out_from_slots(slots):
             product_dict["max_price"] = None
             product_dict["price_range"] = None
             product_dict["promos"] = []
+            product_dict["has_crm_stock"] = crm_id_has_stock(product.crm_product_id, sm)
             out[section].append(product_dict)
     return out
 
@@ -973,40 +985,36 @@ def get_public_homepage_distribution():
         for dist in distributions:
             if dist.section in result and dist.product:
                 product = dist.product
-                
-                has_stock = crm_id_has_stock(product.crm_product_id, stock_map_full)
-                
-                # Si no tiene stock, buscar un reemplazo
-                if not has_stock:
-                    # Obtener productos ya usados en esta sección
-                    section_used_ids = [item['product']['id'] for item in result[dist.section] if 'product' in item and 'id' in item['product']]
+
+                precalc_min_price = None
+                precalc_max_price = None
+
+                if not product.is_active:
+                    section_used_ids = [
+                        item['product']['id']
+                        for item in result[dist.section]
+                        if 'product' in item and 'id' in item['product']
+                    ]
                     all_used_ids = list(used_product_ids) + section_used_ids
-                    
-                    replacement = get_available_replacement_product(all_used_ids, [p.product for p in distributions if p.section == dist.section and p.product])
-                    
+                    replacement = get_available_replacement_product(
+                        all_used_ids,
+                        [p.product for p in distributions if p.section == dist.section and p.product],
+                    )
                     if replacement:
                         product = replacement
-                        # Recalcular precios para el producto de reemplazo
-                        if replacement.id in price_map:
-                            precalc_min_price = price_map[replacement.id]['min']
-                            precalc_max_price = price_map[replacement.id]['max']
-                        else:
-                            precalc_min_price = None
-                            precalc_max_price = None
+                        if replacement.crm_product_id:
+                            stock_map_full.update(get_crm_stock_map([replacement.crm_product_id]))
                     else:
-                        continue  # Omitir este producto si no hay reemplazo
-                else:
-                    # Obtener precios pre-calculados si están disponibles
-                    if product.id in price_map:
-                        precalc_min_price = price_map[product.id]['min']
-                        precalc_max_price = price_map[product.id]['max']
-                    else:
-                        precalc_min_price = None
-                        precalc_max_price = None
-                
-                # Agregar a productos usados
+                        continue
+
+                has_stock = crm_id_has_stock(product.crm_product_id, stock_map_full)
+
+                if product.id in price_map:
+                    precalc_min_price = price_map[product.id]['min']
+                    precalc_max_price = price_map[product.id]['max']
+
                 used_product_ids.add(str(product.id))
-                
+
                 # Usar precios y promociones pre-calculadas directamente en to_dict para evitar queries innecesarias
                 product_dict = product.to_dict(
                     include_variants=False,
@@ -1016,7 +1024,9 @@ def get_public_homepage_distribution():
                     precalculated_min_price=precalc_min_price,
                     precalculated_max_price=precalc_max_price
                 )
-                
+
+                product_dict['has_crm_stock'] = has_stock
+
                 # Agregar promociones pre-calculadas
                 if product.id in promo_map:
                     product_dict['promos'] = promo_map[product.id]
