@@ -30,6 +30,7 @@ from .bank import Bank
 from .card_bank_installment import CardBankInstallment
 from .faq_item import FaqItem
 from .coupon import Coupon
+from .category_pdp_cross_sell import CategoryPdpCrossSell
 
 __all__ = [
     'Category',
@@ -82,5 +83,6 @@ __all__ = [
     'CardBankInstallment',
     'FaqItem',
     'Coupon',
+    'CategoryPdpCrossSell',
 ]
 

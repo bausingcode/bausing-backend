@@ -380,6 +380,7 @@ def get_products():
     - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
     - filling_type_slugs: slugs de Tecnología separados por coma (resortes-biconicos,espuma,espuma-de-alta-densidad,resortes-pocket); filtra por filling_type y opción de categoría principal.
     - subcategory_ids: UUIDs de filas de categoría (hijos) separados por coma; productos con asociación en product_subcategories (OR).
+    - product_ids: UUIDs separados por coma (máx. 12). Si se envía, solo se devuelven esos productos (orden según la lista), ignorando búsqueda/categoría/subcategoría/precio/stock/tecnología. En ese modo no se fuerza is_active salvo que se pase el query param is_active; sí aplica require_crm_product_id.
 
     Cada ítem incluye has_crm_stock (bool): false si el CRM marca el producto sin stock; la vitrina puede listarlo para mostrar etiqueta y deshabilitar compra en el frontend.
     """
@@ -434,15 +435,36 @@ def get_products():
         if include_images:
             eager = (joinedload(Product.images),) + eager
         query = Product.query.options(*eager)
+
+        product_ids_filter_list = None
+        product_ids_raw = request.args.get('product_ids', '').strip()
+        if product_ids_raw:
+            _pid_parts = [x.strip() for x in product_ids_raw.split(',') if x.strip()]
+            if len(_pid_parts) > 12:
+                return jsonify({
+                    'success': False,
+                    'error': 'Máximo 12 valores en product_ids',
+                }), 400
+            try:
+                import uuid as _uuid_pid
+                product_ids_filter_list = [_uuid_pid.UUID(x) for x in _pid_parts]
+            except Exception:
+                return jsonify({
+                    'success': False,
+                    'error': 'product_ids: UUIDs inválidos',
+                }), 400
+            query = query.filter(Product.id.in_(product_ids_filter_list))
+
+        ids_only_mode = product_ids_filter_list is not None
         
         # Búsqueda por texto (tildes, categoría, palabras múltiples, fuzzy si hay pg_trgm)
-        if search:
+        if not ids_only_mode and search:
             search_filter = product_text_search_filter(search)
             if search_filter is not None:
                 query = query.filter(search_filter)
         
         # Filtro por categoría única (incluyendo subcategorías)
-        if category_id:
+        if not ids_only_mode and category_id:
             # Obtener todas las subcategorías (hijas) de esta categoría
             try:
                 import uuid as uuid_lib
@@ -461,13 +483,13 @@ def get_products():
                 query = query.filter_by(category_id=category_id)
         
         # Filtro por múltiples categorías
-        if category_ids:
+        if not ids_only_mode and category_ids:
             cat_ids_list = [cat_id.strip() for cat_id in category_ids.split(',')]
             query = query.filter(Product.category_id.in_(cat_ids_list))
 
         # Filtro por subcategoría(s) – tabla product_subcategories (mismo criterio que el catálogo)
         subcategory_ids_param = request.args.get('subcategory_ids', '').strip()
-        if subcategory_ids_param:
+        if not ids_only_mode and subcategory_ids_param:
             sub_parts = [x.strip() for x in subcategory_ids_param.split(',') if x.strip()]
             if sub_parts:
                 try:
@@ -490,8 +512,8 @@ def get_products():
         # Filtro por estado activo (Product.is_active: filter_by fallaría si el último join es otra entidad, ej. ProductSubcategory)
         if is_active is not None:
             query = query.filter(Product.is_active == (is_active.lower() == 'true'))
-        else:
-            # Por defecto, solo productos activos para ecommerce
+        elif not ids_only_mode:
+            # Por defecto, solo productos activos para ecommerce (ids-only permite elegir explícitamente con is_active)
             query = query.filter(Product.is_active.is_(True))
 
         # Solo productos con vínculo CRM (vitrina / catálogo público)
@@ -500,7 +522,7 @@ def get_products():
 
         # Tecnología (colchones): slugs canónicos separados por coma, mismo criterio que el catálogo en frontend
         filling_raw = request.args.get('filling_type_slugs', '').strip()
-        if filling_raw:
+        if not ids_only_mode and filling_raw:
             slug_list = [x.strip() for x in filling_raw.split(',') if x.strip()]
             if slug_list:
                 fcond = _filling_type_slugs_or_condition(slug_list)
@@ -511,13 +533,13 @@ def get_products():
                     query = query.filter(fcond)
         
         # Filtro por stock (stock en ProductVariantOption)
-        if in_stock is not None and in_stock.lower() == 'true':
+        if not ids_only_mode and in_stock is not None and in_stock.lower() == 'true':
             # Solo productos que tienen al menos una option con stock > 0
             query = query.join(ProductVariant).join(ProductVariantOption).filter(ProductVariantOption.stock > 0).distinct()
         
         # Filtro por precio (min/max) — solo aplica INNER JOIN cuando se filtra por rango de precios
         # El locality_id NO excluye productos: se usa solo para serializar los precios correctos
-        if min_price is not None or max_price is not None:
+        if not ids_only_mode and (min_price is not None or max_price is not None):
             try:
                 # Join correcto: Product -> ProductVariant -> ProductVariantOption -> ProductPrice
                 query = query.join(
@@ -565,7 +587,9 @@ def get_products():
                 }), 500
         
         # Ordenamiento
-        if sort == 'name':
+        if ids_only_mode:
+            query = query.order_by(Product.created_at.desc())
+        elif sort == 'name':
             query = query.order_by(Product.name.asc())
         elif sort == 'name_desc':
             query = query.order_by(Product.name.desc())
@@ -703,6 +727,9 @@ def get_products():
                 row[0] if not isinstance(row, Product) else row
                 for row in _raw_items
             ]
+            if product_ids_filter_list:
+                _order_map = {str(u): i for i, u in enumerate(product_ids_filter_list)}
+                products.sort(key=lambda p: _order_map.get(str(p.id), 999))
         except Exception as e:
             import traceback
             return jsonify({
