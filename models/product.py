@@ -11,6 +11,16 @@ logger = logging.getLogger(__name__)
 PRICE_KIND_TRANSFER = "transfer"
 PRICE_KIND_CARD = "card"
 
+ALLOWED_BASIC_PRODUCT_COLORS = frozenset({"negro", "beige", "gris", "blanco"})
+
+
+def normalize_basic_product_color(raw):
+    """Solo valores canónicos; cualquier otro → None."""
+    if raw is None or raw == "":
+        return None
+    s = str(raw).strip().lower()
+    return s if s in ALLOWED_BASIC_PRODUCT_COLORS else None
+
 
 def product_price_transfer_filter():
     """Filas de precio usadas para listados, filtros y min/max (efectivo/transferencia)."""
@@ -206,6 +216,8 @@ class Product(db.Model):
     warranty_months = db.Column(db.Integer)
     warranty_description = db.Column(db.Text)
     materials = db.Column(db.Text)
+    # Color básico opcional (negro, beige, gris, blanco) — filtro catálogo / ficha
+    basic_color = db.Column(db.String(24), nullable=True)
     filling_type = db.Column(db.String(255))
     max_supported_weight_kg = db.Column(db.Integer)
     has_pillow_top = db.Column(db.Boolean, default=False)
@@ -372,6 +384,7 @@ class Product(db.Model):
             'warranty_months': self.warranty_months,
             'warranty_description': self.warranty_description,
             'materials': self.materials,
+            'basic_color': self.basic_color,
             'filling_type': self.filling_type,
             'max_supported_weight_kg': self.max_supported_weight_kg,
             'has_pillow_top': self.has_pillow_top,

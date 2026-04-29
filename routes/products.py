@@ -17,6 +17,9 @@ from models.product import (
     product_price_card_filter,
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
+    ALLOWED_BASIC_PRODUCT_COLORS,
+    ALLOWED_BASIC_PRODUCT_COLORS,
+    normalize_basic_product_color,
 )
 from models.image import ProductImage
 from models.category import Category
@@ -357,6 +360,50 @@ def _filling_type_slugs_or_condition(slugs):
     return or_(*ors)
 
 
+@products_bp.route('/basic-color-facets', methods=['GET'])
+def get_basic_color_facets():
+    """
+    Lista corta de colores básicos presentes en productos de la categoría (raíz + descendientes).
+    Query única DISTINCT; público (catálogo).
+    Query: category_id (UUID categoría actual del listado — puede ser subcategoría).
+    """
+    try:
+        category_id = request.args.get('category_id', '').strip()
+        if not category_id:
+            return jsonify({'success': False, 'error': 'category_id es requerido'}), 400
+        import uuid as uuid_lib
+
+        category_uuid = (
+            uuid_lib.UUID(category_id) if isinstance(category_id, str) else category_id
+        )
+
+        cat_ids = _descendant_category_ids_including_root(category_uuid)
+        if not cat_ids:
+            return jsonify({'success': True, 'data': {'basic_colors': []}})
+
+        rows = (
+            db.session.query(Product.basic_color)
+            .filter(
+                Product.category_id.in_(cat_ids),
+                Product.is_active.is_(True),
+                Product.crm_product_id.isnot(None),
+                Product.basic_color.in_(ALLOWED_BASIC_PRODUCT_COLORS),
+            )
+            .distinct()
+            .all()
+        )
+        found = [r[0] for r in rows if r[0]]
+        order = ['negro', 'beige', 'gris', 'blanco']
+        idx = {c: i for i, c in enumerate(order)}
+        basic_colors = sorted(found, key=lambda x: idx.get(x, 99))
+        resp = jsonify({'success': True, 'data': {'basic_colors': basic_colors}})
+        resp.headers['Cache-Control'] = 'public, max-age=60'
+        return resp
+    except Exception as e:
+        logger.warning("basic-color-facets: %s", e)
+        return jsonify({'success': True, 'data': {'basic_colors': []}})
+
+
 @products_bp.route('', methods=['GET'])
 def get_products():
     """
@@ -380,7 +427,8 @@ def get_products():
     - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
     - filling_type_slugs: slugs de Tecnología separados por coma (resortes-biconicos,espuma,espuma-de-alta-densidad,resortes-pocket); filtra por filling_type y opción de categoría principal.
     - subcategory_ids: UUIDs de filas de categoría (hijos) separados por coma; productos con asociación en product_subcategories (OR).
-    - product_ids: UUIDs separados por coma (máx. 12). Si se envía, solo se devuelven esos productos (orden según la lista), ignorando búsqueda/categoría/subcategoría/precio/stock/tecnología. En ese modo no se fuerza is_active salvo que se pase el query param is_active; sí aplica require_crm_product_id.
+    - basic_colors: valores canónicos separados por coma (negro,beige,gris,blanco); productos cuyo basic_color está en la lista (OR).
+    - product_ids: UUIDs separados por coma (máx. 12).
 
     Cada ítem incluye has_crm_stock (bool): false si el CRM marca el producto sin stock; la vitrina puede listarlo para mostrar etiqueta y deshabilitar compra en el frontend.
     """
@@ -531,6 +579,17 @@ def get_products():
                         CategoryOption, Product.category_option_id == CategoryOption.id
                     )
                     query = query.filter(fcond)
+
+        # Color básico (opcional en ficha): slugs separados por coma (OR)
+        basic_colors_param = request.args.get('basic_colors', '').strip()
+        if not ids_only_mode and basic_colors_param:
+            parts = [
+                normalize_basic_product_color(x.strip())
+                for x in basic_colors_param.split(',')
+            ]
+            allowed_bc = [p for p in parts if p]
+            if allowed_bc:
+                query = query.filter(Product.basic_color.in_(allowed_bc))
         
         # Filtro por stock (stock en ProductVariantOption)
         if not ids_only_mode and in_stock is not None and in_stock.lower() == 'true':
@@ -1628,6 +1687,7 @@ def create_complete_product():
         # Campos técnicos / colchón (opcionales, mismo criterio que complete CRM)
         _optional_product_fields = (
             'technical_description', 'warranty_months', 'warranty_description', 'materials',
+            'basic_color',
             'filling_type', 'max_supported_weight_kg', 'has_pillow_top', 'is_bed_in_box',
             'mattress_firmness', 'mattress_height_cm', 'mattress_fabric_type',
             'has_double_pillow', 'has_moisture_breathers', 'has_side_handles',
@@ -1637,6 +1697,7 @@ def create_complete_product():
         for _f in _optional_product_fields:
             if _f in data:
                 setattr(product, _f, data[_f])
+        product.basic_color = normalize_basic_product_color(getattr(product, 'basic_color', None))
         if "show_transfer_price_highlight" in data:
             product.show_transfer_price_highlight = bool(data.get("show_transfer_price_highlight"))
         if "display_reference_price" in data:
@@ -1814,6 +1875,8 @@ def update_product(product_id):
         if 'display_reference_price' in data:
             v = data.get('display_reference_price')
             product.display_reference_price = float(v) if v is not None and v != '' else None
+        if 'basic_color' in data:
+            product.basic_color = normalize_basic_product_color(data.get('basic_color'))
         
         db.session.commit()
         

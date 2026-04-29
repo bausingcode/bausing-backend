@@ -7,6 +7,7 @@ from models.product import (
     ProductPrice,
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
+    normalize_basic_product_color,
 )
 
 
@@ -431,6 +432,7 @@ def complete_crm_product(product_id):
             # Vincular el CRM product_id si no está vinculado
             if not product.crm_product_id:
                 product.crm_product_id = crm_product_id_int
+            product.basic_color = normalize_basic_product_color(getattr(product, 'basic_color', None))
         else:
             # Crear nuevo producto
             # Determinar si es combo basado en el crm_product usando SQL directo
@@ -448,6 +450,7 @@ def complete_crm_product(product_id):
                 warranty_months=data.get('warranty_months'),
                 warranty_description=data.get('warranty_description'),
                 materials=data.get('materials'),
+                basic_color=normalize_basic_product_color(data.get('basic_color')),
                 filling_type=data.get('filling_type'),
                 max_supported_weight_kg=data.get('max_supported_weight_kg'),
                 has_pillow_top=data.get('has_pillow_top', False),
