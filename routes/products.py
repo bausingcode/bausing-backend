@@ -1693,6 +1693,10 @@ def create_complete_product():
             'has_double_pillow', 'has_moisture_breathers', 'has_side_handles',
             'size_label',
             'viacargo_height_cm', 'viacargo_width_cm', 'viacargo_depth_cm', 'viacargo_weight_kg',
+            'smart_screen_size', 'smart_resolution', 'smart_tv',
+            'ac_inverter', 'ac_climate_type', 'ac_frigorias',
+            'wm_load_type', 'wm_wash_capacity_kg',
+            'fridge_capacity_liters', 'freezer_capacity_liters',
         )
         for _f in _optional_product_fields:
             if _f in data:

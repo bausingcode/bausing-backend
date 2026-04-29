@@ -243,6 +243,17 @@ class Product(db.Model):
     viacargo_width_cm = db.Column(db.Numeric(10, 2), nullable=True)
     viacargo_depth_cm = db.Column(db.Numeric(10, 2), nullable=True)
     viacargo_weight_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    # Electrodomésticos (subcategorías Smart / Aire / Lavarropas / Heladera)
+    smart_screen_size = db.Column(db.String(128), nullable=True)
+    smart_resolution = db.Column(db.String(128), nullable=True)
+    smart_tv = db.Column(db.Boolean, nullable=True)
+    ac_inverter = db.Column(db.Boolean, nullable=True)
+    ac_climate_type = db.Column(db.String(255), nullable=True)
+    ac_frigorias = db.Column(db.Integer, nullable=True)
+    wm_load_type = db.Column(db.String(64), nullable=True)
+    wm_wash_capacity_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    fridge_capacity_liters = db.Column(db.Numeric(10, 2), nullable=True)
+    freezer_capacity_liters = db.Column(db.Numeric(10, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -410,6 +421,16 @@ class Product(db.Model):
             'viacargo_width_cm': float(self.viacargo_width_cm) if self.viacargo_width_cm is not None else None,
             'viacargo_depth_cm': float(self.viacargo_depth_cm) if self.viacargo_depth_cm is not None else None,
             'viacargo_weight_kg': float(self.viacargo_weight_kg) if self.viacargo_weight_kg is not None else None,
+            'smart_screen_size': self.smart_screen_size,
+            'smart_resolution': self.smart_resolution,
+            'smart_tv': self.smart_tv,
+            'ac_inverter': self.ac_inverter,
+            'ac_climate_type': self.ac_climate_type,
+            'ac_frigorias': self.ac_frigorias,
+            'wm_load_type': self.wm_load_type,
+            'wm_wash_capacity_kg': float(self.wm_wash_capacity_kg) if self.wm_wash_capacity_kg is not None else None,
+            'fridge_capacity_liters': float(self.fridge_capacity_liters) if self.fridge_capacity_liters is not None else None,
+            'freezer_capacity_liters': float(self.freezer_capacity_liters) if self.freezer_capacity_liters is not None else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_inventory:

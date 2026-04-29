@@ -477,6 +477,16 @@ def complete_crm_product(product_id):
                 viacargo_width_cm=data.get('viacargo_width_cm'),
                 viacargo_depth_cm=data.get('viacargo_depth_cm'),
                 viacargo_weight_kg=data.get('viacargo_weight_kg'),
+                smart_screen_size=data.get('smart_screen_size'),
+                smart_resolution=data.get('smart_resolution'),
+                smart_tv=data.get('smart_tv'),
+                ac_inverter=data.get('ac_inverter'),
+                ac_climate_type=data.get('ac_climate_type'),
+                ac_frigorias=data.get('ac_frigorias'),
+                wm_load_type=data.get('wm_load_type'),
+                wm_wash_capacity_kg=data.get('wm_wash_capacity_kg'),
+                fridge_capacity_liters=data.get('fridge_capacity_liters'),
+                freezer_capacity_liters=data.get('freezer_capacity_liters'),
             )
             db.session.add(product)
         
