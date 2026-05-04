@@ -9,12 +9,15 @@ import uuid
 
 homepage_distribution_bp = Blueprint('homepage_distribution', __name__)
 
-HOMEPAGE_SECTION_LEN = {
+# Secciones con cantidad fija de casilleros en el admin (grilla).
+FIXED_HOMEPAGE_SECTION_LEN = {
     'featured': 4,
     'discounts': 3,
     'mattresses': 4,
-    'complete_purchase': 4,
 }
+
+# complete_purchase: lista sin tope (posiciones 0,1,2,… acotadas solo por INTEGER en DB).
+HOMEPAGE_SECTION_KEYS = frozenset((*FIXED_HOMEPAGE_SECTION_LEN.keys(), 'complete_purchase'))
 
 _SECTION_ALIASES = {
     'complete-purchase': 'complete_purchase',
@@ -28,7 +31,9 @@ def _normalize_section(section):
     if section is None:
         return None
     s = str(section).strip().lower().replace('-', '_')
-    if s in HOMEPAGE_SECTION_LEN:
+    if s in _SECTION_ALIASES:
+        s = _SECTION_ALIASES[s]
+    if s in HOMEPAGE_SECTION_KEYS:
         return s
     return _SECTION_ALIASES.get(s) or _SECTION_ALIASES.get(str(section).strip().lower()) or s
 
@@ -36,15 +41,20 @@ def _normalize_section(section):
 def _normalize_position_to_index(section_key, position):
     """
     Índice 0-based para la grilla del admin.
-    Acepta posiciones ya en 0..n-1 o legacy 1..n (p. ej. la cuarta viñeta guardada como 4).
+    Secciones fijas: 0..n-1 o legacy 1..n.
+    complete_purchase: cualquier entero >= 0 (sin tope superior).
     """
-    if section_key not in HOMEPAGE_SECTION_LEN or position is None:
+    if section_key is None or position is None or section_key not in HOMEPAGE_SECTION_KEYS:
         return None
     try:
         pos = int(position)
     except (TypeError, ValueError):
         return None
-    maxlen = HOMEPAGE_SECTION_LEN[section_key]
+    if section_key == 'complete_purchase':
+        if pos < 0:
+            return None
+        return pos
+    maxlen = FIXED_HOMEPAGE_SECTION_LEN[section_key]
     if 0 <= pos < maxlen:
         return pos
     if 1 <= pos <= maxlen:
@@ -66,7 +76,9 @@ def _homepage_dist_load_options():
 
 
 def _empty_homepage_grid():
-    return {s: [None] * n for s, n in HOMEPAGE_SECTION_LEN.items()}
+    grid = {s: [None] * n for s, n in FIXED_HOMEPAGE_SECTION_LEN.items()}
+    grid['complete_purchase'] = []
+    return grid
 
 
 def _published_rows_filter():
@@ -125,6 +137,9 @@ def _distributions_to_grid(distributions, include_product, product_price_map=Non
         idx = _normalize_position_to_index(sec, dist.position)
         if sec is None or idx is None or sec not in grid:
             continue
+        if sec == 'complete_purchase':
+            while len(grid[sec]) <= idx:
+                grid[sec].append(None)
         if dist.product_id is None:
             grid[sec][idx] = None
         else:
@@ -148,6 +163,12 @@ def _merge_draft_over_published(
         if sec is not None and idx is not None:
             draft_by_key[(sec, idx)] = d
     merged = {k: list(v) for k, v in pub_grid.items()}
+    cp_max = len(merged['complete_purchase']) - 1
+    for (sec, pos) in draft_by_key:
+        if sec == 'complete_purchase':
+            cp_max = max(cp_max, pos)
+    while len(merged['complete_purchase']) <= cp_max:
+        merged['complete_purchase'].append(None)
     for section in merged:
         for pos in range(len(merged[section])):
             key = (section, pos)
@@ -240,28 +261,37 @@ def set_homepage_distribution():
         position = data.get('position')
         product_id = data.get('product_id')
         
-        # Validaciones
-        valid_sections = ['featured', 'discounts', 'mattresses', 'complete_purchase']
-        if section not in valid_sections:
+        if section not in HOMEPAGE_SECTION_KEYS:
             return jsonify({
                 'success': False,
-                'error': f'Sección inválida. Debe ser una de: {", ".join(valid_sections)}'
+                'error': f"Sección inválida. Debe ser una de: {', '.join(sorted(HOMEPAGE_SECTION_KEYS))}"
             }), 400
-        
-        # Validar posición según la sección
-        max_positions = {
-            'featured': 4,
-            'discounts': 3,
-            'mattresses': 4,
-            'complete_purchase': 4
-        }
-        
-        if position is None or position < 0 or position >= max_positions[section]:
+
+        try:
+            pos_i = int(position)
+        except (TypeError, ValueError):
             return jsonify({
                 'success': False,
-                'error': f'Posición inválida. Debe estar entre 0 y {max_positions[section] - 1}'
+                'error': 'Posición inválida'
             }), 400
+
+        if section == 'complete_purchase':
+            if pos_i < 0:
+                return jsonify({
+                    'success': False,
+                    'error': 'Posición inválida para accesorios (debe ser >= 0)'
+                }), 400
+        else:
+            max_len = FIXED_HOMEPAGE_SECTION_LEN[section]
+            if pos_i < 0 or pos_i >= max_len:
+                return jsonify({
+                    'success': False,
+                    'error': f'Posición inválida. Debe estar entre 0 y {max_len - 1}'
+                }), 400
         
+        # Normalizar position a entero (JSON puede mandar string)
+        position = pos_i
+
         # Borrador: product_id None = hueco en el inicio al publicar (fila borrador en NULL)
         if product_id is None:
             existing = HomepageProductDistribution.query.filter_by(
@@ -358,7 +388,7 @@ def publish_homepage_distribution():
         HomepageProductDistribution.query.filter_by(is_draft=True).delete(
             synchronize_session=False
         )
-        for section, n in HOMEPAGE_SECTION_LEN.items():
+        for section, n in FIXED_HOMEPAGE_SECTION_LEN.items():
             for pos in range(n):
                 cell = merged[section][pos]
                 pid = None
@@ -375,6 +405,21 @@ def publish_homepage_distribution():
                             is_draft=False,
                         )
                     )
+        for pos, cell in enumerate(merged['complete_purchase']):
+            pid = None
+            if cell is not None:
+                raw = cell.get('product_id')
+                if raw:
+                    pid = uuid.UUID(str(raw))
+            if pid:
+                db.session.add(
+                    HomepageProductDistribution(
+                        section='complete_purchase',
+                        position=pos,
+                        product_id=pid,
+                        is_draft=False,
+                    )
+                )
         db.session.commit()
         return jsonify({
             'success': True,

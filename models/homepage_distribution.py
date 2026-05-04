@@ -8,7 +8,7 @@ class HomepageProductDistribution(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     section = db.Column(db.String(50), nullable=False)  # 'featured', 'discounts', 'mattresses', 'complete_purchase'
-    position = db.Column(db.Integer, nullable=False)  # 0-3 para featured, 0-2 para discounts, 0-3 para los otros
+    position = db.Column(db.Integer, nullable=False)  # 0-based; fijas 0–3 / 0–2; complete_purchase sin tope práctico
     product_id = db.Column(UUID(as_uuid=True), db.ForeignKey('products.id'), nullable=True)
     # False = publicado (sitio); True = borrador hasta publicar
     is_draft = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('false'))
