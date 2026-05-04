@@ -248,7 +248,7 @@ def get_hero_images():
     """
     Listar hero images
     Query params:
-    - position: 1 (hero), 2 (info), 3 (discount), 4 (product banner), 5 (local page), 6 (video) para filtrar por posición.
+    - position: 1 (hero), 2 (info), 3 (discount), 4 (product banner), 5 (local page), 6 (video), 7 (blog listing cover) para filtrar por posición.
       Cada ítem puede incluir image_url_mobile (imagen vertical opcional solo para móvil en position 1).
     - active: true/false para filtrar solo activas
     """
