@@ -2,6 +2,7 @@ from database import db
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import or_
 from datetime import datetime, timezone
+import json
 import logging
 import uuid
 
@@ -20,6 +21,82 @@ def normalize_basic_product_color(raw):
         return None
     s = str(raw).strip().lower()
     return s if s in ALLOWED_BASIC_PRODUCT_COLORS else None
+
+
+MAX_MANUAL_COLOR_LABELS = 24
+MAX_MANUAL_COLOR_LABEL_LEN = 160
+
+
+def coerce_manual_labels_list(raw):
+    """
+    Acepta list, JSON string, o vacío → lista de etiquetas sanitizadas.
+    Dedup por igualdad case-insensitive, preservando el primer texto original.
+    """
+    if raw is None or raw == "":
+        return []
+    items = []
+    if isinstance(raw, str):
+        t = raw.strip()
+        if not t:
+            return []
+        try:
+            parsed = json.loads(t)
+            if isinstance(parsed, list):
+                items = parsed
+            else:
+                return []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        return []
+
+    seen = set()
+    out = []
+    for x in items:
+        if len(out) >= MAX_MANUAL_COLOR_LABELS:
+            break
+        s = str(x).strip()
+        if not s:
+            continue
+        if len(s) > MAX_MANUAL_COLOR_LABEL_LEN:
+            s = s[:MAX_MANUAL_COLOR_LABEL_LEN]
+        key = s.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+    return out
+
+
+def first_basic_color_slug_from_labels(labels):
+    """Primer texto que coincide con slug canónico (catálogo / facet)."""
+    if not labels:
+        return None
+    for lab in labels:
+        n = normalize_basic_product_color(lab)
+        if n:
+            return n
+    return None
+
+
+def apply_manual_colors_from_payload(product, data):
+    """
+    Aplica coloring desde el JSON del cliente.
+    Si viene 'manual_color_labels' → persiste JSON y sincroniza basic_color con primer slug válido si hay.
+    Si no viene esa clave, solo actualiza basic_color si el cliente envía 'basic_color'.
+    """
+    if "manual_color_labels" in data:
+        lst = coerce_manual_labels_list(data.get("manual_color_labels"))
+        if not lst:
+            product.manual_color_labels = None
+        else:
+            product.manual_color_labels = json.dumps(lst, ensure_ascii=False)
+        product.basic_color = first_basic_color_slug_from_labels(lst)
+        return
+    if "basic_color" in data:
+        product.basic_color = normalize_basic_product_color(data.get("basic_color"))
 
 
 def product_price_transfer_filter():
@@ -216,8 +293,10 @@ class Product(db.Model):
     warranty_months = db.Column(db.Integer)
     warranty_description = db.Column(db.Text)
     materials = db.Column(db.Text)
-    # Color básico opcional (negro, beige, gris, blanco) — filtro catálogo / ficha
+    # Color básico opcional (negro, beige, gris, blanco) — filtro catálogo; sync desde manual cuando aplica
     basic_color = db.Column(db.String(24), nullable=True)
+    # JSON ["Rojo vivo", …] cargado en admin; vitrina PDP
+    manual_color_labels = db.Column(db.Text, nullable=True)
     filling_type = db.Column(db.String(255))
     max_supported_weight_kg = db.Column(db.Integer)
     has_pillow_top = db.Column(db.Boolean, default=False)
@@ -386,6 +465,26 @@ class Product(db.Model):
                     return img.image_url
         return None
     
+    def manual_color_labels_list(self):
+        """Lista etiquetas de color cargadas manualmente en admin ([] si no hay o JSON inválido)."""
+        if not self.manual_color_labels:
+            return []
+        try:
+            p = json.loads(self.manual_color_labels)
+            if not isinstance(p, list):
+                return []
+            out = []
+            seen = set()
+            for x in p:
+                s = str(x).strip()
+                if not s or s.lower() in seen:
+                    continue
+                seen.add(s.lower())
+                out.append(s)
+            return out
+        except (json.JSONDecodeError, TypeError):
+            return []
+    
     def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None, precalculated_promos=None):
         data = {
             'id': str(self.id),
@@ -396,6 +495,7 @@ class Product(db.Model):
             'warranty_description': self.warranty_description,
             'materials': self.materials,
             'basic_color': self.basic_color,
+            'manual_color_labels': self.manual_color_labels_list(),
             'filling_type': self.filling_type,
             'max_supported_weight_kg': self.max_supported_weight_kg,
             'has_pillow_top': self.has_pillow_top,

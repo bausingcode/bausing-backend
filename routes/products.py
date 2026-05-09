@@ -17,9 +17,8 @@ from models.product import (
     product_price_card_filter,
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
-    ALLOWED_BASIC_PRODUCT_COLORS,
-    ALLOWED_BASIC_PRODUCT_COLORS,
-    normalize_basic_product_color,
+    apply_manual_colors_from_payload,
+    MAX_MANUAL_COLOR_LABEL_LEN,
 )
 from models.image import ProductImage
 from models.category import Category
@@ -91,11 +90,36 @@ def _trgm_works() -> bool:
     return _trgm_available
 
 
+def _basic_colors_slug_filter_clause(allowed_slugs: list[str]):
+    """
+    OR entre tokens (ya en lower): coincide Product.basic_color o algún elemento de
+    manual_color_labels JSON con igualdad lower(trim(texto elemento)) al token.
+    """
+    if not allowed_slugs:
+        return None
+    lbl_exists = []
+    for s in allowed_slugs:
+        lbl_exists.append(
+            text("""
+EXISTS (
+  SELECT 1
+  FROM jsonb_array_elements_text(
+    COALESCE(CAST(products.manual_color_labels AS JSONB), '[]'::JSONB)
+  ) AS t(x)
+  WHERE lower(trim(x)) = :manual_color_slug_es
+)
+""").bindparams(manual_color_slug_es=str(s))
+        )
+    lbl_or = or_(*lbl_exists) if lbl_exists else False
+    return or_(Product.basic_color.in_(allowed_slugs), lbl_or)
+
+
 def product_text_search_filter(search: str):
     """
     Búsqueda tolerante: ILIKE literal, ILIKE sin tildes (colchon ≈ colchón),
-    nombre de categoría, y opcionalmente similarity (pg_trgm) para typos leves.
-    Varias palabras: deben cumplirse todas (AND), cada una en nombre/desc/SKU/categoría.
+    nombre de categoría, contenido JSON de manual_color_labels, y opcionalmente
+    similarity (pg_trgm) para typos leves.
+    Varias palabras: deben cumplirse todas (AND), cada una en nombre/desc/SKU/categoría/colores JSON.
     """
     q = (search or "").strip()
     if not q:
@@ -122,6 +146,11 @@ def product_text_search_filter(search: str):
         for col in text_cols:
             parts.append(col.ilike(pat, escape="\\"))
             parts.append(_sql_fold_accents(col).like(pat_fold, escape="\\"))
+
+        parts.append(Product.manual_color_labels.ilike(pat, escape="\\"))
+        parts.append(
+            _sql_fold_accents(Product.manual_color_labels).like(pat_fold, escape="\\")
+        )
 
         parts.append(Product.category.has(Category.name.ilike(pat, escape="\\")))
         parts.append(
@@ -363,8 +392,8 @@ def _filling_type_slugs_or_condition(slugs):
 @products_bp.route('/basic-color-facets', methods=['GET'])
 def get_basic_color_facets():
     """
-    Lista corta de colores básicos presentes en productos de la categoría (raíz + descendientes).
-    Query única DISTINCT; público (catálogo).
+    Colores presentes en productos de la categoría (raíz + descendientes): basic_color distinto +
+    elementos de manual_color_labels (JSON). Público (catálogo / facetas filtros).
     Query: category_id (UUID categoría actual del listado — puede ser subcategoría).
     """
     try:
@@ -381,21 +410,50 @@ def get_basic_color_facets():
         if not cat_ids:
             return jsonify({'success': True, 'data': {'basic_colors': []}})
 
-        rows = (
-            db.session.query(Product.basic_color)
+        cid_list = list(cat_ids)
+
+        bc_rows = (
+            db.session.query(func.lower(func.trim(Product.basic_color)))
             .filter(
-                Product.category_id.in_(cat_ids),
+                Product.category_id.in_(cid_list),
                 Product.is_active.is_(True),
                 Product.crm_product_id.isnot(None),
-                Product.basic_color.in_(ALLOWED_BASIC_PRODUCT_COLORS),
+                Product.basic_color.isnot(None),
+                func.trim(Product.basic_color) != '',
             )
             .distinct()
             .all()
         )
-        found = [r[0] for r in rows if r[0]]
-        order = ['negro', 'beige', 'gris', 'blanco']
-        idx = {c: i for i, c in enumerate(order)}
-        basic_colors = sorted(found, key=lambda x: idx.get(x, 99))
+        found_set = {r[0] for r in bc_rows if r[0]}
+
+        placeholders_cats = ",".join(f":mcid{i}" for i in range(len(cid_list)))
+        params_manual = {f"mcid{i}": cid_list[i] for i in range(len(cid_list))}
+        manual_sql_str = (
+            """
+SELECT DISTINCT lower(trim(x))
+FROM products p,
+LATERAL jsonb_array_elements_text(
+    COALESCE(CAST(p.manual_color_labels AS JSONB), '[]'::JSONB)
+) AS t(x)
+WHERE p.category_id IN ("""
+            + placeholders_cats
+            + """)
+AND p.is_active IS TRUE AND p.crm_product_id IS NOT NULL
+AND jsonb_array_length(COALESCE(CAST(p.manual_color_labels AS JSONB), '[]'::JSONB)) > 0
+AND length(trim(COALESCE(x, ''))) > 0
+"""
+        )
+        try:
+            mr = db.session.execute(text(manual_sql_str), params_manual).fetchall()
+            for rw in mr:
+                s = rw[0]
+                if s:
+                    found_set.add(str(s))
+        except Exception:
+            logger.exception("basic-color-facets manual_color_labels lateral")
+
+        order_idx = {'negro': 0, 'beige': 1, 'gris': 2, 'blanco': 3}
+        basic_colors = sorted(found_set, key=lambda x: (order_idx.get(x, 100), x))
         resp = jsonify({'success': True, 'data': {'basic_colors': basic_colors}})
         resp.headers['Cache-Control'] = 'public, max-age=60'
         return resp
@@ -410,7 +468,7 @@ def get_products():
     Obtener productos con búsqueda, filtros y paginación
     
     Query parameters:
-    - search: búsqueda por nombre, descripción o SKU
+    - search: búsqueda por nombre, descripción, SKU y texto dentro de etiquetas de color (manual_color_labels JSON)
     - category_id: filtrar por categoría
     - category_ids: múltiples categorías separadas por coma
     - is_active: filtrar por estado activo (true/false)
@@ -427,7 +485,7 @@ def get_products():
     - require_crm_product_id: si true, solo productos vinculados a CRM (crm_product_id IS NOT NULL). Recomendado para vitrina/catálogo.
     - filling_type_slugs: slugs de Tecnología separados por coma (resortes-biconicos,espuma,espuma-de-alta-densidad,resortes-pocket); filtra por filling_type y opción de categoría principal.
     - subcategory_ids: UUIDs de filas de categoría (hijos) separados por coma; productos con asociación en product_subcategories (OR).
-    - basic_colors: valores canónicos separados por coma (negro,beige,gris,blanco); productos cuyo basic_color está en la lista (OR).
+    - basic_colors: etiquetas separadas por coma (trim+lower cada token); coincidencia en basic_color o algún manual_color_labels igual al token (OR entre tokens).
     - product_ids: UUIDs separados por coma (máx. 12).
 
     Cada ítem incluye has_crm_stock (bool): false si el CRM marca el producto sin stock; la vitrina puede listarlo para mostrar etiqueta y deshabilitar compra en el frontend.
@@ -583,13 +641,21 @@ def get_products():
         # Color básico (opcional en ficha): slugs separados por coma (OR)
         basic_colors_param = request.args.get('basic_colors', '').strip()
         if not ids_only_mode and basic_colors_param:
-            parts = [
-                normalize_basic_product_color(x.strip())
-                for x in basic_colors_param.split(',')
-            ]
-            allowed_bc = [p for p in parts if p]
+            allowed_bc_ordered: list[str] = []
+            seen_bc: set[str] = set()
+            for x in basic_colors_param.split(','):
+                tok = x.strip().lower()
+                if not tok or len(tok) > MAX_MANUAL_COLOR_LABEL_LEN:
+                    continue
+                if tok in seen_bc:
+                    continue
+                seen_bc.add(tok)
+                allowed_bc_ordered.append(tok)
+            allowed_bc = allowed_bc_ordered
             if allowed_bc:
-                query = query.filter(Product.basic_color.in_(allowed_bc))
+                bc_clause = _basic_colors_slug_filter_clause(allowed_bc)
+                if bc_clause is not None:
+                    query = query.filter(bc_clause)
         
         # Filtro por stock (stock en ProductVariantOption)
         if not ids_only_mode and in_stock is not None and in_stock.lower() == 'true':
@@ -1687,7 +1753,6 @@ def create_complete_product():
         # Campos técnicos / colchón (opcionales, mismo criterio que complete CRM)
         _optional_product_fields = (
             'technical_description', 'warranty_months', 'warranty_description', 'materials',
-            'basic_color',
             'filling_type', 'max_supported_weight_kg', 'has_pillow_top', 'is_bed_in_box',
             'mattress_firmness', 'mattress_height_cm', 'mattress_fabric_type',
             'has_double_pillow', 'has_moisture_breathers', 'has_side_handles',
@@ -1701,7 +1766,7 @@ def create_complete_product():
         for _f in _optional_product_fields:
             if _f in data:
                 setattr(product, _f, data[_f])
-        product.basic_color = normalize_basic_product_color(getattr(product, 'basic_color', None))
+        apply_manual_colors_from_payload(product, data)
         if "show_transfer_price_highlight" in data:
             product.show_transfer_price_highlight = bool(data.get("show_transfer_price_highlight"))
         if "display_reference_price" in data:
@@ -1879,9 +1944,8 @@ def update_product(product_id):
         if 'display_reference_price' in data:
             v = data.get('display_reference_price')
             product.display_reference_price = float(v) if v is not None and v != '' else None
-        if 'basic_color' in data:
-            product.basic_color = normalize_basic_product_color(data.get('basic_color'))
-        
+        apply_manual_colors_from_payload(product, data)
+
         db.session.commit()
         
         return jsonify({

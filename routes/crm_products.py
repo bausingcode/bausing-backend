@@ -7,17 +7,8 @@ from models.product import (
     ProductPrice,
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
-    normalize_basic_product_color,
+    apply_manual_colors_from_payload,
 )
-
-
-def _price_kind_from_payload(price_data):
-    raw = price_data.get("price_kind") or PRICE_KIND_TRANSFER
-    if isinstance(raw, str):
-        raw = raw.strip().lower()
-    if raw == "card" or raw == PRICE_KIND_CARD:
-        return PRICE_KIND_CARD
-    return PRICE_KIND_TRANSFER
 from models.locality import Locality
 from models.catalog import Catalog
 from models.category import Category, CategoryOption
@@ -27,6 +18,15 @@ from routes.admin import admin_required
 import uuid
 from datetime import datetime
 import traceback
+
+
+def _price_kind_from_payload(price_data):
+    raw = price_data.get("price_kind") or PRICE_KIND_TRANSFER
+    if isinstance(raw, str):
+        raw = raw.strip().lower()
+    if raw == "card" or raw == PRICE_KIND_CARD:
+        return PRICE_KIND_CARD
+    return PRICE_KIND_TRANSFER
 
 crm_products_bp = Blueprint('crm_products', __name__)
 
@@ -404,7 +404,9 @@ def complete_crm_product(product_id):
             # Excluir campos que son relaciones o que se manejan por separado
             excluded_fields = {
                 'product_id', 'variants', 'images', 'category_option', 'subcategory_associations',
-                'created_at', 'id', 'subcategories'  # Campos que no deben actualizarse desde el request
+                'created_at', 'id', 'subcategories',  # Campos que no deben actualizarse desde el request
+                'basic_color',
+                'manual_color_labels',
             }
             
             for key, value in data.items():
@@ -432,7 +434,7 @@ def complete_crm_product(product_id):
             # Vincular el CRM product_id si no está vinculado
             if not product.crm_product_id:
                 product.crm_product_id = crm_product_id_int
-            product.basic_color = normalize_basic_product_color(getattr(product, 'basic_color', None))
+            apply_manual_colors_from_payload(product, data)
         else:
             # Crear nuevo producto
             # Determinar si es combo basado en el crm_product usando SQL directo
@@ -450,7 +452,6 @@ def complete_crm_product(product_id):
                 warranty_months=data.get('warranty_months'),
                 warranty_description=data.get('warranty_description'),
                 materials=data.get('materials'),
-                basic_color=normalize_basic_product_color(data.get('basic_color')),
                 filling_type=data.get('filling_type'),
                 max_supported_weight_kg=data.get('max_supported_weight_kg'),
                 has_pillow_top=data.get('has_pillow_top', False),
@@ -488,6 +489,7 @@ def complete_crm_product(product_id):
                 fridge_capacity_liters=data.get('fridge_capacity_liters'),
                 freezer_capacity_liters=data.get('freezer_capacity_liters'),
             )
+            apply_manual_colors_from_payload(product, data)
             db.session.add(product)
         
         db.session.flush()  # Para obtener el ID del producto
