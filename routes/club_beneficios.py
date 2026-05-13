@@ -321,6 +321,36 @@ def discard_admin_club_beneficios_draft():
     return jsonify({'success': True, 'message': 'OK'}), 200
 
 
+def _club_batch_main_image_urls(product_ids):
+    """Primera imagen por producto (por posición asc) en una sola query."""
+    if not product_ids:
+        return {}
+    from models.image import ProductImage
+    from sqlalchemy import func
+
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=ProductImage.product_id,
+            order_by=(
+                ProductImage.position.asc().nulls_last(),
+                ProductImage.created_at.asc(),
+            ),
+        )
+        .label("rn")
+    )
+    subq = (
+        db.session.query(ProductImage.product_id, ProductImage.image_url, rn)
+        .filter(ProductImage.product_id.in_(product_ids))
+    ).subquery()
+    rows = (
+        db.session.query(subq.c.product_id, subq.c.image_url)
+        .filter(subq.c.rn == 1)
+        .all()
+    )
+    return {str(pid): str(url).strip() for pid, url in rows if url and str(url).strip()}
+
+
 @club_beneficios_bp.route('/club-beneficios/quick', methods=['GET'])
 def get_public_club_beneficios_quick():
     try:
@@ -328,7 +358,6 @@ def get_public_club_beneficios_quick():
 
         items = (
             ClubBeneficiosItem.query.options(
-                joinedload(ClubBeneficiosItem.product).joinedload(Product.images),
                 joinedload(ClubBeneficiosItem.product).joinedload(Product.category),
                 joinedload(ClubBeneficiosItem.product).joinedload(Product.category_option),
             )
@@ -336,12 +365,12 @@ def get_public_club_beneficios_quick():
             .all()
         )
 
+        active_items = [it for it in items if it.product and it.product.is_active]
+        product_ids = [it.product.id for it in active_items]
+        main_image_by_pid = _club_batch_main_image_urls(product_ids)
+
         products = []
-        for it in items:
-            if not it.product:
-                continue
-            if not it.product.is_active:
-                continue
+        for it in active_items:
             p = it.product.to_dict(
                 include_variants=False,
                 include_images=False,
@@ -349,6 +378,7 @@ def get_public_club_beneficios_quick():
                 include_inventory=False,
                 precalculated_min_price=0.0,
                 precalculated_max_price=0.0,
+                precalculated_main_image=main_image_by_pid.get(str(it.product.id)),
             )
             p['min_price'] = None
             p['max_price'] = None
