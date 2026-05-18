@@ -673,45 +673,12 @@ def sync_data_new():
                     # Obtener estado anterior
                     estado_anterior = estados_anteriores.get(crm_order_id)
                     
-                    # Si el estado cambió, hacer print y enviar email
+                    # Log cambio de estado
                     if estado_anterior and estado_anterior != nuevo_estado:
                         print(f"⚠️ CAMBIO DE ESTADO - Venta ID: {crm_order_id}")
                         print(f"   Estado anterior: {estado_anterior}")
                         print(f"   Estado nuevo: {nuevo_estado}")
                         print(f"   Acción: {accion}")
-                        
-                        # Obtener información del cliente para enviar email
-                        try:
-                            cliente_query = text("""
-                                SELECT client_email, client_name, receipt_number
-                                FROM crm_orders
-                                WHERE crm_order_id = :order_id
-                            """)
-                            cliente_result = db.session.execute(
-                                cliente_query,
-                                {"order_id": crm_order_id}
-                            )
-                            cliente_row = cliente_result.fetchone()
-                            
-                            if cliente_row and cliente_row[0]:  # Si existe client_email
-                                client_email = cliente_row[0]
-                                client_name = cliente_row[1] or "Cliente"
-                                receipt_number = cliente_row[2]
-                                
-                                # Enviar email de notificación de estado
-                                from utils.email_service import email_service
-                                email_service.send_delivery_status_email(
-                                    client_email=client_email,
-                                    client_name=client_name,
-                                    estado=nuevo_estado,
-                                    order_number=receipt_number
-                                )
-                                print(f"✅ Email de notificación enviado a {client_email}")
-                            else:
-                                print(f"⚠️ No se encontró client_email para la venta {crm_order_id}")
-                        except Exception as email_error:
-                            # No fallar la sincronización si falla el envío de email
-                            print(f"❌ Error al enviar email de notificación: {str(email_error)}")
             else:
                 # Otras funciones retornan void o un valor simple
                 sql_start = time.time()
@@ -3601,3 +3568,277 @@ def process_sale_retries():
         error_traceback = traceback.format_exc()
         current_app.logger.error("Error en process_sale_retries: %s", str(e), exc_info=True)
         return server_error()
+
+
+@public_api_bp.route('/public/reviews/send-reminders', methods=['POST'])
+@api_key_required
+def send_review_reminders():
+    """
+    Endpoint para enviar email de agradecimiento con regalo de Pesos Bausing
+    a usuarios con órdenes finalizadas hace 5+ días (un email por usuario).
+    Llamar desde un cron job diario.
+    Body (opcional): { "gift_amount": "2.000" }
+    """
+    try:
+        from utils.email_service import email_service
+        from models.user import User
+        from models.order import Order
+        from sqlalchemy import text
+        from datetime import datetime, timedelta
+
+        data = request.get_json() or {}
+        gift_amount = data.get('gift_amount', '2.000')
+
+        now = datetime.now()
+        finalizado_orders = Order.query.filter_by(status='finalizado').all()
+
+        users_to_notify = {}
+        for order in finalizado_orders:
+            finalization_date = order.finalized_at if order.finalized_at else order.created_at
+            if finalization_date.tzinfo is not None:
+                finalization_date = finalization_date.replace(tzinfo=None)
+            if (now - finalization_date).days < 5:
+                continue
+            if order.user_id in users_to_notify:
+                continue
+
+            receipt_number = None
+            if order.crm_order_id:
+                try:
+                    row = db.session.execute(
+                        text("SELECT receipt_number FROM crm_orders WHERE crm_order_id = :cid"),
+                        {"cid": order.crm_order_id}
+                    ).fetchone()
+                    if row and row[0]:
+                        receipt_number = row[0]
+                except Exception:
+                    pass
+            if not receipt_number:
+                receipt_number = f"#{str(order.id)[:8].upper()}"
+
+            users_to_notify[order.user_id] = (order, receipt_number)
+
+        emails_sent = 0
+        emails_failed = 0
+        frontend_url = Config.FRONTEND_URL
+
+        for user_id, (order, receipt_number) in users_to_notify.items():
+            user = User.query.get(user_id)
+            if not user or not user.email:
+                continue
+
+            first_name = user.first_name or 'Cliente'
+            main_content = f"""
+                <p>Queríamos agradecerte nuevamente por haber confiado en Bausing.</p>
+                <p>Esperamos que ya estés disfrutando tu pedido <strong>{receipt_number}</strong> y que todo haya sido tal como esperabas 🙌</p>
+                <p>Para agradecer tu compra, te regalamos:</p>
+                <p>🎁 <strong>${gift_amount} en Pesos Bausing</strong> para usar en tu próxima compra!</p>
+                <p>Podés canjearlos por cualquiera de nuestros productos, como:</p>
+                <p>✅ Almohadas<br>✅ Sábanas<br>✅ Respaldos<br>✅ Cubrecolchones<br>✅ Electrodomésticos y más</p>
+                <p>👉 Podés usarlos desde tu cuenta o acercándote a nuestro local.</p>
+            """
+
+            sent = email_service.send_custom_email(
+                to=user.email,
+                title="Gracias por tu compra (tenés un regalo 🎁)",
+                header_text="¡Tenés un regalo! 🎁",
+                greeting=f"Hola {first_name}, ¿cómo estás? 😊",
+                main_content=main_content,
+                button_text="Ver productos",
+                button_url=frontend_url,
+                footer_note="Gracias por ser parte de Bausing."
+            )
+
+            if sent:
+                emails_sent += 1
+            else:
+                emails_failed += 1
+
+        return jsonify({
+            'success': True,
+            'message': f'Proceso completado. {emails_sent} emails enviados, {emails_failed} fallidos',
+            'emails_sent': emails_sent,
+            'emails_failed': emails_failed
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al enviar emails: {str(e)}'
+        }), 500
+
+
+@public_api_bp.route('/public/reviews/send-30-day-emails', methods=['POST'])
+@api_key_required
+def send_30_day_emails():
+    """
+    Endpoint para enviar email del programa de referidos a usuarios
+    con órdenes finalizadas hace 30+ días (un email por usuario).
+    Llamar desde un cron job diario.
+    """
+    try:
+        from utils.email_service import email_service
+        from models.user import User
+        from models.order import Order
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        finalizado_orders = Order.query.filter_by(status='finalizado').all()
+
+        users_to_notify = {}
+        for order in finalizado_orders:
+            finalization_date = order.finalized_at if order.finalized_at else order.created_at
+            if finalization_date.tzinfo is not None:
+                finalization_date = finalization_date.replace(tzinfo=None)
+            if (now - finalization_date).days < 30:
+                continue
+            if order.user_id in users_to_notify:
+                continue
+            users_to_notify[order.user_id] = order
+
+        emails_sent = 0
+        emails_failed = 0
+        frontend_url = Config.FRONTEND_URL
+
+        for user_id, order in users_to_notify.items():
+            user = User.query.get(user_id)
+            if not user or not user.email:
+                continue
+
+            first_name = user.first_name or 'Cliente'
+            main_content = """
+                <p>Queríamos contarte algo que muchos clientes ya están aprovechando:</p>
+                <p>👉 ahora podés sumar Pesos Bausing recomendándonos.</p>
+                <p>Desde tu cuenta vas a encontrar tu código de recomendación, que podés compartir con amigos o familiares.
+                Cada vez que alguien realice una compra usando tu código, vas a recibir Pesos Bausing para usar en futuras compras.</p>
+                <p>🔐 Sabemos que hoy hay muchas estafas con este tipo de propuestas, por eso es importante aclararte:</p>
+                <p>✅ Todo se gestiona únicamente desde nuestra web oficial.<br>
+                ✅ Nunca te vamos a pedir datos sensibles por fuera de nuestros canales.<br>
+                ✅ Los beneficios se acreditan directamente en tu cuenta.</p>
+                <p>Para ver tu código, ingresá a tu cuenta.</p>
+                <p>Para conocer más sobre el programa: <a href="https://www.bausing.com.ar/programa-de-referidos" style="color:#00C1A7;">bausing.com.ar/programa-de-referidos</a></p>
+                <p>Si conocés a alguien que necesite algún producto para su hogar, podés recomendar Bausing y empezar a sumar beneficios.</p>
+            """
+
+            sent = email_service.send_custom_email(
+                to=user.email,
+                title="Podés ganar recomendándonos! (te explicamos cómo)",
+                header_text="¡Recomendá y ganá Pesos Bausing!",
+                greeting=f"Hola {first_name}, ¿cómo estás? 😊",
+                main_content=main_content,
+                button_text="Ver mi cuenta",
+                button_url=f"{frontend_url}/usuario",
+                footer_note="Gracias por ser parte de Bausing."
+            )
+
+            if sent:
+                emails_sent += 1
+            else:
+                emails_failed += 1
+
+        return jsonify({
+            'success': True,
+            'message': f'Proceso completado. {emails_sent} emails enviados, {emails_failed} fallidos',
+            'emails_sent': emails_sent,
+            'emails_failed': emails_failed
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al enviar emails: {str(e)}'
+        }), 500
+
+
+@public_api_bp.route('/public/reviews/send-60-day-emails', methods=['POST'])
+@api_key_required
+def send_60_day_emails():
+    """
+    Endpoint para enviar email de upsell a usuarios con órdenes finalizadas
+    hace 60+ días (un email por usuario).
+    Llamar desde un cron job diario.
+    """
+    try:
+        from utils.email_service import email_service
+        from models.user import User
+        from models.order import Order
+        from sqlalchemy import text
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        finalizado_orders = Order.query.filter_by(status='finalizado').all()
+
+        users_to_notify = {}
+        for order in finalizado_orders:
+            finalization_date = order.finalized_at if order.finalized_at else order.created_at
+            if finalization_date.tzinfo is not None:
+                finalization_date = finalization_date.replace(tzinfo=None)
+            if (now - finalization_date).days < 60:
+                continue
+            if order.user_id in users_to_notify:
+                continue
+
+            receipt_number = None
+            if order.crm_order_id:
+                try:
+                    row = db.session.execute(
+                        text("SELECT receipt_number FROM crm_orders WHERE crm_order_id = :cid"),
+                        {"cid": order.crm_order_id}
+                    ).fetchone()
+                    if row and row[0]:
+                        receipt_number = row[0]
+                except Exception:
+                    pass
+            if not receipt_number:
+                receipt_number = f"#{str(order.id)[:8].upper()}"
+
+            users_to_notify[order.user_id] = (order, receipt_number)
+
+        emails_sent = 0
+        emails_failed = 0
+        frontend_url = Config.FRONTEND_URL
+
+        for user_id, (order, receipt_number) in users_to_notify.items():
+            user = User.query.get(user_id)
+            if not user or not user.email:
+                continue
+
+            first_name = user.first_name or 'Cliente'
+            main_content = f"""
+                <p>Hace un tiempo realizaste una compra en Bausing <strong>{receipt_number}</strong>, y queríamos escribirte por algo simple:</p>
+                <p>👉 muchos clientes vuelven a elegirnos para completar su compra o mejorar su experiencia.</p>
+                <p>Por ejemplo, suelen sumar:</p>
+                <p>✅ Almohadas<br>✅ Sábanas<br>✅ Cubrecolchones<br>✅ Respaldos<br>✅ Otros productos para el hogar</p>
+                <p>Son detalles que hacen una gran diferencia en el uso diario. Y lo mejor:</p>
+                <p>👉 podés hacerlo a precios muy accesibles y aprovechando tus beneficios.</p>
+                <p>💡 Recordá que podés usar tus Pesos Bausing en tu próxima compra.</p>
+            """
+
+            sent = email_service.send_custom_email(
+                to=user.email,
+                title="Capaz te falta esto para completar tu compra 👀",
+                header_text="¿Completamos tu compra? 👀",
+                greeting=f"Hola {first_name}, ¿cómo estás? 😊",
+                main_content=main_content,
+                button_text="Ver productos",
+                button_url=frontend_url,
+                footer_note="Gracias por ser parte de Bausing."
+            )
+
+            if sent:
+                emails_sent += 1
+            else:
+                emails_failed += 1
+
+        return jsonify({
+            'success': True,
+            'message': f'Proceso completado. {emails_sent} emails enviados, {emails_failed} fallidos',
+            'emails_sent': emails_sent,
+            'emails_failed': emails_failed
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error al enviar emails: {str(e)}'
+        }), 500
