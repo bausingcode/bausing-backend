@@ -718,126 +718,48 @@ def get_products():
             query = query.order_by(Product.name.asc())
         elif sort == 'name_desc':
             query = query.order_by(Product.name.desc())
-        elif sort == 'price_asc':
-            if locality_id:
-                # Ordenar por precio mínimo en la localidad específica
-                # ProductPrice.product_variant_id apunta a ProductVariantOption.id
-                try:
-                    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-                    import uuid as uuid_lib
+        elif sort in ('price_asc', 'price_desc'):
+            # Subconsulta correlacionada en ORDER BY: no agrega filas ni columnas a la query
+            # principal, por lo que paginate() cuenta correctamente.
+            # Cadena: Product ← ProductVariant → ProductVariantOption → ProductPrice
+            try:
+                import uuid as uuid_lib
+                from sqlalchemy import select as _sa_select
+                agg_fn = func.min if sort == 'price_asc' else func.max
+
+                _pv  = aliased(ProductVariant,      flat=True)
+                _pvo = aliased(ProductVariantOption, flat=True)
+                _pp  = aliased(ProductPrice,         flat=True)
+
+                price_corr = (
+                    _sa_select(agg_fn(_pp.price))
+                    .select_from(_pv)
+                    .join(_pvo, _pvo.product_variant_id == _pv.id)
+                    .join(_pp,  _pp.product_variant_id  == _pvo.id)
+                    .where(
+                        _pv.product_id == Product.id,
+                        or_(_pp.price_kind == "transfer", _pp.price_kind.is_(None)),
+                    )
+                )
+
+                if locality_id:
                     locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                    
                     locality_catalog = cached_locality_catalog
-                    
-                    subquery = db.session.query(
-                        ProductVariantOption.product_variant_id,
-                        func.min(ProductPrice.price).label('min_price')
-                    ).join(
-                        ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-                    ).filter(product_price_transfer_filter())
                     if locality_catalog:
-                        # Filtrar por catalog_id (nuevo sistema)
-                        subquery = subquery.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
+                        price_corr = price_corr.where(_pp.catalog_id == locality_catalog.catalog_id)
                     else:
-                        # Compatibilidad hacia atrás: filtrar por locality_id
-                        subquery = subquery.filter(ProductPrice.locality_id == locality_uuid)
-                    subquery = subquery.group_by(ProductVariantOption.product_variant_id).subquery()
-                    
-                    # Incluir min_price en el SELECT: PostgreSQL exige que ORDER BY aparezca en el
-                    # select list cuando se usa SELECT DISTINCT.
-                    # Alias: si ya hay JOIN a product_variants (stock, rango de precio), un segundo
-                    # .join(ProductVariant) es ambiguo; el alias fija el lado del FROM.
-                    pv_for_price_sort = aliased(ProductVariant)
-                    query = query.join(
-                        pv_for_price_sort, Product.id == pv_for_price_sort.product_id
-                    ).join(
-                        subquery, pv_for_price_sort.id == subquery.c.product_variant_id
-                    ).add_columns(subquery.c.min_price).order_by(
-                        subquery.c.min_price.asc()
-                    ).distinct()
-                except (ValueError, TypeError) as e:
-                    # Continuar sin ordenar por precio si hay error
-                    query = query.order_by(Product.created_at.desc())
-            else:
-                # Ordenar por precio mínimo del catálogo "Cordoba capital" por defecto
-                from models.product import get_cordoba_capital_catalog_id
-                cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
-                if cordoba_capital_catalog_id:
-                    subquery = db.session.query(
-                        ProductVariant.product_id,
-                        func.min(ProductPrice.price).label('min_price')
-                    ).join(ProductPrice).filter(
-                        ProductPrice.catalog_id == cordoba_capital_catalog_id,
-                        product_price_transfer_filter(),
-                    ).group_by(ProductVariant.product_id).subquery()
+                        price_corr = price_corr.where(_pp.locality_id == locality_uuid)
                 else:
-                    # Si no existe el catálogo, ordenar por precio mínimo general
-                    subquery = db.session.query(
-                        ProductVariant.product_id,
-                        func.min(ProductPrice.price).label('min_price')
-                    ).join(ProductPrice).filter(product_price_transfer_filter()).group_by(ProductVariant.product_id).subquery()
-                
-                query = query.join(subquery, Product.id == subquery.c.product_id).add_columns(
-                    subquery.c.min_price
-                ).order_by(subquery.c.min_price.asc())
-        elif sort == 'price_desc':
-            if locality_id:
-                # Ordenar por precio máximo en la localidad específica
-                # ProductPrice.product_variant_id apunta a ProductVariantOption.id
-                try:
-                    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-                    import uuid as uuid_lib
-                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                    
-                    locality_catalog = cached_locality_catalog
-                    
-                    subquery = db.session.query(
-                        ProductVariantOption.product_variant_id,
-                        func.max(ProductPrice.price).label('max_price')
-                    ).join(
-                        ProductPrice, ProductPrice.product_variant_id == ProductVariantOption.id
-                    ).filter(product_price_transfer_filter())
-                    if locality_catalog:
-                        # Filtrar por catalog_id (nuevo sistema)
-                        subquery = subquery.filter(ProductPrice.catalog_id == locality_catalog.catalog_id)
-                    else:
-                        # Compatibilidad hacia atrás: filtrar por locality_id
-                        subquery = subquery.filter(ProductPrice.locality_id == locality_uuid)
-                    subquery = subquery.group_by(ProductVariantOption.product_variant_id).subquery()
-                    
-                    pv_for_price_sort = aliased(ProductVariant)
-                    query = query.join(
-                        pv_for_price_sort, Product.id == pv_for_price_sort.product_id
-                    ).join(
-                        subquery, pv_for_price_sort.id == subquery.c.product_variant_id
-                    ).add_columns(subquery.c.max_price).order_by(
-                        subquery.c.max_price.desc()
-                    ).distinct()
-                except (ValueError, TypeError) as e:
-                    # Continuar sin ordenar por precio si hay error
-                    query = query.order_by(Product.created_at.desc())
-            else:
-                # Ordenar por precio máximo del catálogo "Cordoba capital" por defecto
-                from models.product import get_cordoba_capital_catalog_id
-                cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
-                if cordoba_capital_catalog_id:
-                    subquery = db.session.query(
-                        ProductVariant.product_id,
-                        func.max(ProductPrice.price).label('max_price')
-                    ).join(ProductPrice).filter(
-                        ProductPrice.catalog_id == cordoba_capital_catalog_id,
-                        product_price_transfer_filter(),
-                    ).group_by(ProductVariant.product_id).subquery()
-                else:
-                    # Si no existe el catálogo, ordenar por precio máximo general
-                    subquery = db.session.query(
-                        ProductVariant.product_id,
-                        func.max(ProductPrice.price).label('max_price')
-                    ).join(ProductPrice).filter(product_price_transfer_filter()).group_by(ProductVariant.product_id).subquery()
-                
-                query = query.join(subquery, Product.id == subquery.c.product_id).add_columns(
-                    subquery.c.max_price
-                ).order_by(subquery.c.max_price.desc())
+                    from models.product import get_cordoba_capital_catalog_id
+                    cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                    if cordoba_capital_catalog_id:
+                        price_corr = price_corr.where(_pp.catalog_id == cordoba_capital_catalog_id)
+
+                price_corr = price_corr.correlate(Product).scalar_subquery()
+                order_expr = price_corr.asc().nullslast() if sort == 'price_asc' else price_corr.desc().nullslast()
+                query = query.order_by(order_expr)
+            except (ValueError, TypeError):
+                query = query.order_by(Product.created_at.desc())
         elif sort == 'created_at':
             query = query.order_by(Product.created_at.asc())
         else:  # created_at_desc (default)
