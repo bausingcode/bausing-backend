@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from routes.auth import user_required
 from routes.admin import admin_required
 from config import Config
+from utils.crm_payment_methods import crm_medios_pago_id_for_checkout_method
 import uuid
 from datetime import datetime, timezone, timedelta
 import re
@@ -344,14 +345,7 @@ def create_crm_order_from_order(order):
             forma_pagos_array = []
             for pm in payment_methods_list:
                 pm = pm.strip()
-                if pm == 'wallet':
-                    pm_id = 3
-                elif pm == 'card':
-                    pm_id = 2
-                elif pm == 'transfer':
-                    pm_id = 4
-                else:
-                    pm_id = 1
+                pm_id = crm_medios_pago_id_for_checkout_method(pm)
                 forma_pagos_array.append({
                     "medios_pago_id": pm_id,
                     "monto_total": round(monto_por_metodo, 2),
@@ -359,14 +353,7 @@ def create_crm_order_from_order(order):
                 })
         else:
             pm = payment_methods_list[0].strip()
-            if pm == 'wallet':
-                medios_pago_id = 3
-            elif pm == 'card':
-                medios_pago_id = 2
-            elif pm == 'transfer':
-                medios_pago_id = 4
-            else:
-                medios_pago_id = 1
+            medios_pago_id = crm_medios_pago_id_for_checkout_method(pm)
             forma_pagos_array = [{
                 "medios_pago_id": medios_pago_id,
                 "monto_total": float(order.total),
@@ -1341,17 +1328,8 @@ def create_order():
                 pm_amount = float(pm.get('amount', 0))
                 pm_processed = pm.get('processed', False)
                 
-                # Mapear método a medios_pago_id
-                if pm_method == 'wallet':
-                    pm_medios_pago_id = 3
-                elif pm_method == 'card':
-                    pm_medios_pago_id = 2
-                elif pm_method == 'transfer':
-                    pm_medios_pago_id = 4
-                else:
-                    pm_medios_pago_id = 1  # cash / abonar al recibir
-                
-                # Usar el medios_pago_id del frontend si viene (puede tener mapeo propio)
+                pm_medios_pago_id = crm_medios_pago_id_for_checkout_method(pm_method)
+                # Usar el medios_pago_id del frontend si viene (debe coincidir con el CRM)
                 if pm.get('medios_pago_id'):
                     pm_medios_pago_id = int(pm['medios_pago_id'])
                 
@@ -1368,15 +1346,8 @@ def create_order():
                 payment_method = combined_methods
         else:
             # Backward compat: un solo método de pago
-            if payment_method == 'wallet':
-                medios_pago_id = 3
-            elif payment_method == 'card':
-                medios_pago_id = 2
-            elif payment_method == 'transfer':
-                medios_pago_id = 4
-            else:
-                medios_pago_id = 1  # Abonar al recibir
-            
+            medios_pago_id = crm_medios_pago_id_for_checkout_method(payment_method)
+
             monto_total_pago = total_productos_original if es_pago_wallet_completo else total_a_pagar
             
             forma_pagos_array = [{
@@ -1403,6 +1374,10 @@ def create_order():
                     longitud = float(lat_lon_parts[1].strip())
             except (ValueError, AttributeError):
                 pass
+
+        from utils.order_observations import resolve_order_observations
+
+        order_observations = resolve_order_observations(data)
         
         # Preparar payload para /api/ventas/crear
         venta_payload = {
@@ -1420,12 +1395,13 @@ def create_order():
             "provincia_id": crm_province_id,
             "localidad": city or "",
             "zona_id": crm_zone_id,
-            "observaciones": "",
+            "observaciones": order_observations,
             "lat_long": {"latitud": latitud, "longitud": longitud},
             "js": js_items,  # Items con precios ajustados si hay descuento de billetera
             "formaPagos": forma_pagos_array,  # Medios de pago (puede ser múltiples)
             # Datos adicionales para crear la orden
             "user_id": str(user.id),
+            "observations": order_observations,
             "payment_method": payment_method,
             "payment_processed": any(fp.get('procesado', False) for fp in forma_pagos_array),  # True si al menos un pago fue procesado
             "used_wallet_amount": used_wallet_amount,

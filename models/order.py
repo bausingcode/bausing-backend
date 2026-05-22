@@ -30,6 +30,7 @@ class Order(db.Model):
     )
     coupon_code = db.Column(db.String(64), nullable=True)
     coupon_discount_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    observations = db.Column(db.Text, nullable=True)
     # Usar lambda para asegurar que se llame la función cada vez
     created_at = db.Column(db.DateTime, default=lambda: get_argentina_time(), nullable=False)
     finalized_at = db.Column(db.DateTime, nullable=True)  # Timestamp cuando la orden fue finalizada
@@ -56,6 +57,7 @@ class Order(db.Model):
             'coupon_discount_amount': float(self.coupon_discount_amount)
             if self.coupon_discount_amount is not None
             else None,
+            'observations': self.observations,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'finalized_at': self.finalized_at.isoformat() if self.finalized_at else None
         }

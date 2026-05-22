@@ -2077,8 +2077,11 @@ def crear_venta():
                         "email_cliente": data.get('email_cliente'),
                         "provincia_id": data.get('provincia_id'),
                         "localidad": data.get('localidad'),
-                        "zona_id": data.get('zona_id')
+                        "zona_id": data.get('zona_id'),
                     }
+                    _obs_ext = (data.get('observaciones') or '').strip()
+                    if _obs_ext:
+                        payload_externo["observaciones"] = _obs_ext
                     
                     # Normalizar el formato del CUIT si existe
                     if payload_externo.get('tipo_documento_cliente') == 2 and payload_externo.get('documento_cliente'):
@@ -2879,6 +2882,12 @@ def crear_venta():
                                 _coupon_disc = float(data.get('coupon_discount_amount'))
                             except (TypeError, ValueError):
                                 _coupon_disc = None
+                        _order_obs = None
+                        if data.get('observations'):
+                            _order_obs = str(data.get('observations', '')).strip()[:2000] or None
+                        elif isinstance(data.get('observaciones'), str) and data.get('observaciones', '').strip():
+                            _order_obs = str(data.get('observaciones', '')).strip()[:2000]
+
                         order = Order(
                             user_id=user_id,
                             crm_order_id=crm_order_id,
@@ -2892,6 +2901,7 @@ def crear_venta():
                             coupon_id=_coupon_id,
                             coupon_code=_coupon_code,
                             coupon_discount_amount=_coupon_disc,
+                            observations=_order_obs,
                         )
                         db.session.add(order)
                         db.session.flush()
