@@ -302,6 +302,100 @@ def register():
             'error': str(e)
         }), 500
 
+@auth_bp.route('/auto-register', methods=['POST'])
+def auto_register():
+    """
+    Registro automático durante checkout.
+    Genera contraseña aleatoria y la envía por email.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Datos requeridos'}), 400
+
+        email = data.get('email', '').strip().lower()
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        phone = data.get('phone')
+
+        if not email or not first_name or not last_name:
+            return jsonify({'success': False, 'error': 'Email, nombre y apellido son requeridos'}), 400
+
+        if '@' not in email or '.' not in email.split('@')[1]:
+            return jsonify({'success': False, 'error': 'El formato del email no es válido'}), 400
+
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            return jsonify({
+                'success': False,
+                'error': 'Ya existe una cuenta con este email. Por favor, iniciá sesión.',
+                'email_exists': True
+            }), 400
+
+        alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        password = ''.join(secrets.choice(alphabet) for _ in range(12))
+
+        user = User(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            phone=phone,
+            email_verified=True,
+            referral_code=User.generate_referral_code()
+        )
+        user.set_password(password)
+
+        db.session.add(user)
+        db.session.flush()
+
+        from models.wallet import Wallet
+        wallet = Wallet(user_id=user.id, balance=0.00, is_blocked=False)
+        db.session.add(wallet)
+        db.session.commit()
+
+        try:
+            login_url = f"{Config.FRONTEND_URL}/login"
+            email_service.send_custom_email(
+                to=user.email,
+                title="Tu cuenta en Bausing fue creada",
+                header_text="¡Bienvenido a Bausing!",
+                greeting=f"Hola {first_name},",
+                main_content=(
+                    f"Creamos una cuenta automáticamente para que puedas hacer seguimiento de tus pedidos.<br><br>"
+                    f"Tus datos de acceso:<br><br>"
+                    f"<strong>Email:</strong> {email}<br>"
+                    f"<strong>Contraseña:</strong> {password}<br><br>"
+                    f"Te recomendamos cambiar tu contraseña una vez que inicies sesión."
+                ),
+                button_text="Iniciar sesión",
+                button_url=login_url,
+                footer_note="Si no iniciaste una compra en Bausing, ignorá este email."
+            )
+        except Exception:
+            pass
+
+        token = generate_token(user)
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'user': user.to_dict(),
+                'token': token
+            }
+        }), 201
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': 'Ya existe una cuenta con este email. Por favor, iniciá sesión.',
+            'email_exists': True
+        }), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @auth_bp.route('/login', methods=['POST'])
 def login():
     """
