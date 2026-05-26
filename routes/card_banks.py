@@ -306,26 +306,38 @@ def get_installments():
             installments_query = CardBankInstallment.query.filter_by(card_type_id=card_type.id)
             if only_active:
                 installments_query = installments_query.filter_by(is_active=True)
-            installments = installments_query.all()
-            
-            # Agrupar por banco
+            installments = installments_query.order_by(
+                CardBankInstallment.display_order,
+                CardBankInstallment.installments,
+            ).all()
+
+            # Agrupar por banco (cuotas ya vienen ordenadas por display_order e installments)
             banks_data = {}
+            bank_display_order = {}
             for inst in installments:
                 bank = Bank.query.get(inst.bank_id)
                 if not bank or (only_active and not bank.is_active):
                     continue
-                
+
                 bank_name = bank.name
                 if bank_name not in banks_data:
                     banks_data[bank_name] = []
-                
+                    bank_display_order[bank_name] = bank.display_order
+
                 banks_data[bank_name].append({
                     'cuotas': inst.installments,
-                    'recargoPorcentaje': float(inst.surcharge_percentage)
+                    'recargoPorcentaje': float(inst.surcharge_percentage),
+                    'displayOrder': inst.display_order,
                 })
-            
+
             if banks_data:
-                result[card_type.code] = banks_data
+                sorted_bank_names = sorted(
+                    banks_data.keys(),
+                    key=lambda name: (bank_display_order.get(name, 0), name),
+                )
+                result[card_type.code] = {
+                    name: banks_data[name] for name in sorted_bank_names
+                }
         
         return jsonify({
             'success': True,
