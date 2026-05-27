@@ -1154,6 +1154,11 @@ def create_order():
                     'error': 'El monto de billetera no puede superar el subtotal de productos (después del cupón).'
                 }), 400
         
+        # Factor de recargo de cuotas con tarjeta (1.0 si no hay recargo)
+        _cpd = data.get('card_payment_details') or {}
+        _card_surcharge = float(_cpd.get('surcharge_percent', 0)) if _cpd.get('surcharge_percent') else 0.0
+        _surcharge_factor = 1 + _card_surcharge / 100
+
         # Ajustar precios de los items proporcionalmente para el CRM
         # Si es pago completo con wallet, NO ajustar precios (enviar precios originales)
         js_items = []
@@ -1202,13 +1207,15 @@ def create_order():
                 precio_total_ajustado = precio_total_base
                 precio_unitario_ajustado = precio_unitario_base
             
+            # precio incluye el recargo de cuotas; unitario_sin_fpago guarda el precio base
+            precio_con_recargo = round(precio_total_ajustado * _surcharge_factor, 2)
             js_items.append({
                 "id": None,
                 "accion": "N",
                 "item_id": item_id,
                 "cantidad_recibida": cantidad,
-                "precio": precio_total_ajustado,  # Precio TOTAL (original si es wallet completo, ajustado si es descuento parcial)
-                "unitario_sin_fpago": precio_unitario_ajustado,  # Precio unitario
+                "precio": precio_con_recargo,
+                "unitario_sin_fpago": precio_unitario_ajustado,
                 "descripcion": product.name
             })
         
@@ -1320,6 +1327,9 @@ def create_order():
         # Si no, construir uno solo con el método de pago principal (backward compat)
         # Nota: frontend_payment_methods ya está definido arriba (línea 861)
         
+        card_payment_details = data.get('card_payment_details') or {}
+        card_installments = int(card_payment_details.get('installments', 1)) if card_payment_details.get('installments') else 1
+
         if frontend_payment_methods and isinstance(frontend_payment_methods, list) and len(frontend_payment_methods) > 0:
             # Multi-payment: construir formaPagos desde el array del frontend
             forma_pagos_array = []
@@ -1327,19 +1337,20 @@ def create_order():
                 pm_method = pm.get('method', 'card')
                 pm_amount = float(pm.get('amount', 0))
                 pm_processed = pm.get('processed', False)
-                
+
                 pm_medios_pago_id = crm_medios_pago_id_for_checkout_method(pm_method)
                 # Usar el medios_pago_id del frontend si viene (debe coincidir con el CRM)
                 if pm.get('medios_pago_id'):
                     pm_medios_pago_id = int(pm['medios_pago_id'])
-                
+
                 if pm_amount > 0:
                     forma_pagos_array.append({
                         "medios_pago_id": pm_medios_pago_id,
                         "monto_total": pm_amount,
-                        "procesado": pm_processed
+                        "procesado": pm_processed,
+                        "cantCuotas": card_installments if pm_method == 'card' else 1
                     })
-            
+
             # Guardar los métodos combinados en payment_method (separados por coma)
             combined_methods = ','.join([pm.get('method', 'card') for pm in frontend_payment_methods if float(pm.get('amount', 0)) > 0])
             if combined_methods:
@@ -1349,11 +1360,12 @@ def create_order():
             medios_pago_id = crm_medios_pago_id_for_checkout_method(payment_method)
 
             monto_total_pago = total_productos_original if es_pago_wallet_completo else total_a_pagar
-            
+
             forma_pagos_array = [{
                 "medios_pago_id": medios_pago_id,
                 "monto_total": monto_total_pago,
-                "procesado": payment_method == 'wallet' or (not pay_on_delivery)
+                "procesado": payment_method == 'wallet' or (not pay_on_delivery),
+                "cantCuotas": card_installments if payment_method == 'card' else 1
             }]
         
         # Obtener latitud y longitud de la dirección

@@ -2139,7 +2139,8 @@ def crear_venta():
                         forma_pago_item = {
                             "medios_pago_id": pago.get('medios_pago_id'),
                             "monto_total": float(pago.get('monto_total', 0)),
-                            "procesado": bool(pago.get('procesado', False))
+                            "procesado": bool(pago.get('procesado', False)),
+                            "cantCuotas": int(pago.get('cantCuotas', 1))
                         }
                         forma_pagos_array.append(forma_pago_item)
                     payload_externo["formaPagos"] = forma_pagos_array
