@@ -1159,6 +1159,20 @@ def create_order():
         _card_surcharge = float(_cpd.get('surcharge_percent', 0)) if _cpd.get('surcharge_percent') else 0.0
         _surcharge_factor = 1 + _card_surcharge / 100
 
+        # Para multi-pago, el recargo sólo aplica a la porción pagada con tarjeta.
+        # El frontend ya envía cada método con su monto final (tarjeta = base * (1+recargo)).
+        # Calculamos el factor efectivo real comparando la suma total de formaPagos
+        # contra el total base de productos, de modo que sum(js.precio) == sum(formaPagos).
+        if es_multi_payment and frontend_payment_methods and total_productos_original > 0.01:
+            _all_payments_total = sum(
+                float(pm.get('amount', 0))
+                for pm in frontend_payment_methods
+                if float(pm.get('amount', 0) or 0) > 0
+            )
+            _effective_surcharge_factor = _all_payments_total / total_productos_original if _all_payments_total > 0 else 1.0
+        else:
+            _effective_surcharge_factor = _surcharge_factor
+
         # Ajustar precios de los items proporcionalmente para el CRM
         # Si es pago completo con wallet, NO ajustar precios (enviar precios originales)
         js_items = []
@@ -1208,7 +1222,7 @@ def create_order():
                 precio_unitario_ajustado = precio_unitario_base
             
             # precio incluye el recargo de cuotas; unitario_sin_fpago guarda el precio base
-            precio_con_recargo = round(precio_total_ajustado * _surcharge_factor, 2)
+            precio_con_recargo = round(precio_total_ajustado * _effective_surcharge_factor, 2)
             js_items.append({
                 "id": None,
                 "accion": "N",
