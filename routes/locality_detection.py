@@ -384,10 +384,11 @@ def detect_locality():
 
                 # Si no se especificó address_id y hay múltiples direcciones, pedir selección
                 if len(addresses_with_coords) > 1:
+                    # Devolver TODAS las direcciones del usuario (no solo las que tienen lat_lon)
+                    all_addresses = Address.query.filter_by(user_id=user.id).all()
                     addresses_data = []
-                    for addr in addresses_with_coords:
+                    for addr in all_addresses:
                         addr_dict = addr.to_dict()
-                        # Parsear lat_lon para incluir coordenadas separadas
                         if addr.lat_lon:
                             try:
                                 lat_str, lon_str = addr.lat_lon.split(',')
@@ -398,7 +399,7 @@ def detect_locality():
                             except:
                                 pass
                         addresses_data.append(addr_dict)
-                    
+
                     return jsonify({
                         'success': True,
                         'data': {
@@ -407,7 +408,7 @@ def detect_locality():
                             'message': 'Por favor selecciona una dirección para calcular los precios'
                         }
                     }), 200
-                
+
                 # Si hay una sola dirección, usarla automáticamente
                 elif len(addresses_with_coords) == 1:
                     selected_address = addresses_with_coords[0]
