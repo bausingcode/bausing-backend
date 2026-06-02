@@ -13,13 +13,26 @@ logger = logging.getLogger(__name__)
 BUSPLUS_COTIZAR_URL = "https://ws.busplus.com.ar/alerce/cotizar"
 VIA_CARGO_PLUS_ED_LABEL = "VIA CARGO PLUS ED"
 REQUEST_TIMEOUT_S = 30
+BUSPLUS_DIM_CM_MIN = 1
+BUSPLUS_DIM_CM_MAX = 999
 
 
-def _fmt_dim_m(value: float) -> str:
+def _fmt_kilos(value: float) -> str:
     if value < 0:
         value = 0.0
     s = f"{value:.4f}".rstrip("0").rstrip(".")
     return s if s else "0"
+
+
+def _busplus_dim_cm(value: float, label: str) -> int:
+    """Busplus: Largo/Alto/Ancho enteros en centímetros (1–999)."""
+    n = int(round(float(value)))
+    if n < BUSPLUS_DIM_CM_MIN or n > BUSPLUS_DIM_CM_MAX:
+        raise ValueError(
+            f"{label} debe estar entre {BUSPLUS_DIM_CM_MIN} y {BUSPLUS_DIM_CM_MAX} cm "
+            f"(recibido {n})"
+        )
+    return n
 
 
 def _to_float(v: Any) -> Optional[float]:
@@ -72,6 +85,8 @@ def cotizar_busplus_payload(
     raw_url = (url or BUSPLUS_COTIZAR_URL or "").strip()
     post_url = raw_url.rstrip("/")
 
+    logger.debug("Viacargo cotizar busplus POST %s payload=%s", post_url, payload)
+
     try:
         r = requests.post(
             post_url,
@@ -97,7 +112,7 @@ def cotizar_busplus_payload(
             bus_msg = data.get("message") or data.get("Message")
             if isinstance(bus_msg, str) and bus_msg.strip():
                 err = f"{err}: {bus_msg.strip()}"
-        logger.warning("Viacargo cotizar: %s", err)
+        logger.warning("Viacargo cotizar: %s body=%s", err, json.dumps(data, ensure_ascii=False))
         return None, err, http_status
 
     total, err = extract_viacargo_plus_ed_total(data)
@@ -116,13 +131,14 @@ def build_payload_strings(
     importe_valor_declarado: int,
     numero_bultos: int,
     kilos: float,
-    largo_m: float,
-    alto_m: float,
-    ancho_m: float,
+    largo_cm: float,
+    alto_cm: float,
+    ancho_cm: float,
     tipo_portes: str = "P",
 ) -> Dict[str, Any]:
     """
-    JSON para Alerce/Busplus. Id, CP, bultos e importe como números en JSON.
+    JSON para Alerce/Busplus.
+    Largo, Alto y Ancho: enteros en centímetros (1–999), como en la BD del producto.
     """
     cp_r = str(cp_remitente).strip()[:4]
     cp_d = str(cp_destinatario).strip()[:4]
@@ -142,9 +158,9 @@ def build_payload_strings(
         "CodigoPostalDestinatario": int(cp_d),
         "ImporteValorDeclarado": int(max(0, importe_valor_declarado)),
         "NumeroBultos": max(1, int(numero_bultos)),
-        "Kilos": _fmt_dim_m(kilos),
-        "Largo": _fmt_dim_m(largo_m),
-        "Alto": _fmt_dim_m(alto_m),
-        "Ancho": _fmt_dim_m(ancho_m),
+        "Kilos": _fmt_kilos(kilos),
+        "Largo": _busplus_dim_cm(largo_cm, "Largo"),
+        "Alto": _busplus_dim_cm(alto_cm, "Alto"),
+        "Ancho": _busplus_dim_cm(ancho_cm, "Ancho"),
         "TipoPortes": (tipo_portes or "P").strip() or "P",
     }

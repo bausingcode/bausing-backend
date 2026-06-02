@@ -49,15 +49,16 @@ def _norm_cp_busplus(value: str) -> str:
     return d
 
 
-def _m_from_cm(v) -> float:
+def _cm_from_db(v) -> int:
+    """Medidas en BD ya están en centímetros (enteros para Busplus)."""
     if v is None:
-        return 0.0
-    if isinstance(v, Decimal):
-        return float(v) / 100.0
+        return 0
     try:
-        return float(v) / 100.0
+        if isinstance(v, Decimal):
+            return int(round(float(v)))
+        return int(round(float(v)))
     except (TypeError, ValueError):
-        return 0.0
+        return 0
 
 
 @viacargo_shipping_bp.route("/public/viacargo-cotizar", methods=["POST"])
@@ -122,9 +123,9 @@ def public_viacargo_cotizar():
 
     total_qty = 0
     total_kg = 0.0
-    max_l = 0.0
-    max_w = 0.0
-    per_line_stacked_h: list = []
+    max_largo_cm = 0
+    max_ancho_cm = 0
+    per_line_stacked_h_cm: list = []
 
     for raw in items:
         if not isinstance(raw, dict):
@@ -174,10 +175,10 @@ def public_viacargo_cotizar():
                 400,
             )
         w_kg = float(kg) if not isinstance(kg, Decimal) else float(kg)
-        ld = _m_from_cm(d_cm)
-        lw = _m_from_cm(w_cm)
-        lh = _m_from_cm(h_cm)
-        if w_kg <= 0 or ld <= 0 or lw <= 0 or lh <= 0:
+        largo_cm = _cm_from_db(d_cm)
+        ancho_cm = _cm_from_db(w_cm)
+        alto_unit_cm = _cm_from_db(h_cm)
+        if w_kg <= 0 or largo_cm <= 0 or ancho_cm <= 0 or alto_unit_cm <= 0:
             return (
                 jsonify(
                     {
@@ -190,9 +191,9 @@ def public_viacargo_cotizar():
         line_kg = w_kg * qty
         total_qty += qty
         total_kg += line_kg
-        max_l = max(max_l, ld)
-        max_w = max(max_w, lw)
-        per_line_stacked_h.append(lh * qty)
+        max_largo_cm = max(max_largo_cm, largo_cm)
+        max_ancho_cm = max(max_ancho_cm, ancho_cm)
+        per_line_stacked_h_cm.append(alto_unit_cm * qty)
 
     if total_qty < 1:
         return (
@@ -205,20 +206,23 @@ def public_viacargo_cotizar():
             400,
         )
 
-    alto_m = max(per_line_stacked_h) if per_line_stacked_h else 0.0
+    alto_cm = max(per_line_stacked_h_cm) if per_line_stacked_h_cm else 0
 
-    payload = build_payload_strings(
-        id_cliente=id_cliente,
-        id_centro=id_centro,
-        cp_remitente=cp_remit,
-        cp_destinatario=cp_dest_n,
-        importe_valor_declarado=val_decl,
-        numero_bultos=total_qty,
-        kilos=total_kg,
-        largo_m=max_l,
-        alto_m=alto_m,
-        ancho_m=max_w,
-    )
+    try:
+        payload = build_payload_strings(
+            id_cliente=id_cliente,
+            id_centro=id_centro,
+            cp_remitente=cp_remit,
+            cp_destinatario=cp_dest_n,
+            importe_valor_declarado=val_decl,
+            numero_bultos=total_qty,
+            kilos=total_kg,
+            largo_cm=max_largo_cm,
+            alto_cm=alto_cm,
+            ancho_cm=max_ancho_cm,
+        )
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
     total, err, bus_http = cotizar_busplus_payload(payload, url=busplus_url)
     if err:
