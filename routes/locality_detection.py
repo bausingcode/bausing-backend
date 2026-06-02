@@ -369,6 +369,7 @@ def detect_locality():
                         else:
                             # Dirección sin coords: geocodificar on-the-fly y guardar resultado
                             province_name = selected_address.province.name if selected_address.province else None
+                            # Intento 1: dirección completa
                             geocoded = get_lat_lon_from_address(
                                 selected_address.street,
                                 selected_address.number,
@@ -376,13 +377,22 @@ def detect_locality():
                                 selected_address.postal_code,
                                 province_name,
                             )
+                            # Intento 2: solo ciudad + provincia (más tolerante a calles sin datos OSM)
+                            if not geocoded:
+                                geocoded = get_lat_lon_from_address(
+                                    None,
+                                    None,
+                                    selected_address.city,
+                                    None,
+                                    province_name,
+                                )
                             if geocoded:
                                 selected_address.lat_lon = geocoded
                                 db.session.commit()
                                 lat_str, lon_str = geocoded.split(',')
                                 lat = float(lat_str.strip())
                                 lon = float(lon_str.strip())
-                except (ValueError, AttributeError):
+                except Exception:
                     pass
 
             # Cuando se proporcionó address_id nunca mostramos el selector de dirección;
@@ -433,14 +443,6 @@ def detect_locality():
                     lat = float(lat_str.strip())
                     lon = float(lon_str.strip())
         
-        # Si se proporcionó address_id y no se pudieron obtener coordenadas, retornar error.
-        # Nunca usar IP como fallback cuando el usuario seleccionó una dirección explícitamente.
-        if address_id and (lat is None or lon is None):
-            return jsonify({
-                'success': False,
-                'error': 'No se pudieron obtener las coordenadas para esta dirección. Por favor, edita la dirección e intenta nuevamente.'
-            }), 422
-
         # Si no se proporcionan coordenadas, intentar obtenerlas desde IP
         if lat is None or lon is None:
             
