@@ -5,7 +5,7 @@ from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 from models.locality import Locality
 from models.catalog import Catalog, LocalityCatalog
 from models.address import Address
-from routes.auth import verify_token
+from routes.auth import verify_token, get_lat_lon_from_address
 from models.user import User
 from config import Config
 import requests
@@ -359,18 +359,35 @@ def detect_locality():
                     address_uuid = uuid.UUID(address_id)
                     selected_address = Address.query.filter_by(
                         user_id=user.id, id=address_uuid
-                    ).filter(
-                        Address.lat_lon.isnot(None),
-                        Address.lat_lon != ''
                     ).first()
                     if selected_address:
-                        lat_str, lon_str = selected_address.lat_lon.split(',')
-                        lat = float(lat_str.strip())
-                        lon = float(lon_str.strip())
+                        if selected_address.lat_lon:
+                            # Usar coords ya guardadas
+                            lat_str, lon_str = selected_address.lat_lon.split(',')
+                            lat = float(lat_str.strip())
+                            lon = float(lon_str.strip())
+                        else:
+                            # Dirección sin coords: geocodificar on-the-fly y guardar resultado
+                            province_name = selected_address.province.name if selected_address.province else None
+                            geocoded = get_lat_lon_from_address(
+                                selected_address.street,
+                                selected_address.number,
+                                selected_address.city,
+                                selected_address.postal_code,
+                                province_name,
+                            )
+                            if geocoded:
+                                selected_address.lat_lon = geocoded
+                                db.session.commit()
+                                lat_str, lon_str = geocoded.split(',')
+                                lat = float(lat_str.strip())
+                                lon = float(lon_str.strip())
                 except (ValueError, AttributeError):
                     pass
 
-            if lat is None and lon is None:
+            # Cuando se proporcionó address_id nunca mostramos el selector de dirección;
+            # si lat/lon siguen siendo None (geocodificación falló) caemos a IP.
+            if lat is None and lon is None and not address_id:
                 addresses_with_coords = Address.query.filter_by(
                     user_id=user.id
                 ).filter(
