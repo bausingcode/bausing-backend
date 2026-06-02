@@ -11,8 +11,63 @@ from config import Config
 import requests
 import json
 import uuid
+import time
 
 locality_detection_bp = Blueprint('locality_detection', __name__)
+
+# ── Cache de zonas ──────────────────────────────────────────────────────────
+# Las zonas de entrega cambian raramente; cachearlas evita una query pesada
+# con joinedload en cada request de detect-locality.
+_ZONES_CACHE: list = []
+_ZONES_CACHE_TS: float = 0.0
+_ZONES_CACHE_TTL: float = 300.0  # 5 minutos
+
+def _get_cached_zones() -> list:
+    global _ZONES_CACHE, _ZONES_CACHE_TS
+    now = time.monotonic()
+    if _ZONES_CACHE and (now - _ZONES_CACHE_TS) < _ZONES_CACHE_TTL:
+        return _ZONES_CACHE
+    zones = CrmDeliveryZone.query.options(
+        joinedload(CrmDeliveryZone.zone_localities).joinedload(CrmZoneLocality.locality)
+    ).filter(
+        CrmDeliveryZone.crm_deleted_at.is_(None)
+    ).all()
+    _ZONES_CACHE = zones
+    _ZONES_CACHE_TS = now
+    return zones
+
+# ── Cache de resultados de polygon-check ────────────────────────────────────
+# Coordenadas redondeadas a 3 decimales (~100 m de precisión).
+# Evita recalcular ray-casting para la misma ubicación dentro de la misma sesión.
+_COORD_CACHE: dict = {}
+_COORD_CACHE_TTL: float = 300.0
+_COORD_CACHE_MAX: int = 500  # límite para no crecer sin fin
+
+def _coord_key(lon: float, lat: float) -> str:
+    return f"{round(lon, 3)},{round(lat, 3)}"
+
+def _get_coord_cache(lon: float, lat: float):
+    key = _coord_key(lon, lat)
+    entry = _COORD_CACHE.get(key)
+    if entry and (time.monotonic() - entry['ts']) < _COORD_CACHE_TTL:
+        return entry['value']
+    return None
+
+def _set_coord_cache(lon: float, lat: float, value):
+    global _COORD_CACHE
+    if len(_COORD_CACHE) >= _COORD_CACHE_MAX:
+        # Limpiar entradas expiradas o la mitad más antigua
+        now = time.monotonic()
+        _COORD_CACHE = {
+            k: v for k, v in _COORD_CACHE.items()
+            if (now - v['ts']) < _COORD_CACHE_TTL
+        }
+        if len(_COORD_CACHE) >= _COORD_CACHE_MAX:
+            # Eliminar la mitad más antigua
+            sorted_keys = sorted(_COORD_CACHE, key=lambda k: _COORD_CACHE[k]['ts'])
+            for k in sorted_keys[:len(sorted_keys) // 2]:
+                del _COORD_CACHE[k]
+    _COORD_CACHE[_coord_key(lon, lat)] = {'value': value, 'ts': time.monotonic()}
 
 
 def point_in_polygon(lon, lat, polygon_coordinates):
@@ -85,26 +140,13 @@ def point_in_polygon(lon, lat, polygon_coordinates):
 def find_locality_by_coordinates(lon, lat):
     """
     Encuentra la localidad basada en coordenadas geográficas.
-    Busca en todas las zonas de entrega y verifica si el punto está dentro de algún polígono.
-    Si el punto está dentro de múltiples zonas y alguna empieza con "TERCERIZADO",
-    usa esa zona solo para envío y la otra para todo lo demás.
-    
-    Args:
-        lon: Longitud
-        lat: Latitud
-    
-    Returns:
-        Tuple (Locality object, shipping_zone_locality) o (None, None) si no se encuentra.
-        shipping_zone_locality es el CrmZoneLocality de la zona TERCERIZADO si existe,
-        None en caso contrario.
+    Usa cache en memoria para zonas y para resultados de polygon-check.
     """
-    
-    # Zonas con localidad precargada (evita N queries a crm_zone_localities)
-    zones = CrmDeliveryZone.query.options(
-        joinedload(CrmDeliveryZone.zone_localities).joinedload(CrmZoneLocality.locality)
-    ).filter(
-        CrmDeliveryZone.crm_deleted_at.is_(None)
-    ).all()
+    cached = _get_coord_cache(lon, lat)
+    if cached is not None:
+        return cached
+
+    zones = _get_cached_zones()
     
     
     # Lista para almacenar todas las zonas que contienen el punto
@@ -172,42 +214,31 @@ def find_locality_by_coordinates(lon, lat):
                 })
     
     if not matching_zones:
-        return (None, None)
-    
+        result = (None, None)
+        _set_coord_cache(lon, lat, result)
+        return result
+
     # Si hay múltiples zonas, verificar si alguna empieza con "TERCERIZADO"
     if len(matching_zones) > 1:
-        
-        # Buscar zona que empiece con "TERCERIZADO"
         tercerizado_zone = None
         other_zones = []
-        
         for match in matching_zones:
-            zone_name = match['zone'].name
-            zone_name_upper = zone_name.upper().strip()
-            
-            # Verificar si empieza con "TERCERIZADO" (sin importar espacios, acentos, etc.)
-            if zone_name_upper.startswith('TERCERIZADO'):
+            if match['zone'].name.upper().strip().startswith('TERCERIZADO'):
                 tercerizado_zone = match
             else:
-                # Agregar todas las zonas no-TERCERIZADO
                 other_zones.append(match)
-        
-        
-        # Si hay una zona TERCERIZADO y al menos una normal
-        if tercerizado_zone and len(other_zones) > 0:
-            # Usar la primera zona no-TERCERIZADO para todo lo demás
-            other_zone = other_zones[0]
-            # Retornar la localidad de la zona normal, pero también la zona_locality de TERCERIZADO para envío
-            return (other_zone['locality'], tercerizado_zone['zone_locality'])
+
+        if tercerizado_zone and other_zones:
+            result = (other_zones[0]['locality'], tercerizado_zone['zone_locality'])
         elif tercerizado_zone:
-            # Solo hay zona TERCERIZADO, usarla normalmente
-            return (tercerizado_zone['locality'], None)
+            result = (tercerizado_zone['locality'], None)
         else:
-            # Hay múltiples zonas pero ninguna es TERCERIZADO, usar la primera
-            return (matching_zones[0]['locality'], None)
+            result = (matching_zones[0]['locality'], None)
     else:
-        # Solo hay una zona
-        return (matching_zones[0]['locality'], None)
+        result = (matching_zones[0]['locality'], None)
+
+    _set_coord_cache(lon, lat, result)
+    return result
 
 
 def is_local_ip(ip_address):
