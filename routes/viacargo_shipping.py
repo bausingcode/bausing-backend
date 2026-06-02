@@ -14,18 +14,29 @@ logger = logging.getLogger(__name__)
 
 viacargo_shipping_bp = Blueprint("viacargo_shipping", __name__)
 
-# Mensaje mostrado al usuario cuando Busplus rechaza el CP o no cubre el envío
-MSG_CP_NO_DISPONIBLE_ENVIO = "Este código postal no está disponible para envío."
+MSG_CP_NO_DISPONIBLE_ENVIO = "Este código postal no tiene envío disponible."
+MSG_CP_INVALIDO = "Por favor, ingresá un código postal válido."
 
 
 def _user_facing_cotizar_error(err: str, bus_http) -> str:
     """Mensaje amable si Busplus/validación indica CP inválido o sin cobertura."""
     if not err:
-        return "No se pudo calcular el envío."
-    el = (err or "").lower()
-    if "codigo postal" in el or "código postal" in el or "postal no val" in el:
         return MSG_CP_NO_DISPONIBLE_ENVIO
-    if bus_http in (400, 404) and "postal" in el:
+    el = (err or "").lower()
+    # CP con formato inválido
+    if "codigo postal no val" in el or "postal no val" in el:
+        return MSG_CP_INVALIDO
+    # Sin cobertura: CP válido pero sin servicio, producto no encontrado, timeout, etc.
+    if (
+        "codigo postal" in el
+        or "código postal" in el
+        or "no se encontró el producto" in el
+        or "not found" in el
+        or "sin cobertura" in el
+        or "no cubre" in el
+        or bus_http in (400, 404)
+        or bus_http is None  # timeout / error de red
+    ):
         return MSG_CP_NO_DISPONIBLE_ENVIO
     return err
 
@@ -105,7 +116,7 @@ def public_viacargo_cotizar():
             jsonify(
                 {
                     "success": False,
-                    "error": MSG_CP_NO_DISPONIBLE_ENVIO,
+                    "error": MSG_CP_INVALIDO,
                 }
             ),
             400,
