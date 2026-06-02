@@ -433,6 +433,14 @@ def detect_locality():
                     lat = float(lat_str.strip())
                     lon = float(lon_str.strip())
         
+        # Si se proporcionó address_id y no se pudieron obtener coordenadas, retornar error.
+        # Nunca usar IP como fallback cuando el usuario seleccionó una dirección explícitamente.
+        if address_id and (lat is None or lon is None):
+            return jsonify({
+                'success': False,
+                'error': 'No se pudieron obtener las coordenadas para esta dirección. Por favor, edita la dirección e intenta nuevamente.'
+            }), 422
+
         # Si no se proporcionan coordenadas, intentar obtenerlas desde IP
         if lat is None or lon is None:
             
