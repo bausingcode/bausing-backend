@@ -353,29 +353,37 @@ def detect_locality():
         # Si el usuario está autenticado y no se proporcionaron coordenadas explícitamente,
         # verificar si tiene direcciones con lat_lon
         if user and lat is None and lon is None:
-            addresses_with_coords = Address.query.filter_by(
-                user_id=user.id
-            ).filter(
-                Address.lat_lon.isnot(None),
-                Address.lat_lon != ''
-            ).all()
-            
+            # Si se especificó un address_id explícito, buscarlo directamente (tiene prioridad sobre IP)
+            if address_id:
+                try:
+                    address_uuid = uuid.UUID(address_id)
+                    selected_address = Address.query.filter_by(
+                        user_id=user.id, id=address_uuid
+                    ).filter(
+                        Address.lat_lon.isnot(None),
+                        Address.lat_lon != ''
+                    ).first()
+                    if selected_address:
+                        lat_str, lon_str = selected_address.lat_lon.split(',')
+                        lat = float(lat_str.strip())
+                        lon = float(lon_str.strip())
+                except (ValueError, AttributeError):
+                    pass
+
+            if lat is None and lon is None:
+                addresses_with_coords = Address.query.filter_by(
+                    user_id=user.id
+                ).filter(
+                    Address.lat_lon.isnot(None),
+                    Address.lat_lon != ''
+                ).all()
+            else:
+                addresses_with_coords = []
+
             if addresses_with_coords:
-                
-                # Si se especificó un address_id, usar esa dirección
-                if address_id:
-                    try:
-                        address_uuid = uuid.UUID(address_id)
-                        selected_address = next((a for a in addresses_with_coords if a.id == address_uuid), None)
-                        if selected_address:
-                            lat_str, lon_str = selected_address.lat_lon.split(',')
-                            lat = float(lat_str.strip())
-                            lon = float(lon_str.strip())
-                    except (ValueError, AttributeError):
-                        pass
-                
+
                 # Si no se especificó address_id y hay múltiples direcciones, pedir selección
-                elif len(addresses_with_coords) > 1:
+                if len(addresses_with_coords) > 1:
                     addresses_data = []
                     for addr in addresses_with_coords:
                         addr_dict = addr.to_dict()
