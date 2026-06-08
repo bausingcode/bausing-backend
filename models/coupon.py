@@ -28,6 +28,14 @@ class Coupon(db.Model):
         nullable=False,
     )
 
+    # Descuentos específicos por categoría/subcategoría (solo aplica a club_beneficios_only + percentage)
+    category_discounts = db.relationship(
+        "CouponCategoryDiscount",
+        cascade="all, delete-orphan",
+        lazy="select",
+        foreign_keys="[CouponCategoryDiscount.coupon_id]",
+    )
+
     def to_dict(self):
         return {
             "id": str(self.id),
@@ -44,4 +52,5 @@ class Coupon(db.Model):
             "club_beneficios_only": bool(self.club_beneficios_only),
             "product_id": str(self.product_id) if self.product_id else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "category_discounts": [cd.to_dict() for cd in (self.category_discounts or [])],
         }

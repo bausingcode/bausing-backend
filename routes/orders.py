@@ -1044,6 +1044,8 @@ def create_order():
                 'quantity': cantidad,
                 'precio_unitario_original': precio_unitario_original,
                 'precio_total_original': precio_unitario_original * cantidad,
+                'category_id': str(product.category_id) if product.category_id else None,
+                'subcategory_ids': [str(a.subcategory_id) for a in (product.subcategory_associations or [])],
             })
 
         if not order_lines:
@@ -1068,11 +1070,19 @@ def create_order():
 
             club_ids = get_club_beneficios_product_id_set()
             disc_lines = [
-                {'product_id': ol['product_id'], 'precio_total_original': ol['precio_total_original']}
+                {
+                    'product_id': ol['product_id'],
+                    'precio_total_original': ol['precio_total_original'],
+                    'category_id': ol.get('category_id'),
+                    'subcategory_ids': ol.get('subcategory_ids', []),
+                }
                 for ol in order_lines
             ]
+            from models.coupon_category_discount import CouponCategoryDiscount
+            cat_rules = CouponCategoryDiscount.query.filter_by(coupon_id=coupon_row.id).all()
+            cat_rules_list = [r.to_dict() for r in cat_rules] or None
             total_disc, discounts, cerr = compute_coupon_discount_amount(
-                coupon_row, disc_lines, club_ids
+                coupon_row, disc_lines, club_ids, cat_rules_list
             )
             if cerr:
                 return jsonify({'success': False, 'error': cerr}), 400

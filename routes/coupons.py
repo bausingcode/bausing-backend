@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from database import db
 from models.coupon import Coupon
+from models.coupon_category_discount import CouponCategoryDiscount
 from models.product import Product
 from routes.admin import admin_required
 from routes.auth import user_required
@@ -45,12 +46,87 @@ def _parse_bool_query(raw):
     return None
 
 
+def _parse_uuid(value):
+    if value is None or value == "":
+        return None
+    try:
+        return uuid.UUID(str(value).strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _validate_category_discounts(raw_list):
+    """
+    Valida y parsea la lista de reglas de descuento por categoría.
+    Cada regla debe tener category_id o subcategory_id (o ambos) y discount_value > 0.
+    Devuelve (error_str, lista_parseada) o (None, lista).
+    """
+    if not isinstance(raw_list, list):
+        return "category_discounts debe ser un array", None
+
+    result = []
+    for i, item in enumerate(raw_list):
+        if not isinstance(item, dict):
+            return f"category_discounts[{i}]: debe ser un objeto", None
+
+        cat_id = _parse_uuid(item.get("category_id"))
+        sub_id = _parse_uuid(item.get("subcategory_id"))
+
+        if cat_id is None and sub_id is None:
+            return (
+                f"category_discounts[{i}]: debe tener category_id o subcategory_id",
+                None,
+            )
+
+        try:
+            dv = float(item.get("discount_value"))
+        except (TypeError, ValueError):
+            return f"category_discounts[{i}]: discount_value numérico requerido", None
+
+        if dv <= 0 or dv > 100:
+            return (
+                f"category_discounts[{i}]: discount_value debe estar entre 0 y 100 (excluyendo 0)",
+                None,
+            )
+
+        result.append({"category_id": cat_id, "subcategory_id": sub_id, "discount_value": dv})
+
+    return None, result
+
+
+def _sync_category_discounts(coupon: Coupon, rules: list):
+    """Reemplaza las reglas de descuento por categoría del cupón."""
+    # Eliminar las existentes
+    CouponCategoryDiscount.query.filter_by(coupon_id=coupon.id).delete()
+    # Insertar las nuevas
+    for rule in rules:
+        cd = CouponCategoryDiscount(
+            coupon_id=coupon.id,
+            category_id=rule["category_id"],
+            subcategory_id=rule["subcategory_id"],
+            discount_value=rule["discount_value"],
+        )
+        db.session.add(cd)
+
+
+def _enrich_coupon_dict(c: Coupon) -> dict:
+    """Convierte el cupón a dict y agrega product_name."""
+    d = c.to_dict()
+    if c.product_id:
+        p = db.session.get(Product, c.product_id)
+        d["product_name"] = p.name if p else None
+    else:
+        d["product_name"] = None
+    return d
+
+
 @coupons_bp.route("/api/coupons/preview", methods=["POST"])
 @user_required
 def preview_coupon_checkout():
     """
     Calcula el descuento esperado para el carrito actual (sin reservar el cupón).
     Requiere usuario autenticado (mismo criterio que crear orden).
+    Aplica descuentos por categoría si el cupón los tiene configurados.
     """
     from utils.coupon_order import (
         compute_coupon_discount_amount,
@@ -99,8 +175,31 @@ def preview_coupon_checkout():
                 {"success": False, "error": "No hay líneas válidas para calcular el descuento"}
             ), 400
 
+        # Cargar reglas de descuento por categoría si las hay
+        cat_rules = CouponCategoryDiscount.query.filter_by(coupon_id=c.id).all()
+        cat_rules_list = [r.to_dict() for r in cat_rules]
+
+        # Si hay reglas por categoría, enriquecer cada línea con info de categoría del producto
+        if cat_rules_list:
+            from models.product import Product as ProductModel
+            for line in disc_lines:
+                try:
+                    pid_uuid = _parse_uuid(line["product_id"])
+                    if pid_uuid:
+                        prod = db.session.get(ProductModel, pid_uuid)
+                        if prod:
+                            line["category_id"] = str(prod.category_id) if prod.category_id else None
+                            line["subcategory_ids"] = [
+                                str(a.subcategory_id)
+                                for a in (prod.subcategory_associations or [])
+                            ]
+                except Exception:
+                    pass
+
         club_ids = get_club_beneficios_product_id_set()
-        total_disc, _discounts, cerr = compute_coupon_discount_amount(c, disc_lines, club_ids)
+        total_disc, _discounts, cerr = compute_coupon_discount_amount(
+            c, disc_lines, club_ids, cat_rules_list or None
+        )
         if cerr:
             return jsonify({"success": False, "error": cerr}), 400
 
@@ -117,6 +216,7 @@ def preview_coupon_checkout():
                         "discount_value": float(c.discount_value)
                         if c.discount_value is not None
                         else 0.0,
+                        "has_category_discounts": len(cat_rules_list) > 0,
                     },
                 }
             ),
@@ -151,21 +251,8 @@ def admin_list_coupons():
             except (ValueError, TypeError):
                 pass
         rows = q.order_by(Coupon.created_at.desc()).all()
-
-        # Enriquecer con nombre del producto
-        coupons_data = []
-        for c in rows:
-            d = c.to_dict()
-            if c.product_id:
-                p = db.session.get(Product, c.product_id)
-                d["product_name"] = p.name if p else None
-            else:
-                d["product_name"] = None
-            coupons_data.append(d)
-
-        return jsonify(
-            {"success": True, "data": {"coupons": coupons_data}}
-        ), 200
+        coupons_data = [_enrich_coupon_dict(c) for c in rows]
+        return jsonify({"success": True, "data": {"coupons": coupons_data}}), 200
     except Exception as e:
         current_app.logger.error("Error al listar cupones: %s", str(e), exc_info=True)
         return jsonify({"success": False, "error": "Error interno del servidor"}), 500
@@ -175,7 +262,7 @@ def admin_list_coupons():
 @admin_required
 def admin_create_coupon():
     """
-    Alta de cupón general o exclusivo Club Beneficios (club_beneficios_only, default false).
+    Alta de cupón. Para cupones club + percentage se pueden incluir category_discounts.
     """
     try:
         data = request.get_json() or {}
@@ -255,6 +342,18 @@ def admin_create_coupon():
             except (ValueError, TypeError):
                 return jsonify({"success": False, "error": "product_id inválido"}), 400
 
+        # Validar category_discounts si se envían
+        raw_cat_discounts = data.get("category_discounts")
+        cat_discount_rules = []
+        if raw_cat_discounts:
+            if not (bool(club_only) and discount_type == "percentage"):
+                return jsonify(
+                    {"success": False, "error": "category_discounts solo aplica a cupones Club Beneficios con descuento en porcentaje"}
+                ), 400
+            err, cat_discount_rules = _validate_category_discounts(raw_cat_discounts)
+            if err:
+                return jsonify({"success": False, "error": err}), 400
+
         c = Coupon(
             code=code,
             discount_type=discount_type,
@@ -269,14 +368,13 @@ def admin_create_coupon():
             created_at=datetime.now(timezone.utc),
         )
         db.session.add(c)
+        db.session.flush()  # obtener c.id antes de commit
+
+        if cat_discount_rules:
+            _sync_category_discounts(c, cat_discount_rules)
+
         db.session.commit()
-        d = c.to_dict()
-        if c.product_id:
-            p = db.session.get(Product, c.product_id)
-            d["product_name"] = p.name if p else None
-        else:
-            d["product_name"] = None
-        return jsonify({"success": True, "data": d}), 201
+        return jsonify({"success": True, "data": _enrich_coupon_dict(c)}), 201
     except IntegrityError:
         db.session.rollback()
         return jsonify(
@@ -437,14 +535,25 @@ def admin_update_coupon(coupon_id):
                 return jsonify({"success": False, "error": "Producto no encontrado"}), 400
             c.product_id = new_pid
 
+        # Procesar category_discounts si se incluyen en el payload
+        if "category_discounts" in data:
+            raw_cat = data["category_discounts"]
+            is_club = fields.get("club_beneficios_only", c.club_beneficios_only)
+            disc_type = fields.get("discount_type", c.discount_type)
+            if raw_cat and not (is_club and str(disc_type).lower() == "percentage"):
+                return jsonify(
+                    {"success": False, "error": "category_discounts solo aplica a cupones Club Beneficios con descuento en porcentaje"}
+                ), 400
+            if raw_cat:
+                cat_err, cat_rules = _validate_category_discounts(raw_cat)
+                if cat_err:
+                    return jsonify({"success": False, "error": cat_err}), 400
+            else:
+                cat_rules = []
+            _sync_category_discounts(c, cat_rules)
+
         db.session.commit()
-        d = c.to_dict()
-        if c.product_id:
-            p = db.session.get(Product, c.product_id)
-            d["product_name"] = p.name if p else None
-        else:
-            d["product_name"] = None
-        return jsonify({"success": True, "data": d}), 200
+        return jsonify({"success": True, "data": _enrich_coupon_dict(c)}), 200
     except IntegrityError:
         db.session.rollback()
         return jsonify(

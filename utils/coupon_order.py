@@ -67,13 +67,50 @@ def _parse_uuid(value: Any) -> Optional[uuid.UUID]:
         return None
 
 
+def _find_category_rate(
+    line: Dict[str, Any],
+    category_discount_rules: List[Dict[str, Any]],
+) -> Optional[float]:
+    """
+    Busca la tasa de descuento (%) que aplica a una línea según sus categorías.
+    Subcategoría toma precedencia sobre categoría principal.
+    Devuelve None si ninguna regla coincide.
+    """
+    line_cat_id = str(line.get("category_id") or "").strip()
+    line_sub_ids = {str(s).strip() for s in (line.get("subcategory_ids") or []) if s}
+
+    # Primero buscar coincidencia por subcategoría (mayor especificidad)
+    for rule in category_discount_rules:
+        rule_sub = str(rule.get("subcategory_id") or "").strip()
+        if rule_sub and rule_sub in line_sub_ids:
+            return float(rule["discount_value"])
+
+    # Luego buscar coincidencia por categoría principal
+    for rule in category_discount_rules:
+        rule_cat = str(rule.get("category_id") or "").strip()
+        rule_sub = str(rule.get("subcategory_id") or "").strip()
+        if rule_cat and not rule_sub and rule_cat == line_cat_id:
+            return float(rule["discount_value"])
+
+    return None
+
+
 def compute_coupon_discount_amount(
     coupon: Coupon,
     order_lines: List[Dict[str, Any]],
     club_ids: set,
+    category_discount_rules: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[float, List[float], Optional[str]]:
     """
-    order_lines: lista de dicts con 'product_id' (uuid), 'precio_total_original' (float).
+    order_lines: lista de dicts con:
+      - 'product_id' (uuid)
+      - 'precio_total_original' (float)
+      - 'category_id' (str uuid, opcional — para reglas por categoría)
+      - 'subcategory_ids' (list de str uuid, opcional)
+
+    category_discount_rules: lista de dicts con 'category_id', 'subcategory_id', 'discount_value'.
+      Solo aplica cuando coupon.club_beneficios_only=True y discount_type='percentage'.
+
     Devuelve (total_descuento, descuentos_por_linea_misma_orden, error).
     """
     n = len(order_lines)
@@ -112,6 +149,32 @@ def compute_coupon_discount_amount(
             "Este cupón solo aplica a productos de Club Beneficios y no hay ninguno en el carrito",
         )
 
+    # Descuentos por categoría: aplica solo para cupones club + percentage con reglas configuradas
+    has_cat_rules = (
+        bool(category_discount_rules)
+        and coupon.club_beneficios_only
+        and str(coupon.discount_type).lower() == "percentage"
+    )
+
+    if has_cat_rules:
+        total_discount = Decimal("0")
+        discounts = [0.0] * n
+
+        for i, line in enumerate(order_lines):
+            if eligible[i] <= 0:
+                continue
+            rate = _find_category_rate(line, category_discount_rules)  # type: ignore[arg-type]
+            if rate is None:
+                # Sin regla específica → usar descuento predeterminado del cupón
+                rate = float(coupon.discount_value)
+            line_raw = Decimal(str(eligible[i])) * Decimal(str(rate)) / Decimal("100")
+            line_discount = float(line_raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+            discounts[i] = line_discount
+            total_discount += Decimal(str(line_discount))
+
+        return float(total_discount), discounts, None
+
+    # Lógica original (sin reglas por categoría)
     dv = float(coupon.discount_value)
     if coupon.discount_type == "percentage":
         raw = eligible_sum * (dv / 100.0)
