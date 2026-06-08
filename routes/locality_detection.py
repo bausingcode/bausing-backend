@@ -12,6 +12,7 @@ import requests
 import json
 import uuid
 import time
+import threading
 
 locality_detection_bp = Blueprint('locality_detection', __name__)
 
@@ -316,6 +317,36 @@ def get_coordinates_from_ip(ip_address, force_geolocation=False):
     return None
 
 
+def _geocode_address_bg(address_id, app):
+    """Geocodifica una dirección en segundo plano y guarda el resultado en la BD."""
+    with app.app_context():
+        try:
+            address = Address.query.get(address_id)
+            if not address or address.lat_lon:
+                return
+            province_name = address.province.name if address.province else None
+            geocoded = get_lat_lon_from_address(
+                address.street, address.number, address.city,
+                address.postal_code, province_name,
+            )
+            if not geocoded:
+                geocoded = get_lat_lon_from_address(
+                    None, None, address.city, None, province_name,
+                )
+            if geocoded:
+                address.lat_lon = geocoded
+                db.session.commit()
+        except Exception:
+            pass
+
+
+def _enqueue_geocode(address_id):
+    from flask import current_app
+    app = current_app._get_current_object()
+    t = threading.Thread(target=_geocode_address_bg, args=(address_id, app), daemon=True)
+    t.start()
+
+
 def get_user_from_token():
     """
     Intenta obtener el usuario desde el token de autenticación.
@@ -398,31 +429,10 @@ def detect_locality():
                             lat = float(lat_str.strip())
                             lon = float(lon_str.strip())
                         else:
-                            # Dirección sin coords: geocodificar on-the-fly y guardar resultado
-                            province_name = selected_address.province.name if selected_address.province else None
-                            # Intento 1: dirección completa
-                            geocoded = get_lat_lon_from_address(
-                                selected_address.street,
-                                selected_address.number,
-                                selected_address.city,
-                                selected_address.postal_code,
-                                province_name,
-                            )
-                            # Intento 2: solo ciudad + provincia (más tolerante a calles sin datos OSM)
-                            if not geocoded:
-                                geocoded = get_lat_lon_from_address(
-                                    None,
-                                    None,
-                                    selected_address.city,
-                                    None,
-                                    province_name,
-                                )
-                            if geocoded:
-                                selected_address.lat_lon = geocoded
-                                db.session.commit()
-                                lat_str, lon_str = geocoded.split(',')
-                                lat = float(lat_str.strip())
-                                lon = float(lon_str.strip())
+                            # Dirección sin coords: lanzar geocodificación en background
+                            # para no bloquear el checkout (~2.8 s). El resultado se
+                            # guardará en la BD y estará disponible en la próxima request.
+                            _enqueue_geocode(selected_address.id)
                 except Exception:
                     pass
 
