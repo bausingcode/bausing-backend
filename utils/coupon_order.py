@@ -56,6 +56,17 @@ def validate_coupon_row(c: Coupon, now: Optional[datetime] = None) -> Optional[s
     return None
 
 
+def _parse_uuid(value: Any) -> Optional[uuid.UUID]:
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, TypeError):
+        return None
+
+
 def compute_coupon_discount_amount(
     coupon: Coupon,
     order_lines: List[Dict[str, Any]],
@@ -70,15 +81,17 @@ def compute_coupon_discount_amount(
         return 0.0, [], "El carrito no tiene ítems válidos"
 
     eligible = [0.0] * n
-    if coupon.club_beneficios_only:
+    coupon_product_id = _parse_uuid(coupon.product_id)
+
+    if coupon_product_id is not None:
+        # Cupón específico para un producto: solo aplica a líneas con ese product_id
         for i, line in enumerate(order_lines):
-            pid = line.get("product_id")
-            try:
-                if isinstance(pid, str):
-                    pid = uuid.UUID(pid)
-            except (ValueError, TypeError):
-                eligible[i] = 0.0
-                continue
+            pid = _parse_uuid(line.get("product_id"))
+            if pid == coupon_product_id:
+                eligible[i] = float(line["precio_total_original"])
+    elif coupon.club_beneficios_only:
+        for i, line in enumerate(order_lines):
+            pid = _parse_uuid(line.get("product_id"))
             if pid in club_ids:
                 eligible[i] = float(line["precio_total_original"])
     else:
@@ -86,6 +99,12 @@ def compute_coupon_discount_amount(
             eligible[i] = float(line["precio_total_original"])
 
     eligible_sum = sum(eligible)
+    if coupon_product_id is not None and eligible_sum <= 0:
+        return (
+            0.0,
+            [],
+            "Este cupón solo aplica a un producto específico que no está en el carrito",
+        )
     if coupon.club_beneficios_only and eligible_sum <= 0:
         return (
             0.0,

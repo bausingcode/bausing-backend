@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, current_app
@@ -6,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from database import db
 from models.coupon import Coupon
+from models.product import Product
 from routes.admin import admin_required
 from routes.auth import user_required
 
@@ -110,6 +112,7 @@ def preview_coupon_checkout():
                         "code": c.code,
                         "discount_amount": round(float(total_disc), 2),
                         "club_beneficios_only": bool(c.club_beneficios_only),
+                        "product_id": str(c.product_id) if c.product_id else None,
                         "discount_type": c.discount_type,
                         "discount_value": float(c.discount_value)
                         if c.discount_value is not None
@@ -131,6 +134,7 @@ def admin_list_coupons():
     Lista cupones. Sin query: todos.
     ?club_beneficios_only=true  solo Club Beneficios
     ?club_beneficios_only=false solo generales
+    ?product_id=<uuid>          solo cupones de ese producto
     """
     try:
         q = Coupon.query
@@ -139,9 +143,28 @@ def admin_list_coupons():
             q = q.filter(Coupon.club_beneficios_only.is_(True))
         elif flag is False:
             q = q.filter(Coupon.club_beneficios_only.is_(False))
+        raw_pid = request.args.get("product_id")
+        if raw_pid:
+            try:
+                pid = uuid.UUID(raw_pid.strip())
+                q = q.filter(Coupon.product_id == pid)
+            except (ValueError, TypeError):
+                pass
         rows = q.order_by(Coupon.created_at.desc()).all()
+
+        # Enriquecer con nombre del producto
+        coupons_data = []
+        for c in rows:
+            d = c.to_dict()
+            if c.product_id:
+                p = db.session.get(Product, c.product_id)
+                d["product_name"] = p.name if p else None
+            else:
+                d["product_name"] = None
+            coupons_data.append(d)
+
         return jsonify(
-            {"success": True, "data": {"coupons": [c.to_dict() for c in rows]}}
+            {"success": True, "data": {"coupons": coupons_data}}
         ), 200
     except Exception as e:
         current_app.logger.error("Error al listar cupones: %s", str(e), exc_info=True)
@@ -222,6 +245,16 @@ def admin_create_coupon():
         if isinstance(club_only, str):
             club_only = club_only.lower() in ("1", "true", "yes")
 
+        product_id = None
+        raw_pid = data.get("product_id")
+        if raw_pid:
+            try:
+                product_id = uuid.UUID(str(raw_pid).strip())
+                if not db.session.get(Product, product_id):
+                    return jsonify({"success": False, "error": "Producto no encontrado"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"success": False, "error": "product_id inválido"}), 400
+
         c = Coupon(
             code=code,
             discount_type=discount_type,
@@ -232,11 +265,18 @@ def admin_create_coupon():
             valid_until=valid_until,
             is_active=bool(is_active),
             club_beneficios_only=bool(club_only),
+            product_id=product_id,
             created_at=datetime.now(timezone.utc),
         )
         db.session.add(c)
         db.session.commit()
-        return jsonify({"success": True, "data": c.to_dict()}), 201
+        d = c.to_dict()
+        if c.product_id:
+            p = db.session.get(Product, c.product_id)
+            d["product_name"] = p.name if p else None
+        else:
+            d["product_name"] = None
+        return jsonify({"success": True, "data": d}), 201
     except IntegrityError:
         db.session.rollback()
         return jsonify(
@@ -320,6 +360,16 @@ def _validate_coupon_fields(data, *, require_code=False):
             co = co.lower() in ("1", "true", "yes")
         out["club_beneficios_only"] = bool(co)
 
+    if "product_id" in data:
+        raw_pid = data.get("product_id")
+        if raw_pid is None or raw_pid == "":
+            out["product_id"] = None
+        else:
+            try:
+                out["product_id"] = uuid.UUID(str(raw_pid).strip())
+            except (ValueError, TypeError):
+                return {"success": False, "error": "product_id inválido"}, None
+
     return None, out
 
 
@@ -381,9 +431,20 @@ def admin_update_coupon(coupon_id):
             c.is_active = fields["is_active"]
         if "club_beneficios_only" in fields:
             c.club_beneficios_only = fields["club_beneficios_only"]
+        if "product_id" in fields:
+            new_pid = fields["product_id"]
+            if new_pid is not None and not db.session.get(Product, new_pid):
+                return jsonify({"success": False, "error": "Producto no encontrado"}), 400
+            c.product_id = new_pid
 
         db.session.commit()
-        return jsonify({"success": True, "data": c.to_dict()}), 200
+        d = c.to_dict()
+        if c.product_id:
+            p = db.session.get(Product, c.product_id)
+            d["product_name"] = p.name if p else None
+        else:
+            d["product_name"] = None
+        return jsonify({"success": True, "data": d}), 200
     except IntegrityError:
         db.session.rollback()
         return jsonify(

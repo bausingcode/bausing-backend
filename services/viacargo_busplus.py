@@ -11,7 +11,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 BUSPLUS_COTIZAR_URL = "https://ws.busplus.com.ar/alerce/cotizar"
-VIA_CARGO_PLUS_ED_LABEL = "VIA CARGO PLUS ED"
+VIA_CARGO_PLUS_ED_LABEL = "VIA CARGO ESTANDAR"
 REQUEST_TIMEOUT_S = 30
 BUSPLUS_DIM_CM_MIN = 1
 BUSPLUS_DIM_CM_MAX = 999

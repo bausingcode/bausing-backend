@@ -20,6 +20,8 @@ class Coupon(db.Model):
     valid_until = db.Column(db.DateTime(timezone=True), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     club_beneficios_only = db.Column(db.Boolean, nullable=False, default=False)
+    # null = aplica a todo el catálogo; UUID = solo al producto específico
+    product_id = db.Column(UUID(as_uuid=True), nullable=True, default=None)
     created_at = db.Column(
         db.DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -40,5 +42,6 @@ class Coupon(db.Model):
             "valid_until": self.valid_until.isoformat() if self.valid_until else None,
             "is_active": bool(self.is_active),
             "club_beneficios_only": bool(self.club_beneficios_only),
+            "product_id": str(self.product_id) if self.product_id else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
