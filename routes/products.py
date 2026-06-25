@@ -25,7 +25,7 @@ from models.category import Category
 from models.locality import Locality
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_, func, not_, text, bindparam, literal
-from sqlalchemy.orm import joinedload, selectinload, aliased
+from sqlalchemy.orm import joinedload, selectinload, aliased, contains_eager
 from routes.admin import admin_required, verify_token
 
 products_bp = Blueprint('products', __name__)
@@ -293,14 +293,14 @@ def _build_promo_map_for_product_ids(product_ids, category_id_by_product=None):
         )
 
     all_promo_applicabilities = (
-        PromoApplicability.query.join(Promo, PromoApplicability.promo_id == Promo.id)
+        PromoApplicability.query.join(PromoApplicability.promo)
         .filter(
             Promo.is_active == True,
             Promo.start_at <= now,
             Promo.end_at >= now,
             or_(*applicability_conds),
         )
-        .options(joinedload(PromoApplicability.promo))
+        .options(contains_eager(PromoApplicability.promo))
         .all()
     )
 
