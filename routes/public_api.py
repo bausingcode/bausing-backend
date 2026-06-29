@@ -2152,8 +2152,8 @@ def crear_venta():
                     external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
                     
                     # URL del endpoint externo
-                    external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
-                    # external_url = "https://autogestion.bausing.com.ar/api/ventas/crear"
+                    # external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
+                    external_url = "https://autogestion.bausing.com.ar/api/ventas/crear"
 
                     
                     # Headers
