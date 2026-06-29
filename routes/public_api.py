@@ -3590,17 +3590,28 @@ def send_review_reminders():
     Endpoint para enviar email de agradecimiento con regalo de Pesos Bausing
     a usuarios con órdenes finalizadas hace 5+ días (un email por usuario).
     Llamar desde un cron job diario.
-    Body (opcional): { "gift_amount": "2.000" }
     """
     try:
         from utils.email_service import email_service
         from models.user import User
         from models.order import Order
+        from models.settings import SystemSettings
         from sqlalchemy import text
         from datetime import datetime, timedelta
 
-        data = request.get_json() or {}
-        gift_amount = data.get('gift_amount', '2.000')
+        fixed_amount = SystemSettings.get_value('wallet.fixed_amount', default=None)
+        min_amount = SystemSettings.get_value('wallet.min_amount', default=None)
+
+        if fixed_amount is None:
+            return jsonify({
+                'success': False,
+                'error': 'wallet.fixed_amount no está configurado'
+            }), 400
+
+        fixed_amount = float(fixed_amount)
+        min_amount = float(min_amount) if min_amount is not None else None
+
+        gift_amount = f"{fixed_amount:,.0f}".replace(',', '.')
 
         now = datetime.now()
         finalizado_orders = Order.query.filter_by(status='finalizado').all()
@@ -3613,6 +3624,8 @@ def send_review_reminders():
             if (now - finalization_date).days < 5:
                 continue
             if order.user_id in users_to_notify:
+                continue
+            if min_amount is not None and float(order.total) < min_amount:
                 continue
 
             receipt_number = None
