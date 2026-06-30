@@ -8,12 +8,14 @@ from sqlalchemy import func
 from datetime import datetime
 import uuid
 import re
+import unicodedata
 
 blog_bp = Blueprint('blog', __name__)
 
 def generate_slug(title):
     """Genera un slug a partir del título"""
     slug = title.lower()
+    slug = unicodedata.normalize('NFKD', slug).encode('ascii', 'ignore').decode('ascii')
     slug = re.sub(r'[^a-z0-9]+', '-', slug)
     slug = slug.strip('-')
     return slug
