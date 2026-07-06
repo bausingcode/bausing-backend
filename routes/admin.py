@@ -742,6 +742,10 @@ def delete_order(crm_order_id):
             db.session.delete(order)
 
         db.session.execute(
+            text("DELETE FROM crm_order_items WHERE crm_order_id = :cid"),
+            {"cid": crm_order_id},
+        )
+        db.session.execute(
             text("DELETE FROM crm_orders WHERE crm_order_id = :cid"),
             {"cid": crm_order_id},
         )
