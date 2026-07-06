@@ -740,6 +740,7 @@ def delete_order(crm_order_id):
                 {"oid": order.id},
             )
             db.session.delete(order)
+            db.session.flush()  # ejecutar el DELETE antes de los SQL crudos que dependen de él
 
         db.session.execute(
             text("""
