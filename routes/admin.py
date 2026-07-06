@@ -691,12 +691,68 @@ def update_review_status(review_id):
         
         review.status = status
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'data': review.to_dict()
         }), 200
-        
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@admin_bp.route('/orders/<int:crm_order_id>', methods=['DELETE'])
+@admin_required
+def delete_order(crm_order_id):
+    """
+    Eliminar una venta por crm_order_id con cascade.
+    Elimina: order_items, referrals, reviews, pone NULL en wallet_movements
+    y sale_retry_queue, y luego elimina crm_orders y la orden.
+    """
+    try:
+        from models.order import Order
+
+        order = Order.query.filter_by(crm_order_id=crm_order_id).first()
+
+        if order:
+            db.session.execute(
+                text("UPDATE wallet_movements SET order_id = NULL WHERE order_id = :oid"),
+                {"oid": order.id},
+            )
+            db.session.execute(
+                text("UPDATE sale_retry_queue SET order_id = NULL WHERE order_id = :oid"),
+                {"oid": order.id},
+            )
+            db.session.execute(
+                text("DELETE FROM product_reviews WHERE order_id = :oid"),
+                {"oid": order.id},
+            )
+            db.session.execute(
+                text("DELETE FROM referrals WHERE order_id = :oid"),
+                {"oid": order.id},
+            )
+            db.session.execute(
+                text("DELETE FROM order_items WHERE order_id = :oid"),
+                {"oid": order.id},
+            )
+            db.session.delete(order)
+
+        db.session.execute(
+            text("DELETE FROM crm_orders WHERE crm_order_id = :cid"),
+            {"cid": crm_order_id},
+        )
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Venta eliminada correctamente'
+        }), 200
+
     except Exception as e:
         db.session.rollback()
         return jsonify({

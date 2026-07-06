@@ -2195,7 +2195,11 @@ def crear_venta():
                         try:
                             response_json = response.json()
                         except:
-                            pass
+                            # El CRM a veces incluye un BOM (﻿) al inicio del JSON
+                            try:
+                                response_json = json.loads(response_text.lstrip('﻿').strip())
+                            except:
+                                pass
                     except:
                         pass
                     
