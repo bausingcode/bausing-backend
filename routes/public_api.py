@@ -2281,9 +2281,21 @@ def crear_venta():
             
             # Si el endpoint externo no retornó un venta_id, retornar error
             if not external_venta_id:
-                error_msg = "No se pudo obtener el ID de venta del endpoint externo"
-                if external_response_info and external_response_info.get('error'):
-                    error_msg = f"{error_msg}: {external_response_info.get('error')}"
+                # Intentar usar el mensaje de error del CRM si está disponible
+                crm_response_json = external_response_info.get('response_json') if external_response_info else None
+                if crm_response_json and crm_response_json.get('status') is False:
+                    error_msg = crm_response_json.get('message', 'Error de validación')
+                    crm_errors = crm_response_json.get('errors')
+                    if crm_errors and isinstance(crm_errors, dict):
+                        field_details = ', '.join(
+                            msg for msgs in crm_errors.values() for msg in (msgs if isinstance(msgs, list) else [msgs])
+                        )
+                        if field_details:
+                            error_msg = f"{error_msg}: {field_details}"
+                else:
+                    error_msg = "No se pudo obtener el ID de venta del endpoint externo"
+                    if external_response_info and external_response_info.get('error'):
+                        error_msg = f"{error_msg}: {external_response_info.get('error')}"
                 return jsonify({
                     "status": False,
                     "message": error_msg,

@@ -1135,7 +1135,12 @@ def create_order():
                 return "3510000000"
             return phone_cleaned
         
-        phone_final = normalize_phone(user.phone or address_data.get('phone') or (address.phone if address else ''))
+        phone_final = normalize_phone(
+            formData.get('phone') or
+            user.phone or
+            address_data.get('phone') or
+            (address.phone if address else '')
+        )
         
         # Calcular el total a pagar (después del descuento de billetera)
         total_a_pagar = float(total)  # Este es el total después del descuento (lo que realmente se paga)
