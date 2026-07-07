@@ -312,15 +312,20 @@ def create_crm_order_from_order(order):
         # Normalizar teléfono
         def normalize_phone(phone_str):
             if not phone_str:
-                return "3510000000"
+                return ""
             phone_str = str(phone_str).strip()
             phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
             if phone_cleaned.startswith('0'):
                 phone_cleaned = phone_cleaned[1:]
-            if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
-                return "3510000000"
+            if len(phone_cleaned) > 11:
+                if phone_cleaned.startswith('549'):
+                    phone_cleaned = phone_cleaned[3:]
+                elif phone_cleaned.startswith('54'):
+                    phone_cleaned = phone_cleaned[2:]
+            if len(phone_cleaned) < 6 or len(phone_cleaned) > 12:
+                return phone_cleaned
             return phone_cleaned
-        
+
         phone_final = normalize_phone(phone)
         
         # Obtener latitud y longitud de la dirección
@@ -1126,15 +1131,20 @@ def create_order():
         # Normalizar teléfono
         def normalize_phone(phone_str):
             if not phone_str:
-                return "3510000000"
+                return ""
             phone_str = str(phone_str).strip()
             phone_cleaned = ''.join(c for c in phone_str if c.isdigit())
             if phone_cleaned.startswith('0'):
                 phone_cleaned = phone_cleaned[1:]
-            if len(phone_cleaned) < 8 or len(phone_cleaned) > 11:
-                return "3510000000"
+            if len(phone_cleaned) > 11:
+                if phone_cleaned.startswith('549'):
+                    phone_cleaned = phone_cleaned[3:]
+                elif phone_cleaned.startswith('54'):
+                    phone_cleaned = phone_cleaned[2:]
+            if len(phone_cleaned) < 6 or len(phone_cleaned) > 12:
+                return phone_cleaned
             return phone_cleaned
-        
+
         phone_final = normalize_phone(
             formData.get('phone') or
             user.phone or

@@ -1130,7 +1130,7 @@ def obtener_ventas_crm(registro_id=None, fecha=None, vendedor_id=None, search=No
     
     # Query base para obtener encabezados de ventas
     query_base = """
-        SELECT 
+        SELECT
             co.crm_order_id as id,
             co.receipt_number as numero_comprobante,
             co.detail_date as fecha_detalle,
@@ -1153,8 +1153,13 @@ def obtener_ventas_crm(registro_id=None, fecha=None, vendedor_id=None, search=No
             co.cobranza_at as fecha_paso_cobranza,
             co.caja_at as fecha_paso_caja,
             co.crm_created_at as created_at,
-            co.crm_updated_at as updated_at
+            co.crm_updated_at as updated_at,
+            u.phone as user_phone,
+            a.phone as address_phone
         FROM crm_orders co
+        LEFT JOIN orders o ON co.crm_order_id = o.crm_order_id
+        LEFT JOIN users u ON o.user_id = u.id
+        LEFT JOIN addresses a ON a.user_id = o.user_id AND a.is_default = TRUE
         WHERE 1=1
     """
     
@@ -1281,7 +1286,9 @@ def obtener_ventas_crm(registro_id=None, fecha=None, vendedor_id=None, search=No
                 'js': renglones,
                 'pagos_procesados': pagos_procesados,
                 'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S') if row.created_at else None,
-                'updated_at': row.updated_at.strftime('%Y-%m-%d %H:%M:%S') if row.updated_at else None
+                'updated_at': row.updated_at.strftime('%Y-%m-%d %H:%M:%S') if row.updated_at else None,
+                'user_phone': row.user_phone if hasattr(row, 'user_phone') else None,
+                'address_phone': row.address_phone if hasattr(row, 'address_phone') else None,
             }
             ventas.append(venta)
         except Exception as e:
