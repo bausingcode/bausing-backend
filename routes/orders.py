@@ -991,14 +991,13 @@ def create_order():
             }), 400
         
         city = address_data.get('city') or (address.city if address else '')
-        crm_zone_id = data.get('crm_zone_id')
+        frontend_crm_zone_id = data.get('crm_zone_id')
+        crm_zone_id = get_crm_zone_id_from_locality(city) or frontend_crm_zone_id
         if not crm_zone_id:
-            crm_zone_id = get_crm_zone_id_from_locality(city)
-            if not crm_zone_id:
-                return jsonify({
-                    'success': False,
-                    'error': f'La localidad "{city}" no se encontró. Por favor, verifica que la localidad sea correcta.'
-                }), 400
+            return jsonify({
+                'success': False,
+                'error': f'No se pudo determinar la zona de entrega para "{city}". Por favor, verifica que la localidad sea correcta.'
+            }), 400
         
         # Preparar líneas del pedido (misma validación CRM para ítems y precios)
         from utils.coupon_order import (
