@@ -433,13 +433,12 @@ def get_user_metrics(user_id):
         query_orders = text("""
             SELECT
                 COUNT(*) as total_orders,
-                COUNT(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN 1 END) as completed_orders,
-                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
+                COUNT(CASE WHEN status != 'cancelled' THEN 1 END) as completed_orders,
                 COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_orders,
-                COALESCE(SUM(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN total ELSE 0 END), 0) as total_spent,
-                COALESCE(AVG(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN total END), 0) as avg_order_value,
-                MAX(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN created_at END) as last_purchase_date,
-                MIN(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN created_at END) as first_purchase_date
+                COALESCE(SUM(CASE WHEN status != 'cancelled' THEN total ELSE 0 END), 0) as total_spent,
+                COALESCE(AVG(CASE WHEN status != 'cancelled' THEN total END), 0) as avg_order_value,
+                MAX(CASE WHEN status != 'cancelled' THEN created_at END) as last_purchase_date,
+                MIN(CASE WHEN status != 'cancelled' THEN created_at END) as first_purchase_date
             FROM orders
             WHERE user_id = :user_id
         """)
@@ -456,22 +455,6 @@ def get_user_metrics(user_id):
         wallet = Wallet.query.filter_by(user_id=user_id).first()
         wallet_balance = float(wallet.balance) if wallet else 0.0
         
-        # Calcular "carritos abandonados" - esto es una aproximación
-        # Un carrito abandonado sería una orden pendiente que no se completó en X días
-        # Por ahora, consideramos órdenes pendientes como potenciales carritos abandonados
-        abandoned_carts_count = row_orders.pending_orders if row_orders else 0
-        
-        # Calcular valor de órdenes pendientes (potenciales carritos abandonados)
-        query_abandoned_value = text("""
-            SELECT COALESCE(SUM(total), 0) as total_value
-            FROM orders
-            WHERE user_id = :user_id
-                AND LOWER(status) LIKE '%pendiente%'
-        """)
-        
-        result_abandoned = db.session.execute(query_abandoned_value, {'user_id': user_id})
-        abandoned_carts_value = float(result_abandoned.scalar() or 0)
-        
         metrics = {
             'user_id': str(user_id),
             'user_name': f"{user.first_name} {user.last_name}",
@@ -479,7 +462,7 @@ def get_user_metrics(user_id):
             'orders': {
                 'total': int(row_orders.total_orders or 0) if row_orders else 0,
                 'completed': int(row_orders.completed_orders or 0) if row_orders else 0,
-                'pending': int(row_orders.pending_orders or 0) if row_orders else 0,
+                'pending': 0,
                 'cancelled': int(row_orders.cancelled_orders or 0) if row_orders else 0
             },
             'purchases': {
@@ -490,16 +473,13 @@ def get_user_metrics(user_id):
                 'days_since_last_purchase': days_since_last_purchase
             },
             'abandoned_carts': {
-                'count': abandoned_carts_count,
-                'total_value': abandoned_carts_value
+                'count': 0,
+                'total_value': 0.0
             },
             'wallet': {
                 'balance': wallet_balance
             },
-            'cart_abandonment_rate': (
-                (int(abandoned_carts_count) / (int(abandoned_carts_count) + int(row_orders.completed_orders or 0)) * 100) 
-                if row_orders and (int(abandoned_carts_count) + int(row_orders.completed_orders or 0)) > 0 else 0.0
-            )
+            'cart_abandonment_rate': 0.0
         }
         
         return jsonify({
@@ -557,11 +537,11 @@ def get_users_metrics():
                 u.email,
                 u.created_at as user_created_at,
                 COUNT(DISTINCT o.id) as total_orders,
-                COUNT(DISTINCT CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.id END) as completed_orders,
-                COUNT(DISTINCT CASE WHEN o.status = 'pending' THEN o.id END) as pending_orders,
-                COALESCE(SUM(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total ELSE 0 END), 0) as total_spent,
-                COALESCE(AVG(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total END), 0) as avg_order_value,
-                MAX(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.created_at END) as last_purchase_date,
+                COUNT(DISTINCT CASE WHEN o.status != 'cancelled' THEN o.id END) as completed_orders,
+                COUNT(DISTINCT CASE WHEN o.status = 'cancelled' THEN o.id END) as pending_orders,
+                COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) as total_spent,
+                COALESCE(AVG(CASE WHEN o.status != 'cancelled' THEN o.total END), 0) as avg_order_value,
+                MAX(CASE WHEN o.status != 'cancelled' THEN o.created_at END) as last_purchase_date,
                 COALESCE(w.balance, 0) as wallet_balance
             FROM users u
             LEFT JOIN orders o ON u.id = o.user_id
@@ -726,9 +706,9 @@ def get_general_metrics():
                 SELECT
                     u.id as user_id,
                     COUNT(DISTINCT o.id) as total_orders,
-                    COUNT(DISTINCT CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.id END) as completed_orders,
-                    COALESCE(SUM(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total ELSE 0 END), 0) as total_spent,
-                    COALESCE(AVG(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total END), 0) as avg_order_value
+                    COUNT(DISTINCT CASE WHEN o.status != 'cancelled' THEN o.id END) as completed_orders,
+                    COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) as total_spent,
+                    COALESCE(AVG(CASE WHEN o.status != 'cancelled' THEN o.total END), 0) as avg_order_value
                 FROM users u
                 LEFT JOIN orders o ON u.id = o.user_id {date_filter}
                 GROUP BY u.id

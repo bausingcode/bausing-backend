@@ -488,30 +488,99 @@ def delete_admin_user(user_id):
 @admin_required
 def get_customers():
     """
-    Obtener todos los usuarios regulares (clientes) con información de billetera
+    Obtener usuarios regulares con billetera, conteo de órdenes y paginación
     """
     try:
-        from models.wallet import Wallet
-        users = User.query.all()
+        from sqlalchemy import text
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 30, type=int)
+        search = request.args.get('search', '').strip()
+
+        page = max(1, page)
+        per_page = min(max(1, per_page), 100)
+
+        search_filter = ""
+        params = {'limit': per_page, 'offset': (page - 1) * per_page}
+        if search:
+            search_filter = """
+                AND (u.first_name ILIKE :search
+                  OR u.last_name  ILIKE :search
+                  OR u.email      ILIKE :search
+                  OR u.phone      ILIKE :search)
+            """
+            params['search'] = f'%{search}%'
+
+        query = text(f"""
+            SELECT
+                u.id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                u.phone,
+                u.dni,
+                u.email_verified,
+                u.is_suspended,
+                u.created_at,
+                u.referral_code,
+                COALESCE(w.balance, 0)    AS wallet_balance,
+                COALESCE(w.is_blocked, false) AS wallet_blocked,
+                COUNT(DISTINCT o.id)      AS total_orders,
+                COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.total ELSE 0 END), 0) AS total_spent,
+                MAX(CASE WHEN o.status != 'cancelled' THEN o.created_at END) AS last_order_date
+            FROM users u
+            LEFT JOIN wallets w  ON w.user_id = u.id
+            LEFT JOIN orders  o  ON o.user_id = u.id
+            WHERE 1=1
+            {search_filter}
+            GROUP BY u.id, u.first_name, u.last_name, u.email, u.phone, u.dni,
+                     u.email_verified, u.is_suspended, u.created_at, u.referral_code,
+                     w.balance, w.is_blocked
+            ORDER BY u.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """)
+
+        count_query = text(f"""
+            SELECT COUNT(DISTINCT u.id)
+            FROM users u
+            WHERE 1=1
+            {search_filter}
+        """)
+
+        from database import db
+        rows = db.session.execute(query, params).fetchall()
+        total = db.session.execute(count_query, {k: v for k, v in params.items() if k not in ('limit', 'offset')}).scalar() or 0
+
         results = []
-        for user in users:
-            user_dict = user.to_dict()
-            # Obtener información de la billetera
-            wallet = Wallet.query.filter_by(user_id=user.id).first()
-            if wallet:
-                user_dict['wallet'] = {
-                    'balance': float(wallet.balance) if wallet.balance else 0.0,
-                    'is_blocked': wallet.is_blocked
-                }
-            else:
-                user_dict['wallet'] = {
-                    'balance': 0.0,
-                    'is_blocked': False
-                }
-            results.append(user_dict)
+        for row in rows:
+            results.append({
+                'id': str(row.id),
+                'first_name': row.first_name,
+                'last_name': row.last_name,
+                'email': row.email,
+                'phone': row.phone,
+                'dni': row.dni,
+                'email_verified': row.email_verified,
+                'is_suspended': row.is_suspended,
+                'created_at': row.created_at.isoformat() if row.created_at else None,
+                'referral_code': row.referral_code,
+                'wallet': {
+                    'balance': float(row.wallet_balance),
+                    'is_blocked': row.wallet_blocked,
+                },
+                'total_orders': int(row.total_orders),
+                'total_spent': float(row.total_spent),
+                'last_order_date': row.last_order_date.isoformat() if row.last_order_date else None,
+            })
+
         return jsonify({
             'success': True,
-            'data': results
+            'data': results,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'total_pages': (total + per_page - 1) // per_page,
+            }
         }), 200
     except Exception as e:
         return jsonify({
