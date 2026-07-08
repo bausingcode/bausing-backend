@@ -160,6 +160,19 @@ def get_public_pdp_cross_sell():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@public_settings_bp.route('/settings/public/review-count', methods=['GET'])
+def get_public_review_count():
+    """
+    Obtener cantidad de reseñas mostrada en el home (sin autenticación)
+    """
+    try:
+        setting = SystemSettings.query.filter_by(key='general.review_count').first()
+        count = int(float(setting.value)) if setting and setting.value_type == 'number' else 1550
+        return jsonify({'success': True, 'review_count': count}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @public_settings_bp.route('/settings/public/price-per-km', methods=['GET'])
 def get_public_price_per_km():
     """
@@ -680,7 +693,8 @@ def update_general_settings():
             'instagramUrl': ('general.instagram_url', 'string', 'URL de Instagram'),
             'facebookUrl': ('general.facebook_url', 'string', 'URL de Facebook'),
             'tiktokUrl': ('general.tiktok_url', 'string', 'URL de TikTok'),
-            'precioPorKm': ('general.price_per_km', 'number', 'Precio por kilómetro de envío')
+            'precioPorKm': ('general.price_per_km', 'number', 'Precio por kilómetro de envío'),
+            'cantidadResenas': ('general.review_count', 'number', 'Cantidad de reseñas mostrada en el home')
         }
 
         updated_settings = []
