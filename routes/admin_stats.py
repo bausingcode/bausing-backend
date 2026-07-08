@@ -431,30 +431,15 @@ def get_user_metrics(user_id):
         # Calcular métricas de órdenes
         # Consideramos órdenes completadas aquellas con status que contenga "entregado", "finalizado", "completado" o "pagado"
         query_orders = text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_orders,
-                COUNT(CASE WHEN LOWER(status) LIKE '%entregado%' 
-                          OR LOWER(status) LIKE '%finalizado%' 
-                          OR LOWER(status) LIKE '%completado%' 
-                          OR LOWER(status) LIKE '%pagado%' THEN 1 END) as completed_orders,
-                COUNT(CASE WHEN LOWER(status) LIKE '%pendiente%' THEN 1 END) as pending_orders,
-                COUNT(CASE WHEN LOWER(status) LIKE '%cancelado%' THEN 1 END) as cancelled_orders,
-                COALESCE(SUM(CASE WHEN LOWER(status) LIKE '%entregado%' 
-                                  OR LOWER(status) LIKE '%finalizado%' 
-                                  OR LOWER(status) LIKE '%completado%' 
-                                  OR LOWER(status) LIKE '%pagado%' THEN total ELSE 0 END), 0) as total_spent,
-                COALESCE(AVG(CASE WHEN LOWER(status) LIKE '%entregado%' 
-                                  OR LOWER(status) LIKE '%finalizado%' 
-                                  OR LOWER(status) LIKE '%completado%' 
-                                  OR LOWER(status) LIKE '%pagado%' THEN total END), 0) as avg_order_value,
-                MAX(CASE WHEN LOWER(status) LIKE '%entregado%' 
-                            OR LOWER(status) LIKE '%finalizado%' 
-                            OR LOWER(status) LIKE '%completado%' 
-                            OR LOWER(status) LIKE '%pagado%' THEN created_at END) as last_purchase_date,
-                MIN(CASE WHEN LOWER(status) LIKE '%entregado%' 
-                            OR LOWER(status) LIKE '%finalizado%' 
-                            OR LOWER(status) LIKE '%completado%' 
-                            OR LOWER(status) LIKE '%pagado%' THEN created_at END) as first_purchase_date
+                COUNT(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN 1 END) as completed_orders,
+                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
+                COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_orders,
+                COALESCE(SUM(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN total ELSE 0 END), 0) as total_spent,
+                COALESCE(AVG(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN total END), 0) as avg_order_value,
+                MAX(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN created_at END) as last_purchase_date,
+                MIN(CASE WHEN status IN ('delivered', 'in_transit', 'pending_delivery') THEN created_at END) as first_purchase_date
             FROM orders
             WHERE user_id = :user_id
         """)
@@ -540,68 +525,70 @@ def get_users_metrics():
     try:
         from models.user import User
         
-        # Parámetros de paginación
+        # Parámetros de paginación y orden
         page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 50, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
         search = request.args.get('search', '').strip()
-        
+        sort_by = request.args.get('sort_by', 'total_spent')
+        sort_order = request.args.get('sort_order', 'desc')
+
         # Validar parámetros
         page = max(1, page)
-        per_page = min(max(1, per_page), 100)  # Máximo 100 por página
-        
+        per_page = min(max(1, per_page), 100)
+
+        valid_sort_columns = {
+            'total_spent': 'total_spent',
+            'completed_orders': 'completed_orders',
+            'pending_orders': 'pending_orders',
+            'avg_order_value': 'avg_order_value',
+            'total_orders': 'total_orders',
+            'last_purchase_date': 'last_purchase_date',
+            'user_created_at': 'user_created_at',
+        }
+        sort_col = valid_sort_columns.get(sort_by, 'total_spent')
+        sort_dir = 'ASC' if sort_order == 'asc' else 'DESC'
+
         # Query base para métricas de usuarios
-        query_base = text("""
-            SELECT 
+        query_base = """
+            SELECT
                 u.id,
                 u.first_name,
                 u.last_name,
                 u.email,
                 u.created_at as user_created_at,
                 COUNT(DISTINCT o.id) as total_orders,
-                COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                                      OR LOWER(o.status) LIKE '%finalizado%' 
-                                      OR LOWER(o.status) LIKE '%completado%' 
-                                      OR LOWER(o.status) LIKE '%pagado%' THEN o.id END) as completed_orders,
-                COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%pendiente%' THEN o.id END) as pending_orders,
-                COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                                    OR LOWER(o.status) LIKE '%finalizado%' 
-                                    OR LOWER(o.status) LIKE '%completado%' 
-                                    OR LOWER(o.status) LIKE '%pagado%' THEN o.total ELSE 0 END), 0) as total_spent,
-                COALESCE(AVG(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                                    OR LOWER(o.status) LIKE '%finalizado%' 
-                                    OR LOWER(o.status) LIKE '%completado%' 
-                                    OR LOWER(o.status) LIKE '%pagado%' THEN o.total END), 0) as avg_order_value,
-                MAX(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                            OR LOWER(o.status) LIKE '%finalizado%' 
-                            OR LOWER(o.status) LIKE '%completado%' 
-                            OR LOWER(o.status) LIKE '%pagado%' THEN o.created_at END) as last_purchase_date,
+                COUNT(DISTINCT CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.id END) as completed_orders,
+                COUNT(DISTINCT CASE WHEN o.status = 'pending' THEN o.id END) as pending_orders,
+                COALESCE(SUM(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total ELSE 0 END), 0) as total_spent,
+                COALESCE(AVG(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total END), 0) as avg_order_value,
+                MAX(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.created_at END) as last_purchase_date,
                 COALESCE(w.balance, 0) as wallet_balance
             FROM users u
             LEFT JOIN orders o ON u.id = o.user_id
             LEFT JOIN wallets w ON u.id = w.user_id
             WHERE 1=1
-        """)
-        
+        """
+
         params = {}
         conditions = []
-        
+
         # Filtro de búsqueda
         if search:
             conditions.append("""
-                (u.first_name ILIKE :search OR 
-                 u.last_name ILIKE :search OR 
+                (u.first_name ILIKE :search OR
+                 u.last_name ILIKE :search OR
                  u.email ILIKE :search)
             """)
             params['search'] = f'%{search}%'
-        
+
         where_clause = " AND " + " AND ".join(conditions) if conditions else ""
-        
+
         # Query completo con GROUP BY y paginación
         query = text(f"""
             {query_base}
             {where_clause}
             GROUP BY u.id, u.first_name, u.last_name, u.email, u.created_at, w.balance
-            ORDER BY total_spent DESC, u.created_at DESC
+            ORDER BY {sort_col} {sort_dir} NULLS LAST, u.created_at DESC
             LIMIT :limit OFFSET :offset
         """)
         
@@ -736,21 +723,12 @@ def get_general_metrics():
         # Query para métricas generales
         query = text(f"""
             WITH user_orders AS (
-                SELECT 
+                SELECT
                     u.id as user_id,
                     COUNT(DISTINCT o.id) as total_orders,
-                    COUNT(DISTINCT CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                                          OR LOWER(o.status) LIKE '%finalizado%' 
-                                          OR LOWER(o.status) LIKE '%completado%' 
-                                          OR LOWER(o.status) LIKE '%pagado%' THEN o.id END) as completed_orders,
-                    COALESCE(SUM(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                                        OR LOWER(o.status) LIKE '%finalizado%' 
-                                        OR LOWER(o.status) LIKE '%completado%' 
-                                        OR LOWER(o.status) LIKE '%pagado%' THEN o.total ELSE 0 END), 0) as total_spent,
-                    COALESCE(AVG(CASE WHEN LOWER(o.status) LIKE '%entregado%' 
-                                        OR LOWER(o.status) LIKE '%finalizado%' 
-                                        OR LOWER(o.status) LIKE '%completado%' 
-                                        OR LOWER(o.status) LIKE '%pagado%' THEN o.total END), 0) as avg_order_value
+                    COUNT(DISTINCT CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.id END) as completed_orders,
+                    COALESCE(SUM(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total ELSE 0 END), 0) as total_spent,
+                    COALESCE(AVG(CASE WHEN o.status IN ('delivered', 'in_transit', 'pending_delivery') THEN o.total END), 0) as avg_order_value
                 FROM users u
                 LEFT JOIN orders o ON u.id = o.user_id {date_filter}
                 GROUP BY u.id
