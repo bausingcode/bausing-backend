@@ -2,6 +2,8 @@ from flask import Blueprint, request, jsonify
 from database import db
 from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 from models.locality import Locality
+from models.catalog import LocalityCatalog
+from models.product import ProductPrice
 from routes.admin import admin_required
 from sqlalchemy.exc import IntegrityError
 from decimal import Decimal
@@ -242,12 +244,74 @@ def bulk_update_zone_localities():
             }), 400
         
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'data': updated,
             'errors': errors if errors else None
         }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@delivery_zones_bp.route('/<int:crm_zone_id>', methods=['DELETE'])
+@admin_required
+def delete_delivery_zone(crm_zone_id):
+    """
+    Eliminar una zona de entrega en cascada: borra crm_zone_localities y
+    crm_delivery_zones. Las localities asociadas se borran solo si no quedan
+    referenciadas por otra zona, por product_prices o por locality_catalogs
+    (para no romper precios/catálogos de otras zonas que compartan localidad).
+    """
+    try:
+        zone = CrmDeliveryZone.query.filter_by(crm_zone_id=crm_zone_id).first_or_404()
+
+        zone_localities = CrmZoneLocality.query.filter_by(crm_zone_id=crm_zone_id).all()
+        locality_ids = [zl.locality_id for zl in zone_localities]
+
+        for zl in zone_localities:
+            db.session.delete(zl)
+        db.session.delete(zone)
+        db.session.flush()
+
+        localities_removed = []
+        localities_kept = []
+
+        for locality_id in locality_ids:
+            still_referenced = (
+                CrmZoneLocality.query.filter_by(locality_id=locality_id).first() is not None
+                or ProductPrice.query.filter_by(locality_id=locality_id).first() is not None
+                or LocalityCatalog.query.filter_by(locality_id=locality_id).first() is not None
+            )
+
+            locality = Locality.query.get(locality_id)
+            if not locality:
+                continue
+
+            if still_referenced:
+                localities_kept.append(locality.name)
+            else:
+                localities_removed.append(locality.name)
+                db.session.delete(locality)
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Zona eliminada correctamente',
+            'localities_removed': localities_removed,
+            'localities_kept': localities_kept
+        }), 200
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': 'Error de integridad: ' + str(e)
+        }), 400
     except Exception as e:
         db.session.rollback()
         return jsonify({

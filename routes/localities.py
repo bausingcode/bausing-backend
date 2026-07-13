@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from database import db
 from models.locality import Locality
+from models.catalog import Catalog, LocalityCatalog
 from sqlalchemy.exc import IntegrityError
 from routes.admin import admin_required
 
@@ -129,11 +130,59 @@ def delete_locality(locality_id):
         
         db.session.delete(locality)
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': 'Localidad eliminada correctamente'
         }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@localities_bp.route('/<uuid:locality_id>/catalog', methods=['PUT'])
+@admin_required
+def set_locality_catalog(locality_id):
+    """Asignar (o cambiar) el catálogo de precios de una localidad"""
+    try:
+        locality = Locality.query.get_or_404(locality_id)
+        data = request.get_json()
+
+        if not data or not data.get('catalog_id'):
+            return jsonify({
+                'success': False,
+                'error': 'catalog_id es requerido'
+            }), 400
+
+        catalog = Catalog.query.get(data['catalog_id'])
+        if not catalog:
+            return jsonify({
+                'success': False,
+                'error': 'El catálogo no existe'
+            }), 404
+
+        # Convención: una localidad tiene un solo catálogo asociado
+        LocalityCatalog.query.filter_by(locality_id=locality_id).delete()
+
+        association = LocalityCatalog(
+            locality_id=locality_id,
+            catalog_id=catalog.id
+        )
+        db.session.add(association)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'data': association.to_dict()
+        }), 200
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': 'Error de integridad: ' + str(e)
+        }), 400
     except Exception as e:
         db.session.rollback()
         return jsonify({

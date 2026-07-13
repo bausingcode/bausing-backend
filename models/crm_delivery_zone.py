@@ -61,6 +61,7 @@ class CrmZoneLocality(db.Model):
     locality = db.relationship('Locality', backref='zone_associations', lazy=True)
 
     def to_dict(self):
+        locality_catalog = self.locality.catalog_associations[0] if self.locality and self.locality.catalog_associations else None
         return {
             'id': str(self.id),
             'crm_zone_id': self.crm_zone_id,
@@ -68,6 +69,8 @@ class CrmZoneLocality(db.Model):
             'locality_name': self.locality.name if self.locality else None,
             'is_third_party_transport': self.is_third_party_transport,
             'shipping_price': float(self.shipping_price) if self.shipping_price else None,
+            'catalog_id': str(locality_catalog.catalog_id) if locality_catalog else None,
+            'catalog_name': locality_catalog.catalog.name if locality_catalog else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
