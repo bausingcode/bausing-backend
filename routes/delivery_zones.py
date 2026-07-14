@@ -6,6 +6,8 @@ from models.catalog import LocalityCatalog
 from models.product import ProductPrice
 from routes.admin import admin_required
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
+from sqlalchemy.orm import joinedload
 from decimal import Decimal
 
 delivery_zones_bp = Blueprint('delivery_zones', __name__)
@@ -19,16 +21,21 @@ def get_delivery_zones():
         zones = CrmDeliveryZone.query.filter(
             CrmDeliveryZone.crm_deleted_at.is_(None)
         ).all()
-        
+
+        all_zone_localities = CrmZoneLocality.query.options(
+            joinedload(CrmZoneLocality.locality)
+            .joinedload(Locality.catalog_associations)
+            .joinedload(LocalityCatalog.catalog)
+        ).all()
+
+        localities_by_zone = {}
+        for zl in all_zone_localities:
+            localities_by_zone.setdefault(zl.crm_zone_id, []).append(zl)
+
         zones_data = []
         for zone in zones:
             zone_dict = zone.to_dict()
-            # Obtener todas las localidades asociadas a esta zona
-            zone_localities = CrmZoneLocality.query.filter_by(
-                crm_zone_id=zone.crm_zone_id
-            ).all()
-            
-            zone_dict['localities'] = [zl.to_dict() for zl in zone_localities]
+            zone_dict['localities'] = [zl.to_dict() for zl in localities_by_zone.get(zone.crm_zone_id, [])]
             zones_data.append(zone_dict)
         
         return jsonify({
@@ -47,8 +54,12 @@ def get_delivery_zones():
 def get_zone_localities():
     """Obtener todas las asociaciones zona-localidad"""
     try:
-        zone_localities = CrmZoneLocality.query.all()
-        
+        zone_localities = CrmZoneLocality.query.options(
+            joinedload(CrmZoneLocality.locality)
+            .joinedload(Locality.catalog_associations)
+            .joinedload(LocalityCatalog.catalog)
+        ).all()
+
         return jsonify({
             'success': True,
             'data': [zl.to_dict() for zl in zone_localities]
@@ -270,6 +281,16 @@ def delete_delivery_zone(crm_zone_id):
     try:
         zone = CrmDeliveryZone.query.filter_by(crm_zone_id=crm_zone_id).first_or_404()
 
+        has_orders = db.session.execute(
+            text("SELECT 1 FROM crm_orders WHERE crm_zone_id = :zone_id LIMIT 1"),
+            {"zone_id": crm_zone_id}
+        ).first() is not None
+        if has_orders:
+            return jsonify({
+                'success': False,
+                'error': f'No se puede eliminar la zona "{zone.name}" porque tiene pedidos asociados.'
+            }), 400
+
         zone_localities = CrmZoneLocality.query.filter_by(crm_zone_id=crm_zone_id).all()
         locality_ids = [zl.locality_id for zl in zone_localities]
 
@@ -306,11 +327,11 @@ def delete_delivery_zone(crm_zone_id):
             'localities_removed': localities_removed,
             'localities_kept': localities_kept
         }), 200
-    except IntegrityError as e:
+    except IntegrityError:
         db.session.rollback()
         return jsonify({
             'success': False,
-            'error': 'Error de integridad: ' + str(e)
+            'error': 'No se puede eliminar la zona porque todavía está en uso.'
         }), 400
     except Exception as e:
         db.session.rollback()
