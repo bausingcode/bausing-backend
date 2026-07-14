@@ -42,6 +42,19 @@ def get_argentina_time():
     argentina_tz = timezone(timedelta(hours=-3))
     return datetime.now(argentina_tz).replace(tzinfo=None)
 
+def format_estimated_delivery(catalog):
+    """Arma el texto de días estimados de entrega a partir del catálogo de la orden"""
+    if not catalog:
+        return None
+    days_min = catalog.estimated_delivery_days_min
+    days_max = catalog.estimated_delivery_days_max
+    if days_min is None and days_max is None:
+        return None
+    if days_min is not None and days_max is not None and days_min != days_max:
+        return f"{days_min} a {days_max} días hábiles"
+    day = days_max if days_max is not None else days_min
+    return "1 día hábil" if day == 1 else f"{day} días hábiles"
+
 # Funciones helper para obtener IDs del CRM
 def get_crm_zone_id_from_locality(locality_name):
     """
@@ -684,6 +697,8 @@ def order_to_dict_optimized(order, shipping_address=None, receipt_number=None, i
         'items': items or [],
         'tracking_number': None,  # Por ahora None, se puede agregar después
         'tracking_url': None,  # Por ahora None, se puede agregar después
+        'estimated_delivery_days_min': order.catalog.estimated_delivery_days_min if order.catalog else None,
+        'estimated_delivery_days_max': order.catalog.estimated_delivery_days_max if order.catalog else None,
         'created_at': order.created_at.isoformat() if order.created_at else None,
         'updated_at': order.created_at.isoformat() if order.created_at else None  # Por ahora usamos created_at
     }
@@ -785,6 +800,8 @@ def order_to_dict(order):
         'items': items,
         'tracking_number': None,  # Por ahora None, se puede agregar después
         'tracking_url': None,  # Por ahora None, se puede agregar después
+        'estimated_delivery_days_min': order.catalog.estimated_delivery_days_min if order.catalog else None,
+        'estimated_delivery_days_max': order.catalog.estimated_delivery_days_max if order.catalog else None,
         'created_at': order.created_at.isoformat() if order.created_at else None,
         'updated_at': order.created_at.isoformat() if order.created_at else None  # Por ahora usamos created_at
     }
@@ -1718,16 +1735,17 @@ def create_order():
                 # Construir URL del pedido (opcional)
                 frontend_url = Config.FRONTEND_URL if hasattr(Config, 'FRONTEND_URL') else os.getenv('FRONTEND_URL', 'https://bausing.com.ar')
                 order_url = f"{frontend_url.rstrip('/')}/usuario?order={order.id}"
-                
+
                 # Enviar email
                 email_sent = email_service.send_order_confirmation_email(
                     user_email=user_email,
                     user_first_name=user_first_name,
                     order_number=order_number,
                     order_total=order_total,
-                    order_url=order_url
+                    order_url=order_url,
+                    estimated_delivery_text=format_estimated_delivery(order.catalog)
                 )
-                
+
             except Exception:
                 # No fallar la creación de la orden si falla el envío del email
                 pass
@@ -1795,14 +1813,15 @@ def create_order():
                             # Construir URL del pedido (opcional)
                             frontend_url = Config.FRONTEND_URL if hasattr(Config, 'FRONTEND_URL') else os.getenv('FRONTEND_URL', 'https://bausing.com.ar')
                             order_url = f"{frontend_url.rstrip('/')}/usuario?order={existing_order.id}"
-                            
+
                             # Enviar email
                             email_sent = email_service.send_order_confirmation_email(
                                 user_email=user_email,
                                 user_first_name=user_first_name,
                                 order_number=order_number,
                                 order_total=order_total,
-                                order_url=order_url
+                                order_url=order_url,
+                                estimated_delivery_text=format_estimated_delivery(existing_order.catalog)
                             )
                             
                         except Exception:

@@ -1629,6 +1629,35 @@ def validar_cuit(cuit):
     return True, None, cuit_formateado
 
 
+def resolve_catalog_id_from_locality_name(locality_name):
+    """
+    Resuelve el catalog_id (locality_catalogs) a partir del nombre de localidad
+    tal como llega en el payload de venta (campo 'localidad'). Usa el mismo
+    criterio de matching (exacto -> case-insensitive -> parcial) que se usa
+    para resolver la zona de entrega, para no depender de un catalog_id que
+    el checkout no envía hoy.
+    """
+    if not locality_name:
+        return None
+    try:
+        from models.locality import Locality
+        from models.catalog import LocalityCatalog
+
+        locality = Locality.query.filter_by(name=locality_name).first()
+        if not locality:
+            locality = Locality.query.filter(Locality.name.ilike(locality_name)).first()
+        if not locality:
+            locality = Locality.query.filter(Locality.name.ilike(f'%{locality_name}%')).first()
+        if not locality:
+            return None
+
+        locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality.id).first()
+        return locality_catalog.catalog_id if locality_catalog else None
+    except Exception:
+        db.session.rollback()
+        return None
+
+
 @public_api_bp.route('/api/ventas/crear', methods=['POST'])
 @api_key_required
 def crear_venta():
@@ -2830,6 +2859,12 @@ def crear_venta():
                     payment_processed = data.get('payment_processed', False)
                     used_wallet_amount = data.get('used_wallet_amount')
                     
+                    # Resolver el catalogo de precios aplicable a la localidad de entrega,
+                    # para poder mostrar los dias estimados de entrega de ese catalogo
+                    # en el email de confirmacion, la pantalla de compra realizada y el
+                    # seguimiento de pedido
+                    resolved_catalog_id = resolve_catalog_id_from_locality_name(data.get('localidad'))
+
                     # Verificar si ya existe una orden con este crm_order_id
                     existing_order = Order.query.filter_by(crm_order_id=crm_order_id).first()
                     if existing_order:
@@ -2839,6 +2874,8 @@ def crear_venta():
                         existing_order.payment_method = payment_method
                         existing_order.crm_sale_type_id = data.get('tipo_venta')
                         existing_order.used_wallet_amount = float(used_wallet_amount) if used_wallet_amount else None
+                        if resolved_catalog_id:
+                            existing_order.catalog_id = resolved_catalog_id
                         # Actualizar referral_code_used si viene en el payload
                         if data.get('referral_code_used'):
                             existing_order.referral_code_used = data.get('referral_code_used', '').strip().upper()
@@ -2928,6 +2965,7 @@ def crear_venta():
                             coupon_code=_coupon_code,
                             coupon_discount_amount=_coupon_disc,
                             observations=_order_obs,
+                            catalog_id=resolved_catalog_id,
                         )
                         db.session.add(order)
                         db.session.flush()

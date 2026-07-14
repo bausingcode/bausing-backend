@@ -9,6 +9,8 @@ class Catalog(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = db.Column(db.String(255), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True)
+    estimated_delivery_days_min = db.Column(db.Integer, nullable=True)
+    estimated_delivery_days_max = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -21,6 +23,8 @@ class Catalog(db.Model):
             'id': str(self.id),
             'name': self.name,
             'description': self.description,
+            'estimated_delivery_days_min': self.estimated_delivery_days_min,
+            'estimated_delivery_days_max': self.estimated_delivery_days_max,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

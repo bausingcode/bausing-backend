@@ -31,12 +31,18 @@ class Order(db.Model):
     coupon_code = db.Column(db.String(64), nullable=True)
     coupon_discount_amount = db.Column(db.Numeric(12, 2), nullable=True)
     observations = db.Column(db.Text, nullable=True)
+    catalog_id = db.Column(
+        UUID(as_uuid=True),
+        db.ForeignKey("catalogs.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # Catálogo de precios usado en la localidad de entrega, para mostrar días estimados de entrega
     # Usar lambda para asegurar que se llame la función cada vez
     created_at = db.Column(db.DateTime, default=lambda: get_argentina_time(), nullable=False)
     finalized_at = db.Column(db.DateTime, nullable=True)  # Timestamp cuando la orden fue finalizada
 
     # Relación con User
     user = db.relationship('User', backref='orders', lazy=True)
+    catalog = db.relationship('Catalog', lazy=True)
 
     def to_dict(self):
         """Convierte la orden a diccionario"""
@@ -58,6 +64,9 @@ class Order(db.Model):
             if self.coupon_discount_amount is not None
             else None,
             'observations': self.observations,
+            'catalog_id': str(self.catalog_id) if self.catalog_id else None,
+            'estimated_delivery_days_min': self.catalog.estimated_delivery_days_min if self.catalog else None,
+            'estimated_delivery_days_max': self.catalog.estimated_delivery_days_max if self.catalog else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'finalized_at': self.finalized_at.isoformat() if self.finalized_at else None
         }

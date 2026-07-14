@@ -104,12 +104,38 @@ def update_catalog(catalog_id):
     try:
         catalog = Catalog.query.get_or_404(catalog_id)
         data = request.get_json()
-        
+
         if 'name' in data:
             catalog.name = data['name']
         if 'description' in data:
             catalog.description = data.get('description')
-        
+
+        if 'estimated_delivery_days_min' in data or 'estimated_delivery_days_max' in data:
+            days_min = data.get('estimated_delivery_days_min')
+            days_max = data.get('estimated_delivery_days_max')
+            try:
+                days_min = int(days_min) if days_min is not None else None
+                days_max = int(days_max) if days_max is not None else None
+            except (TypeError, ValueError):
+                return jsonify({
+                    'success': False,
+                    'error': 'Los días estimados de entrega deben ser números enteros'
+                }), 400
+
+            if days_min is not None and days_min < 0:
+                return jsonify({
+                    'success': False,
+                    'error': 'Los días estimados de entrega no pueden ser negativos'
+                }), 400
+            if days_min is not None and days_max is not None and days_min > days_max:
+                return jsonify({
+                    'success': False,
+                    'error': 'El mínimo de días estimados no puede ser mayor que el máximo'
+                }), 400
+
+            catalog.estimated_delivery_days_min = days_min
+            catalog.estimated_delivery_days_max = days_max
+
         db.session.commit()
         
         return jsonify({

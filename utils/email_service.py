@@ -121,24 +121,26 @@ class EmailService:
         user_first_name: str,
         order_number: str,
         order_total: str,
-        order_url: Optional[str] = None
+        order_url: Optional[str] = None,
+        estimated_delivery_text: Optional[str] = None
     ) -> bool:
         """
         Envía email de confirmación de pedido.
-        
+
         Args:
             user_email: Email del usuario
             user_first_name: Nombre del usuario
             order_number: Número de pedido
             order_total: Total del pedido
             order_url: URL para ver el pedido (opcional)
-        
+            estimated_delivery_text: Texto de días estimados de entrega (opcional)
+
         Returns:
             True si se envió correctamente
         """
         from .email_templates import get_order_confirmation_template
-        
-        html = get_order_confirmation_template(user_first_name, order_number, order_total, order_url)
+
+        html = get_order_confirmation_template(user_first_name, order_number, order_total, order_url, estimated_delivery_text)
         return self._send_email(
             to=user_email,
             subject=f"Confirmación de pedido #{order_number} - Bausing",

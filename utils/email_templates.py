@@ -224,24 +224,33 @@ def get_order_confirmation_template(
     user_first_name: str,
     order_number: str,
     order_total: str,
-    order_url: Optional[str] = None
+    order_url: Optional[str] = None,
+    estimated_delivery_text: Optional[str] = None
 ) -> str:
     """
     Plantilla para email de confirmación de pedido.
-    
+
     Args:
         user_first_name: Nombre del usuario
         order_number: Número de pedido
         order_total: Total del pedido
         order_url: URL para ver el pedido (opcional)
-    
+        estimated_delivery_text: Texto de días estimados de entrega (opcional)
+
     Returns:
         HTML completo del email
     """
     button_html = ""
     if order_url:
         button_html = get_button_html("Ver mi pedido", order_url)
-    
+
+    delivery_html = ""
+    if estimated_delivery_text:
+        delivery_html = f"""
+                                    <p style="margin: 10px 0 0; color: {TEXT_DARK}; font-size: 14px; font-weight: 600;">
+                                        Entrega estimada: <span style="color: {BRAND_COLOR};">{estimated_delivery_text}</span>
+                                    </p>"""
+
     content = f"""
                                 <p style="margin: 0 0 20px; color: {TEXT_DARK}; font-size: 16px; line-height: 1.6;">
                                     Hola <strong style="color: {BRAND_COLOR};">{user_first_name}</strong>,
@@ -249,23 +258,23 @@ def get_order_confirmation_template(
                                 <p style="margin: 0 0 30px; color: {TEXT_MEDIUM}; font-size: 16px; line-height: 1.6;">
                                     ¡Gracias por tu compra! Tu pedido ha sido confirmado y está siendo procesado.
                                 </p>
-                                
+
                                 <div style="background-color: {BG_FOOTER}; padding: 20px; border-radius: 8px; margin: 20px 0;">
                                     <p style="margin: 0 0 10px; color: {TEXT_DARK}; font-size: 14px; font-weight: 600;">
                                         Número de pedido: <span style="color: {BRAND_COLOR};">{order_number}</span>
                                     </p>
                                     <p style="margin: 0; color: {TEXT_DARK}; font-size: 14px; font-weight: 600;">
                                         Total: <span style="color: {BRAND_COLOR};">{order_total}</span>
-                                    </p>
+                                    </p>{delivery_html}
                                 </div>
-                                
+
                                 {button_html}
-                                
+
                                 <p style="margin: 30px 0 0; color: {TEXT_MEDIUM}; font-size: 14px; line-height: 1.6;">
                                     Te notificaremos cuando tu pedido sea enviado.
                                 </p>
     """
-    
+
     return get_base_email_structure(
         title="Confirmación de pedido - Bausing",
         header_text="¡Pedido confirmado!",
