@@ -235,7 +235,7 @@ def public_viacargo_cotizar():
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
-    total, err, bus_http = cotizar_busplus_payload(payload, url=busplus_url)
+    total, err, bus_http, busplus_response = cotizar_busplus_payload(payload, url=busplus_url)
     if err:
         # Busplus usa 4xx p. ej. 404 "Codigo Postal No Valido" (validación), no "Bad Gateway"
         st = 502
@@ -245,6 +245,15 @@ def public_viacargo_cotizar():
             st = 502  # error de red
         user_err = _user_facing_cotizar_error(err, bus_http)
         logger.warning("Viacargo cotizar fallo: %s (HTTP %s → %s)", err, bus_http, st)
-        return jsonify({"success": False, "error": user_err}), st
+        return jsonify({"success": False, "error": user_err, "busplus_payload": payload}), st
 
-    return jsonify({"success": True, "data": {"total": total}})
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "total": total,
+                "busplus_payload": payload,
+                "busplus_response": busplus_response,
+            },
+        }
+    )

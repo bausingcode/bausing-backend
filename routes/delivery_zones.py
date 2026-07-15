@@ -273,7 +273,8 @@ def bulk_update_zone_localities():
 @admin_required
 def delete_delivery_zone(crm_zone_id):
     """
-    Eliminar una zona de entrega en cascada: borra crm_zone_localities y
+    Eliminar una zona de entrega en cascada: desvincula (crm_zone_id = NULL)
+    los crm_orders que apuntaban a la zona, borra crm_zone_localities y
     crm_delivery_zones. Las localities asociadas se borran solo si no quedan
     referenciadas por otra zona, por product_prices o por locality_catalogs
     (para no romper precios/catálogos de otras zonas que compartan localidad).
@@ -281,15 +282,10 @@ def delete_delivery_zone(crm_zone_id):
     try:
         zone = CrmDeliveryZone.query.filter_by(crm_zone_id=crm_zone_id).first_or_404()
 
-        has_orders = db.session.execute(
-            text("SELECT 1 FROM crm_orders WHERE crm_zone_id = :zone_id LIMIT 1"),
+        db.session.execute(
+            text("UPDATE crm_orders SET crm_zone_id = NULL WHERE crm_zone_id = :zone_id"),
             {"zone_id": crm_zone_id}
-        ).first() is not None
-        if has_orders:
-            return jsonify({
-                'success': False,
-                'error': f'No se puede eliminar la zona "{zone.name}" porque tiene pedidos asociados.'
-            }), 400
+        )
 
         zone_localities = CrmZoneLocality.query.filter_by(crm_zone_id=crm_zone_id).all()
         locality_ids = [zl.locality_id for zl in zone_localities]

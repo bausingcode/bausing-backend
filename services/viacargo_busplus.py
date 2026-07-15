@@ -17,11 +17,11 @@ BUSPLUS_DIM_CM_MIN = 1
 BUSPLUS_DIM_CM_MAX = 999
 
 
-def _fmt_kilos(value: float) -> str:
+def _fmt_kilos(value: float) -> Any:
     if value < 0:
         value = 0.0
-    s = f"{value:.4f}".rstrip("0").rstrip(".")
-    return s if s else "0"
+    rounded = round(float(value), 4)
+    return int(rounded) if rounded == int(rounded) else rounded
 
 
 def _busplus_dim_cm(value: float, label: str) -> int:
@@ -78,9 +78,10 @@ def extract_viacargo_plus_ed_total(response_json: Any) -> Tuple[int, Optional[st
 def cotizar_busplus_payload(
     payload: dict,
     url: Optional[str] = None,
-) -> Tuple[Optional[int], Optional[str], Optional[int]]:
+) -> Tuple[Optional[int], Optional[str], Optional[int], Any]:
     """
-    POST al endpoint; devuelve (total, error, status_http_busplus o None si no hubo respuesta).
+    POST al endpoint; devuelve (total, error, status_http_busplus o None si no hubo respuesta,
+    respuesta_completa_de_busplus).
     """
     raw_url = (url or BUSPLUS_COTIZAR_URL or "").strip()
     post_url = raw_url.rstrip("/")
@@ -96,7 +97,7 @@ def cotizar_busplus_payload(
         )
     except requests.RequestException as e:
         logger.warning("Viacargo cotizar: error de red: %s", e)
-        return None, f"Error al conectar con el servicio de cotización: {e!s}", None
+        return None, f"Error al conectar con el servicio de cotización: {e!s}", None, None
 
     http_status = r.status_code
 
@@ -104,7 +105,7 @@ def cotizar_busplus_payload(
         data = r.json()
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("Viacargo cotizar: JSON inválido: %s", e)
-        return None, "La respuesta del servicio de cotización no es JSON válido", http_status
+        return None, "La respuesta del servicio de cotización no es JSON válido", http_status, None
 
     if not r.ok:
         err = f"El servicio de cotización respondió con estado {r.status_code}"
@@ -113,14 +114,14 @@ def cotizar_busplus_payload(
             if isinstance(bus_msg, str) and bus_msg.strip():
                 err = f"{err}: {bus_msg.strip()}"
         logger.warning("Viacargo cotizar: %s body=%s", err, json.dumps(data, ensure_ascii=False))
-        return None, err, http_status
+        return None, err, http_status, data
 
     total, err = extract_viacargo_plus_ed_total(data)
     if err:
-        return None, err, http_status
+        return None, err, http_status, data
     if total < 0:
-        return None, "TOTAL de cotización inválido", http_status
-    return total, None, http_status
+        return None, "TOTAL de cotización inválido", http_status, data
+    return total, None, http_status, data
 
 
 def build_payload_strings(
