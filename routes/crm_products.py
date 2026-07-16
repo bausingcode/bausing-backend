@@ -478,6 +478,7 @@ def complete_crm_product(product_id):
                 viacargo_width_cm=data.get('viacargo_width_cm'),
                 viacargo_depth_cm=data.get('viacargo_depth_cm'),
                 viacargo_weight_kg=data.get('viacargo_weight_kg'),
+                viacargo_extra_price=data.get('viacargo_extra_price'),
                 smart_screen_size=data.get('smart_screen_size'),
                 smart_resolution=data.get('smart_resolution'),
                 smart_tv=data.get('smart_tv'),

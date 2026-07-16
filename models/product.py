@@ -322,6 +322,8 @@ class Product(db.Model):
     viacargo_width_cm = db.Column(db.Numeric(10, 2), nullable=True)
     viacargo_depth_cm = db.Column(db.Numeric(10, 2), nullable=True)
     viacargo_weight_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    # Viacargo: precio extra que se suma (por unidad) al costo de envío cotizado para este producto
+    viacargo_extra_price = db.Column(db.Numeric(10, 2), nullable=True)
     # Electrodomésticos (subcategorías Smart / Aire / Lavarropas / Heladera)
     smart_screen_size = db.Column(db.String(128), nullable=True)
     smart_resolution = db.Column(db.String(128), nullable=True)
@@ -521,6 +523,7 @@ class Product(db.Model):
             'viacargo_width_cm': float(self.viacargo_width_cm) if self.viacargo_width_cm is not None else None,
             'viacargo_depth_cm': float(self.viacargo_depth_cm) if self.viacargo_depth_cm is not None else None,
             'viacargo_weight_kg': float(self.viacargo_weight_kg) if self.viacargo_weight_kg is not None else None,
+            'viacargo_extra_price': float(self.viacargo_extra_price) if self.viacargo_extra_price is not None else None,
             'smart_screen_size': self.smart_screen_size,
             'smart_resolution': self.smart_resolution,
             'smart_tv': self.smart_tv,

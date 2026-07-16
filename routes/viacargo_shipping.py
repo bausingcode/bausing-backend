@@ -137,6 +137,7 @@ def public_viacargo_cotizar():
     max_largo_cm = 0
     max_ancho_cm = 0
     per_line_stacked_h_cm: list = []
+    extra_total = 0.0
 
     for raw in items:
         if not isinstance(raw, dict):
@@ -205,6 +206,8 @@ def public_viacargo_cotizar():
         max_largo_cm = max(max_largo_cm, largo_cm)
         max_ancho_cm = max(max_ancho_cm, ancho_cm)
         per_line_stacked_h_cm.append(alto_unit_cm * qty)
+        if p.viacargo_extra_price is not None:
+            extra_total += float(p.viacargo_extra_price) * qty
 
     if total_qty < 1:
         return (
@@ -251,7 +254,7 @@ def public_viacargo_cotizar():
         {
             "success": True,
             "data": {
-                "total": total,
+                "total": total + extra_total,
                 "busplus_payload": payload,
                 "busplus_response": busplus_response,
             },
