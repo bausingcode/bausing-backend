@@ -808,13 +808,16 @@ def get_locality_catalog(locality_id):
         
         locality_uuid = uuid_lib.UUID(str(locality_id)) if isinstance(locality_id, str) else locality_id
         locality_catalog = LocalityCatalog.query.filter_by(locality_id=locality_uuid).first()
-        
+
         if locality_catalog:
+            catalog = locality_catalog.catalog
             return jsonify({
                 'success': True,
                 'data': {
                     'catalog_id': str(locality_catalog.catalog_id),
-                    'locality_id': str(locality_id)
+                    'locality_id': str(locality_id),
+                    'estimated_delivery_days_min': catalog.estimated_delivery_days_min if catalog else None,
+                    'estimated_delivery_days_max': catalog.estimated_delivery_days_max if catalog else None,
                 }
             }), 200
         else:
