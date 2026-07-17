@@ -5,7 +5,7 @@ from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 from models.locality import Locality
 from models.catalog import Catalog, LocalityCatalog
 from models.address import Address
-from routes.auth import verify_token, get_lat_lon_from_address
+from routes.auth import verify_token, geocode_address_with_fallback
 from models.user import User
 from config import Config
 import requests
@@ -325,14 +325,10 @@ def _geocode_address_bg(address_id, app):
             if not address or address.lat_lon:
                 return
             province_name = address.province.name if address.province else None
-            geocoded = get_lat_lon_from_address(
+            geocoded = geocode_address_with_fallback(
                 address.street, address.number, address.city,
                 address.postal_code, province_name,
             )
-            if not geocoded:
-                geocoded = get_lat_lon_from_address(
-                    None, None, address.city, None, province_name,
-                )
             if geocoded:
                 address.lat_lon = geocoded
                 db.session.commit()
@@ -429,10 +425,27 @@ def detect_locality():
                             lat = float(lat_str.strip())
                             lon = float(lon_str.strip())
                         else:
-                            # Dirección sin coords: lanzar geocodificación en background
-                            # para no bloquear el checkout (~2.8 s). El resultado se
-                            # guardará en la BD y estará disponible en la próxima request.
-                            _enqueue_geocode(selected_address.id)
+                            # Dirección sin coords (p. ej. geocode previo falló por un
+                            # domicilio "S/N"): geocodificar ahora mismo en vez de caer
+                            # al fallback genérico de IP/localidad por defecto, que no
+                            # corresponde a esta dirección. Cuesta ~1-2 s pero solo pasa
+                            # la primera vez; el resultado queda persistido.
+                            province_name = selected_address.province.name if selected_address.province else None
+                            geocoded = geocode_address_with_fallback(
+                                selected_address.street, selected_address.number,
+                                selected_address.city, selected_address.postal_code,
+                                province_name,
+                            )
+                            if geocoded:
+                                selected_address.lat_lon = geocoded
+                                db.session.commit()
+                                lat_str, lon_str = geocoded.split(',')
+                                lat = float(lat_str.strip())
+                                lon = float(lon_str.strip())
+                            else:
+                                # Ni siquiera ciudad+provincia resolvió: reintentar en
+                                # background por si es un problema transitorio de Nominatim.
+                                _enqueue_geocode(selected_address.id)
                 except Exception:
                     pass
 

@@ -70,6 +70,17 @@ def get_lat_lon_from_address(street, number, city, postal_code, province_name=No
         # Si falla la geocodificación, no fallar la creación de la dirección
         return None
 
+def geocode_address_with_fallback(street, number, city, postal_code, province_name=None):
+    """
+    Geocodifica una dirección completa; si falla (p. ej. calle/número no
+    resoluble como "S/N"), reintenta solo con ciudad + provincia para no
+    quedarse sin coordenadas.
+    """
+    lat_lon = get_lat_lon_from_address(street, number, city, postal_code, province_name)
+    if not lat_lon:
+        lat_lon = get_lat_lon_from_address(None, None, city, None, province_name)
+    return lat_lon
+
 def generate_token(user):
     """Genera un token JWT para el usuario"""
     payload = {
@@ -884,8 +895,8 @@ def create_address():
         if data.get('is_default', False):
             Address.query.filter_by(user_id=user.id, is_default=True).update({'is_default': False})
         
-        # Obtener latitud y longitud usando geocodificación
-        lat_lon = get_lat_lon_from_address(
+        # Obtener latitud y longitud usando geocodificación (con fallback a ciudad+provincia)
+        lat_lon = geocode_address_with_fallback(
             street=data['street'],
             number=data['number'],
             city=data['city'],
@@ -989,17 +1000,22 @@ def update_address(address_id):
             address.province_id = province_id
             address_changed = True
         
-        # Recalcular lat/lon si cambió algún campo relevante
+        # Recalcular lat/lon si cambió algún campo relevante (con fallback a
+        # ciudad+provincia). Si ambos intentos fallan, no pisamos el lat_lon
+        # existente con None: eso dejaba la dirección sin coordenadas y el
+        # detect-locality caía silenciosamente a un fallback genérico en vez
+        # de usar la localidad real de la dirección.
         if address_changed:
             province = Province.query.get(address.province_id)
-            lat_lon = get_lat_lon_from_address(
+            lat_lon = geocode_address_with_fallback(
                 street=address.street,
                 number=address.number,
                 city=address.city,
                 postal_code=address.postal_code,
                 province_name=province.name if province else None
             )
-            address.lat_lon = lat_lon
+            if lat_lon:
+                address.lat_lon = lat_lon
         
         if 'is_default' in data:
             # Si se marca como default, quitar default de otras direcciones
