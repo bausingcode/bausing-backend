@@ -8,6 +8,11 @@ import uuid as uuid_lib
 settings_bp = Blueprint('settings', __name__)
 public_settings_bp = Blueprint('public_settings', __name__)
 
+# "Almohadas y accesorios" — usada por la regla de envío acordado de zona local
+ACCESSORIES_CATALOG_CATEGORY_ID = "57e5e2e5-e054-4b18-84dc-be94a22e2994"
+# Catálogo "Pais" — la regla de envío acordado por catálogo no aplica ahí
+PAIS_CATALOG_ID = "8335e521-f25a-4f92-8f59-c4439671ef26"
+
 
 def _resolve_root_category_uuid(leaf_category_id_str):
     """UUID de categoría raíz (sin padre) a partir de una categoría hoja, o None."""
@@ -202,6 +207,55 @@ def get_public_price_per_km():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@public_settings_bp.route('/settings/public/accessories-shipping-quote', methods=['POST'])
+def get_public_accessories_shipping_quote():
+    """
+    Determina si el envío acordado para "Almohadas y accesorios" aplica a un carrito,
+    según el precio configurado para el catálogo de la localidad de entrega
+    (sin autenticación, usado en el checkout de zona local no tercerizada / no Catálogo País).
+    """
+    try:
+        data = request.get_json() or {}
+        product_ids = data.get('product_ids') or []
+        catalog_id = data.get('catalog_id')
+
+        if not product_ids or not catalog_id or str(catalog_id) == PAIS_CATALOG_ID:
+            return jsonify({'success': True, 'data': {'applies': False, 'price': None}}), 200
+
+        from models.catalog import Catalog
+        from models.product import Product
+
+        try:
+            catalog_uuid = uuid_lib.UUID(str(catalog_id))
+            target = uuid_lib.UUID(ACCESSORIES_CATALOG_CATEGORY_ID)
+            product_uuids = [uuid_lib.UUID(str(pid)) for pid in product_ids]
+        except (ValueError, AttributeError, TypeError):
+            return jsonify({'success': True, 'data': {'applies': False, 'price': None}}), 200
+
+        catalog = Catalog.query.get(catalog_uuid)
+        price = float(catalog.accessories_shipping_price) if catalog and catalog.accessories_shipping_price is not None else None
+        if not price or price <= 0:
+            return jsonify({'success': True, 'data': {'applies': False, 'price': None}}), 200
+
+        products = Product.query.filter(Product.id.in_(product_uuids)).all()
+
+        applies = (
+            len(products) == len(set(product_uuids))
+            and all(
+                p.category_id and _resolve_root_category_uuid(p.category_id) == target
+                for p in products
+            )
+        )
+
+        return jsonify({
+            'success': True,
+            'data': {'applies': applies, 'price': price if applies else None}
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @settings_bp.route('/settings', methods=['GET'])
 @admin_required

@@ -136,6 +136,24 @@ def update_catalog(catalog_id):
             catalog.estimated_delivery_days_min = days_min
             catalog.estimated_delivery_days_max = days_max
 
+        if 'accessories_shipping_price' in data:
+            raw_price = data.get('accessories_shipping_price')
+            try:
+                price = float(raw_price) if raw_price is not None else None
+            except (TypeError, ValueError):
+                return jsonify({
+                    'success': False,
+                    'error': 'El precio de envío de accesorios debe ser un número'
+                }), 400
+
+            if price is not None and price < 0:
+                return jsonify({
+                    'success': False,
+                    'error': 'El precio de envío de accesorios no puede ser negativo'
+                }), 400
+
+            catalog.accessories_shipping_price = price
+
         db.session.commit()
         
         return jsonify({

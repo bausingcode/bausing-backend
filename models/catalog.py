@@ -11,6 +11,7 @@ class Catalog(db.Model):
     description = db.Column(db.Text, nullable=True)
     estimated_delivery_days_min = db.Column(db.Integer, nullable=True)
     estimated_delivery_days_max = db.Column(db.Integer, nullable=True)
+    accessories_shipping_price = db.Column(db.Numeric(10, 2), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -25,6 +26,7 @@ class Catalog(db.Model):
             'description': self.description,
             'estimated_delivery_days_min': self.estimated_delivery_days_min,
             'estimated_delivery_days_max': self.estimated_delivery_days_max,
+            'accessories_shipping_price': float(self.accessories_shipping_price) if self.accessories_shipping_price is not None else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
