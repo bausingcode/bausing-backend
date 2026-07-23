@@ -127,6 +127,45 @@ def get_crm_zone_id_from_locality(locality_name):
             pass
         return None
 
+
+def get_crm_zone_id_from_coordinates(lat_lon_str):
+    """
+    Calcula crm_zone_id vía point-in-polygon sobre surface_geojson (mismo cálculo
+    que usa /detect-locality), a partir de coordenadas "lat,lon".
+
+    Esto evita el matching ambiguo por texto de get_crm_zone_id_from_locality:
+    varios nombres de localidad pueden ser substring unos de otros (ej. dos zonas
+    distintas que incluyen "Santa Rosa" en su nombre compuesto), lo cual con
+    ILIKE + .first() sin ORDER BY puede resolver a la zona equivocada.
+    """
+    if not lat_lon_str:
+        return None
+
+    try:
+        parts = lat_lon_str.split(',')
+        if len(parts) != 2:
+            return None
+        lat = float(parts[0].strip())
+        lon = float(parts[1].strip())
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+    try:
+        from routes.locality_detection import find_locality_by_coordinates
+        locality, _shipping_zone_locality = find_locality_by_coordinates(lon, lat)
+        if not locality:
+            return None
+
+        zone_locality = CrmZoneLocality.query.filter_by(locality_id=locality.id).first()
+        return zone_locality.crm_zone_id if zone_locality else None
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return None
+
+
 def get_crm_province_id_from_province(province_id):
     """
     Obtiene el crm_province_id desde el province_id
@@ -264,10 +303,12 @@ def create_crm_order_from_order(order):
         if not crm_province_id:
             return None
         
-        crm_zone_id = get_crm_zone_id_from_locality(address.city)
+        crm_zone_id = get_crm_zone_id_from_coordinates(address.lat_lon)
+        if not crm_zone_id:
+            crm_zone_id = get_crm_zone_id_from_locality(address.city)
         if not crm_zone_id:
             return None
-        
+
         # Preparar items para el CRM
         js_items = []
         for order_item in order_items:
@@ -1013,7 +1054,12 @@ def create_order_for_user(user, data):
         
         city = address_data.get('city') or (address.city if address else '')
         frontend_crm_zone_id = data.get('crm_zone_id')
-        crm_zone_id = get_crm_zone_id_from_locality(city) or frontend_crm_zone_id
+        order_lat_lon = address_data.get('lat_lon') or (address.lat_lon if address else None)
+        crm_zone_id = (
+            frontend_crm_zone_id
+            or get_crm_zone_id_from_coordinates(order_lat_lon)
+            or get_crm_zone_id_from_locality(city)
+        )
         if not crm_zone_id:
             return jsonify({
                 'success': False,
