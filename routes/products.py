@@ -731,31 +731,39 @@ def get_products():
                 _pvo = aliased(ProductVariantOption, flat=True)
                 _pp  = aliased(ProductPrice,         flat=True)
 
-                price_corr = (
-                    _sa_select(agg_fn(_pp.price))
-                    .select_from(_pv)
-                    .join(_pvo, _pvo.product_variant_id == _pv.id)
-                    .join(_pp,  _pp.product_variant_id  == _pvo.id)
-                    .where(
-                        _pv.product_id == Product.id,
-                        or_(_pp.price_kind == "transfer", _pp.price_kind.is_(None)),
+                def _build_price_corr(price_kind_filter):
+                    corr = (
+                        _sa_select(agg_fn(_pp.price))
+                        .select_from(_pv)
+                        .join(_pvo, _pvo.product_variant_id == _pv.id)
+                        .join(_pp,  _pp.product_variant_id  == _pvo.id)
+                        .where(
+                            _pv.product_id == Product.id,
+                            price_kind_filter,
+                        )
                     )
-                )
 
-                if locality_id:
-                    locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
-                    locality_catalog = cached_locality_catalog
-                    if locality_catalog:
-                        price_corr = price_corr.where(_pp.catalog_id == locality_catalog.catalog_id)
+                    if locality_id:
+                        locality_uuid = uuid_lib.UUID(locality_id) if isinstance(locality_id, str) else locality_id
+                        locality_catalog = cached_locality_catalog
+                        if locality_catalog:
+                            corr = corr.where(_pp.catalog_id == locality_catalog.catalog_id)
+                        else:
+                            corr = corr.where(_pp.locality_id == locality_uuid)
                     else:
-                        price_corr = price_corr.where(_pp.locality_id == locality_uuid)
-                else:
-                    from models.product import get_cordoba_capital_catalog_id
-                    cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
-                    if cordoba_capital_catalog_id:
-                        price_corr = price_corr.where(_pp.catalog_id == cordoba_capital_catalog_id)
+                        from models.product import get_cordoba_capital_catalog_id
+                        cordoba_capital_catalog_id = get_cordoba_capital_catalog_id()
+                        if cordoba_capital_catalog_id:
+                            corr = corr.where(_pp.catalog_id == cordoba_capital_catalog_id)
 
-                price_corr = price_corr.correlate(Product).scalar_subquery()
+                    return corr.correlate(Product).scalar_subquery()
+
+                # Misma prioridad que el resto del listado: tarjeta primero, transferencia
+                # como fallback legacy si el producto no tiene filas "card".
+                card_price_corr = _build_price_corr(product_price_card_filter())
+                transfer_price_corr = _build_price_corr(product_price_transfer_filter())
+                price_corr = func.coalesce(card_price_corr, transfer_price_corr)
+
                 order_expr = price_corr.asc().nullslast() if sort == 'price_asc' else price_corr.desc().nullslast()
                 query = query.order_by(order_expr)
             except (ValueError, TypeError):

@@ -810,8 +810,16 @@ def order_to_dict(order):
 @user_required
 def create_order():
     """
-    Crear una nueva orden
-    Si pay_on_delivery is true, primero crea la venta en el CRM
+    Crear una nueva orden (checkout autenticado).
+    Si pay_on_delivery is true, primero crea la venta en el CRM.
+    """
+    return create_order_for_user(request.user, request.get_json())
+
+
+def create_order_for_user(user, data):
+    """
+    Crear una nueva orden para un usuario dado.
+    Reutilizado por checkout JWT y por la API Atendium.
     """
     try:
         # Limpiar cualquier transacción abortada
@@ -819,11 +827,7 @@ def create_order():
             db.session.rollback()
         except:
             pass
-        
-        user = request.user
-        data = request.get_json()
-        
-        
+
         if not data:
             return jsonify({
                 'success': False,

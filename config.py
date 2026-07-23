@@ -14,6 +14,8 @@ class Config:
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     SECRET_KEY = os.getenv('SECRET_KEY')
     API_KEY = os.getenv('API_KEY')
+    # Clave dedicada para Atendium; si no está seteada, se usa API_KEY
+    ATENDIUM_API_KEY = os.getenv('ATENDIUM_API_KEY') or None
 
     if not SECRET_KEY:
         raise ValueError("SECRET_KEY no está configurada en las variables de entorno")
