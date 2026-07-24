@@ -2,7 +2,7 @@
 """
 API Atendium — endpoints tool-oriented para el bot (catálogo, zona, quote, ventas, estado).
 Prefijo: /atendium/v1
-Auth: X-API-Key o Authorization Bearer (ATENDIUM_API_KEY o API_KEY).
+Auth: X-API-Key o Authorization Bearer (API_KEY).
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def atendium_api_key_required(f):
             auth = request.headers["Authorization"]
             api_key = auth.split(" ", 1)[1] if auth.startswith("Bearer ") else auth
 
-        expected = Config.ATENDIUM_API_KEY or Config.API_KEY
+        expected = Config.API_KEY
         if not api_key or api_key != expected:
             return _err("Token inválido o no proporcionado", 401)
         return f(*args, **kwargs)

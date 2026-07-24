@@ -2188,8 +2188,13 @@ def crear_venta():
                     external_token = "e38f6bce99529961a5cffd3521c5abfea47b4ca3a1e2ff9d7f837a3155d4fa60"
                     
                     # URL del endpoint externo
-                    # external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
-                    external_url = "https://autogestion.bausing.com.ar/api/ventas/crear"
+                    # CAMBIO TEMPORAL: las ventas originadas por el bot de Atendium (marcadas
+                    # en "observaciones" por routes/atendium.py) van al CRM de pruebas en vez
+                    # de al de producción. Revertir sacando este if cuando termine el testing.
+                    if "Atendium bot" in (data.get("observaciones") or ""):
+                        external_url = "https://pruebas.bausing.com.ar/api/ventas/crear"
+                    else:
+                        external_url = "https://autogestion.bausing.com.ar/api/ventas/crear"
 
                     
                     # Headers

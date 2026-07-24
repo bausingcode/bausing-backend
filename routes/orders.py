@@ -434,7 +434,7 @@ def create_crm_order_from_order(order):
             "provincia_id": crm_province_id,
             "localidad": address.city or "",
             "zona_id": crm_zone_id,
-            "observaciones": "",
+            "observaciones": order.observations or "",
             "lat_long": {"latitud": latitud, "longitud": longitud},
             "js": js_items,
             "formaPagos": forma_pagos_array

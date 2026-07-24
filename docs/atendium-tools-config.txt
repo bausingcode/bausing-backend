@@ -1,0 +1,403 @@
+CONFIGURACION DE HERRAMIENTAS "CUSTOM API REST CALL" - ATENDIUM
+================================================================
+
+Este documento tiene, campo por campo, lo que hay que cargar en el formulario
+"Custom API Rest Call" de la plataforma Atendium para cada endpoint de
+bausing-backend/routes/atendium.py.
+
+Base URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1
+
+
+CREDENCIAL (crear una sola vez y reutilizar en las 10 herramientas)
+---------------------------------------------------------------
+Tipo: API Key por header
+Nombre del header: X-API-Key
+Valor: el valor de API_KEY configurado en el backend
+Nombre sugerido de la credencial: Bausing API Key
+
+Con esto seteado, en cada herramienta de abajo NO hace falta activar el
+toggle de "Headers" para la auth: se selecciona directamente en el campo
+"Credencial".
+
+IMPORTANTE - "Reintentar ante fallas de la API":
+Dejalo APAGADO en "Crear Orden" (POST /orders). Si Atendium reintenta
+automaticamente una creacion de orden que si llego a procesarse en el
+servidor pero fallo la respuesta (timeout, corte de red), se puede duplicar
+la venta en el CRM. En el resto de los endpoints (todos de solo lectura o
+sin efectos secundarios persistentes) es seguro dejarlo encendido.
+
+En todas las herramientas: "Enviar Metadata del mensaje a la API body" y
+"Enviar la respuesta de la API directamente" -> apagados (dejamos que el
+agente redacte la respuesta al usuario final).
+
+
+================================================================
+1. HEALTH CHECK
+================================================================
+Titulo de la herramienta: Bausing - Health Check
+Cuando deberia usarse: Usar para verificar que el backend de Bausing y su
+  base de datos estan disponibles, por ejemplo si otras herramientas fallan
+  repetidamente.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/health
+Metodo HTTP: GET
+Timeout (ms): 5000
+Path parameters: Off
+Query Parameters: Off
+Headers: Off
+Body: Off
+Reintentar ante fallas: On
+
+MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs
+================================================================
+2. RESOLVER ZONA POR DIRECCION
+================================================================
+Titulo de la herramienta: Bausing - Resolver Zona
+Cuando deberia usarse: Usar apenas el cliente da su direccion (calle,
+  numero, ciudad, provincia o coordenadas) para saber localidad, catalogo
+  de precios, zona CRM y dias estimados de entrega, antes de mostrar
+  productos o cotizar.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone
+Metodo HTTP: POST
+Timeout (ms): 8000
+Path parameters: Off
+Query Parameters: Off
+Headers: Off
+Body: On (ver tabla)
+Reintentar ante fallas: On
+
+Body:
+  street        | string | No* | Calle
+  number        | string | No* | Altura
+  city          | string | No* | Ciudad
+  province      | string | No* | Provincia
+  postal_code   | string | No  | Codigo postal
+  lat           | number | No* | Latitud (si se tiene, evita geocodificar)
+  lon           | number | No* | Longitud
+
+  * Se necesita lat+lon O street+city como minimo.
+
+Body (JSON):
+{
+  "street": "San Martin",
+  "number": "100",
+  "city": "Cordoba",
+  "province": "Cordoba",
+  "postal_code": "5000",
+  "lat": -31.4201,
+  "lon": -64.1888
+}
+
+
+================================================================
+3. BUSCAR CATALOGO DE PRODUCTOS
+================================================================
+Titulo de la herramienta: Bausing - Buscar Catalogo
+Cuando deberia usarse: Usar para buscar productos activos por texto y/o
+  categoria, con precios segun la localidad del cliente. Requiere
+  locality_id (obtenido de "Resolver Zona") para que los precios coincidan
+  con el checkout real.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog
+Metodo HTTP: GET
+Timeout (ms): 8000
+Path parameters: Off
+Query Parameters: On (ver tabla)
+Headers: Off
+Body: Off
+Reintentar ante fallas: On
+
+Query Parameters:
+  q             | string        | No               | Texto de busqueda
+  locality_id   | string (uuid) | No (recomendado) | Localidad para precios correctos
+  category_id   | string        | No               | Filtro por categoria
+  page          | number        | No               | Default 1
+  per_page      | number        | No               | Default 20, max 50
+
+
+================================================================
+4. DETALLE DE PRODUCTO
+================================================================
+Titulo de la herramienta: Bausing - Detalle de Producto
+Cuando deberia usarse: Usar cuando el cliente pregunta por un producto
+  especifico o pide mas informacion de un item que ya aparecio en el
+  catalogo.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/:product_id
+Metodo HTTP: GET
+Timeout (ms): 8000
+Path parameters: On (ver tabla)
+Query Parameters: On (ver tabla)
+Headers: Off
+Body: Off
+Reintentar ante fallas: On
+
+Path parameters:
+  product_id    | string (uuid) | Si | ID del producto
+
+Query Parameters:
+  locality_id   | string (uuid) | No (recomendado) | Localidad para precios correctos
+
+
+================================================================
+5. VALIDAR CUPON DE DESCUENTO
+================================================================
+Titulo de la herramienta: Bausing - Validar Cupon
+Cuando deberia usarse: Usar cuando el cliente menciona un codigo de cupon,
+  para validar si es correcto y calcular el descuento antes de confirmar el
+  pedido. Requiere precios unitarios ya conocidos (de catalogo o
+  cotizacion).
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/validate-coupon
+Metodo HTTP: POST
+Timeout (ms): 8000
+Path parameters: Off
+Query Parameters: Off
+Headers: Off
+Body: On (ver tabla)
+Reintentar ante fallas: On
+
+Body:
+  coupon_code   | string           | Si | Codigo del cupon
+  items         | array de objetos | Si | { product_id, quantity, price } por linea (price = unitario)
+
+Body (JSON):
+{
+  "coupon_code": "VERANO10",
+  "items": [
+    { "product_id": "<uuid>", "quantity": 1, "price": 50000 }
+  ]
+}
+
+
+================================================================
+6. VALIDAR CODIGO DE REFERIDO
+================================================================
+Titulo de la herramienta: Bausing - Validar Referido
+Cuando deberia usarse: Usar cuando el cliente menciona un codigo de
+  referido, para validar que sea correcto y evitar auto-referido antes de
+  aplicarlo a la cotizacion o la orden.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/validate-referral
+Metodo HTTP: POST
+Timeout (ms): 8000
+Path parameters: Off
+Query Parameters: Off
+Headers: Off
+Body: On (ver tabla)
+Reintentar ante fallas: On
+
+Body:
+  referral_code  | string | Si | Codigo de referido
+  customer_email | string | No | Email del cliente (evita auto-referido)
+
+Body (JSON):
+{
+  "referral_code": "ABC123",
+  "customer_email": "opcional@mail.com"
+}
+
+
+================================================================
+7. COTIZAR PEDIDO
+================================================================
+Titulo de la herramienta: Bausing - Cotizar Pedido
+Cuando deberia usarse: Usar siempre antes de crear una orden: arma la
+  cotizacion completa (precios por zona, envio, cupon/referido, dias
+  estimados) y dice si la venta se puede cerrar por el bot o si hay que
+  derivar a un asesor humano.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote
+Metodo HTTP: POST
+Timeout (ms): 10000
+Path parameters: Off
+Query Parameters: Off
+Headers: Off
+Body: On (ver tabla)
+Reintentar ante fallas: On
+
+Body:
+  address         | object           | Si                        | { street, number, city, province, postal_code, lat, lon }
+  items           | array de objetos | Si                        | { product_id, quantity }
+  payment_method  | string           | No (default "transfer")  | cash | transfer | card
+  coupon_code     | string           | No                        | Codigo de cupon
+  referral_code   | string           | No                        | Codigo de referido
+  customer        | object           | No                        | { email } - para detectar cliente existente
+
+Body (JSON):
+{
+  "address": {
+    "street": "San Martin",
+    "number": "100",
+    "city": "Cordoba",
+    "province": "Cordoba",
+    "postal_code": "5000",
+    "lat": -31.4201,
+    "lon": -64.1888
+  },
+  "items": [
+    { "product_id": "<uuid>", "quantity": 1 }
+  ],
+  "payment_method": "transfer",
+  "coupon_code": "VERANO10",
+  "referral_code": "ABC123",
+  "customer": { "email": "opcional@mail.com" }
+}
+
+
+================================================================
+8. CREAR ORDEN DE VENTA
+================================================================
+Titulo de la herramienta: Bausing - Crear Orden
+Cuando deberia usarse: Usar para crear la venta en el CRM (pago contra
+  entrega) SOLO despues de que "Cotizar Pedido" haya devuelto
+  can_create_order: true. Si devuelve requires_human_handoff: true, no usar
+  esta herramienta: derivar al cliente con el handoff_message y
+  whatsapp_phone de la cotizacion.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders
+Metodo HTTP: POST
+Timeout (ms): 10000
+Path parameters: Off
+Query Parameters: Off
+Headers: Off
+Body: On (ver tabla)
+Reintentar ante fallas: OFF (evita duplicar la orden en el CRM ante un reintento)
+
+Body:
+  customer        | object           | Si | { first_name, last_name, email, phone, dni, document_type }
+  address         | object           | Si | { street, number, city, province, province_id, postal_code, references } - province_id o province (nombre) obligatorio
+  items           | array de objetos | Si | { product_id, quantity }
+  payment_method  | string           | Si | cash | transfer | card
+  total           | number           | No | Total esperado; se revalida contra el servidor (tolerancia $1)
+  coupon_code     | string           | No | Codigo de cupon ya validado
+  referral_code   | string           | No | Codigo de referido ya validado
+  observations    | string           | No | Notas adicionales (se le agrega "Origen: Atendium bot")
+
+Body (JSON):
+{
+  "customer": {
+    "first_name": "Juan",
+    "last_name": "Perez",
+    "email": "juan@mail.com",
+    "phone": "3515551234",
+    "dni": "30111222",
+    "document_type": "DNI"
+  },
+  "address": {
+    "street": "San Martin",
+    "number": "100",
+    "city": "Cordoba",
+    "province": "Cordoba",
+    "province_id": "<uuid-opcional-si-mandas-province>",
+    "postal_code": "5000",
+    "lat": -31.4201,
+    "lon": -64.1888
+  },
+  "items": [
+    { "product_id": "<uuid>", "quantity": 1 }
+  ],
+  "payment_method": "cash",
+  "total": 255000,
+  "coupon_code": null,
+  "referral_code": null,
+  "observations": "opcional"
+}
+
+
+================================================================
+9. LISTAR PEDIDOS DEL CLIENTE
+================================================================
+Titulo de la herramienta: Bausing - Listar Pedidos
+Cuando deberia usarse: Usar cuando el cliente pregunta por su historial de
+  compras o pedidos anteriores. Requiere telefono y/o DNI para
+  identificarlo.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders
+Metodo HTTP: GET
+Timeout (ms): 8000
+Path parameters: Off
+Query Parameters: On (ver tabla)
+Headers: Off
+Body: Off
+Reintentar ante fallas: On
+
+Query Parameters:
+  phone   | string | No* | Telefono del cliente
+  dni     | string | No* | DNI del cliente
+  limit   | number | No  | Default 10, max 50
+
+  * Al menos uno de phone o dni es obligatorio.
+
+
+================================================================
+10. ESTADO DE UN PEDIDO
+================================================================
+Titulo de la herramienta: Bausing - Estado de Pedido
+Cuando deberia usarse: Usar cuando el cliente pregunta por el estado o
+  seguimiento de un pedido puntual, dando el numero de orden y su
+  telefono.
+Credencial: Bausing API Key
+URL: https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders/:order_id
+Metodo HTTP: GET
+Timeout (ms): 8000
+Path parameters: On (ver tabla)
+Query Parameters: On (ver tabla)
+Headers: Off
+Body: Off
+Reintentar ante fallas: On
+
+Path parameters:
+  order_id  | string | Si | UUID interno de la orden o crm_order_id numerico
+
+Query Parameters:
+  phone     | string | Si | Telefono del cliente (valida que el pedido sea suyo)
+
+
+================================================================
+FLUJO SUGERIDO PARA EL BOT
+================================================================
+1. "Resolver Zona" con la direccion -> mostrar dias estimados.
+2. "Buscar Catalogo" con locality_id de la zona.
+3. "Validar Cupon" / "Validar Referido" si el cliente los menciona.
+4. "Cotizar Pedido" con el carrito armado.
+5. Si requires_human_handoff -> derivar con handoff_message + whatsapp_phone.
+6. Si can_create_order -> confirmar datos con el cliente -> "Crear Orden".
+7. "Estado de Pedido" / "Listar Pedidos" para seguimiento.
+
+
+================================================================
+TEXTO PARA EL CAMPO "INSTRUCCIONES" DEL BOT (pegar tal cual)
+================================================================
+Sos el asistente de ventas de Bausing por WhatsApp. Tu objetivo es ayudar al cliente a elegir productos, cotizar y cerrar la compra con pago contra entrega, o derivarlo a un asesor humano cuando corresponda. Se cordial, breve y claro, usa pesos argentinos y nunca inventes precios, stock ni tiempos de entrega: siempre salen de las herramientas.
+
+PASOS OBLIGATORIOS (segui este orden):
+
+1. Pedi la direccion completa del cliente (calle, numero, ciudad, provincia, codigo postal; si tiene ubicacion de WhatsApp, mejor). Usa la herramienta "Bausing - Resolver Zona" [POST /resolve-zone] para obtener localidad, catalogo y dias estimados de entrega. Contale los dias estimados.
+
+2. Pregunta que productos busca y usa "Bausing - Buscar Catalogo" [GET /catalog] (con el locality_id de la zona) para mostrarle opciones con precio. Si pide detalle de un producto puntual, usa "Bausing - Detalle de Producto" [GET /catalog/:product_id].
+
+3. Si el cliente menciona un cupon, validalo con "Bausing - Validar Cupon" [POST /validate-coupon] antes de aplicarlo. Si menciona un codigo de referido, validalo con "Bausing - Validar Referido" [POST /validate-referral].
+
+4. Antes de confirmar cualquier compra, arma el carrito y usa "Bausing - Cotizar Pedido" [POST /quote] con la direccion, los items, el medio de pago y cupon/referido si los hay. Nunca calcules el total vos mismo.
+
+5. Si la cotizacion devuelve requires_human_handoff en true, no sigas con la venta: deriva al cliente al asesor usando el handoff_message y el whatsapp_phone que te da la herramienta.
+
+6. Si can_create_order es true, pregunta y confirma con el cliente: nombre y apellido, DNI, email, telefono, medio de pago (efectivo, transferencia o tarjeta) y que la direccion sea correcta. Con esos datos confirmados, crea la venta con "Bausing - Crear Orden" [POST /orders].
+
+7. Si el cliente pregunta por pedidos anteriores, pedile telefono y/o DNI y usa "Bausing - Listar Pedidos" [GET /orders]. Si pregunta por el estado de un pedido puntual, pedile el numero de pedido y su telefono y usa "Bausing - Estado de Pedido" [GET /orders/:order_id].
+
+PREGUNTAS QUE SIEMPRE DEBES HACER ANTES DE CREAR UNA ORDEN:
+- Nombre y apellido
+- DNI
+- Email
+- Telefono de contacto
+- Direccion completa (si no la diste antes)
+- Medio de pago preferido
+
+QUE NO HACER:
+- No inventes precios, stock, cupones ni tiempos de entrega: siempre verificalos con la herramienta correspondiente.
+- No crees una orden sin haber cotizado antes con "Bausing - Cotizar Pedido" [POST /quote].
+- No crees una orden si la cotizacion pide derivar a un asesor.
+- No repitas la cotizacion completa en cada mensaje; resumi lo esencial (productos, total, envio).

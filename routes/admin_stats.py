@@ -734,8 +734,8 @@ def get_general_metrics():
                 COALESCE(AVG(uo.completed_orders), 0) as avg_completed_orders_per_user,
                 COALESCE(AVG(COALESCE(cbt.open_carts, 0)), 0) as avg_open_carts_per_user,
                 COALESCE(AVG(COALESCE(cbt.abandoned_carts, 0)), 0) as avg_abandoned_carts_per_user,
-                COALESCE(AVG(uo.total_spent), 0) as avg_spent_per_user,
-                COALESCE(AVG(uo.avg_order_value), 0) as avg_order_value_general,
+                COALESCE(AVG(uo.total_spent) FILTER (WHERE uo.completed_orders > 0), 0) as avg_spent_per_user,
+                COALESCE(AVG(uo.avg_order_value) FILTER (WHERE uo.completed_orders > 0), 0) as avg_order_value_general,
                 
                 -- Totales
                 COALESCE(SUM(uo.total_orders), 0) as total_orders_all,

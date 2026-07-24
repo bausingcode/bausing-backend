@@ -8,12 +8,12 @@ Ejemplo local: `http://localhost:5000/atendium/v1`
 **Auth (requerida en todos los endpoints):**
 
 ```
-X-API-Key: <ATENDIUM_API_KEY o API_KEY>
+X-API-Key: <API_KEY>
 ```
 
 También acepta `Authorization: Bearer <misma_clave>`.
 
-Variable de entorno preferida: `ATENDIUM_API_KEY`. Si no está seteada, se usa `API_KEY`.
+Variable de entorno: `API_KEY`.
 
 **Formato de respuesta:**
 
