@@ -36,6 +36,10 @@ def _wallet_covers(available, required) -> bool:
 
 orders_bp = Blueprint('orders', __name__)
 
+# crm_products.crm_product_id del renglón "ENVIOS" en el CRM, usado para
+# reportar el costo de envío tercerizado como renglón propio de la venta.
+CRM_ITEM_ID_ENVIO_TERCERIZADO = 212
+
 # Función helper para obtener la hora de Argentina (UTC-3)
 def get_argentina_time():
     """Retorna la fecha y hora actual en zona horaria de Argentina (UTC-3) como datetime naive"""
@@ -889,6 +893,10 @@ def create_order_for_user(user, data):
         address_data = data['address']
         items = data['items']
         total = float(data['total'])  # Este total ya viene con el descuento de billetera aplicado desde el frontend
+        try:
+            shipping_cost = float(data.get('shipping_cost') or 0)
+        except (TypeError, ValueError):
+            shipping_cost = 0.0
         formData = data.get('customer', {})  # Datos del cliente para el pago
         payment_method = data.get('payment_method', 'card')
         referral_code = data.get('referral_code', '').strip().upper() if data.get('referral_code') else None
@@ -1329,7 +1337,20 @@ def create_order_for_user(user, data):
                 'success': False,
                 'error': 'No se pudieron mapear los productos al CRM'
             }), 400
-        
+
+        # Renglón de envío tercerizado (cobrado junto con el pedido, no incluido
+        # en items_con_precios): se agrega como su propio renglón del CRM.
+        if shipping_cost > 0.01:
+            js_items.append({
+                "id": None,
+                "accion": "N",
+                "item_id": CRM_ITEM_ID_ENVIO_TERCERIZADO,
+                "cantidad_recibida": 1,
+                "precio": round(shipping_cost, 2),
+                "unitario_sin_fpago": round(shipping_cost, 2),
+                "descripcion": "Envío tercerizado"
+            })
+
         # Preparar order_items con precios
         # Si es pago completo con wallet, usar precios originales
         # Si es descuento parcial, usar precios ajustados
@@ -1455,6 +1476,14 @@ def create_order_for_user(user, data):
                         "procesado": pm_processed,
                         "cantCuotas": card_installments if pm_method == 'card' else 1
                     })
+
+            # El envío tercerizado se cobra junto con el primer medio de pago, pero
+            # payment_methods[].amount del frontend no lo incluye; se suma acá para
+            # que coincida con el renglón "Envío tercerizado" agregado a js_items.
+            if shipping_cost > 0.01 and forma_pagos_array:
+                forma_pagos_array[0]["monto_total"] = round(
+                    forma_pagos_array[0]["monto_total"] + shipping_cost, 2
+                )
 
             # Guardar los métodos combinados en payment_method (separados por coma)
             combined_methods = ','.join([pm.get('method', 'card') for pm in frontend_payment_methods if float(pm.get('amount', 0)) > 0])
