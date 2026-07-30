@@ -11,64 +11,207 @@ from functools import wraps
 import jwt
 import uuid
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, date
 from config import Config
 from utils.email_service import email_service
 import requests
 import time
+import re
 
 auth_bp = Blueprint('auth', __name__)
 
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_HEADERS = {"User-Agent": "BausingApp/1.0"}
+NOMINATIM_RESULT_LIMIT = 5
+
+
+def _normalize_place_name(value):
+    """Normaliza nombres de lugar para comparar (sin acentos, lowercase, trim)."""
+    if not value:
+        return ""
+    text_value = unicodedata.normalize("NFKD", str(value))
+    text_value = "".join(ch for ch in text_value if not unicodedata.combining(ch))
+    text_value = text_value.lower().strip()
+    text_value = re.sub(r"\s+", " ", text_value)
+    # "Villa Carlos Paz" / "Municipio de Córdoba" → tokens comparables
+    for prefix in ("municipio de ", "ciudad de ", "villa "):
+        if text_value.startswith(prefix):
+            text_value = text_value[len(prefix):]
+            break
+    return text_value
+
+
+def _normalize_postal_code(value):
+    """Normaliza CP argentinos: 'X5000' / '5000' / '5009' → dígitos."""
+    if not value:
+        return ""
+    digits = re.sub(r"\D", "", str(value))
+    return digits
+
+
+def _postal_codes_compatible(requested, candidate):
+    """True si los CP son iguales o comparten el mismo prefijo de ciudad (4 dígitos)."""
+    req = _normalize_postal_code(requested)
+    cand = _normalize_postal_code(candidate)
+    if not req or not cand:
+        return False
+    if req == cand:
+        return True
+    # En AR a veces llega 5009 vs X5000: comparar primeros 3–4 dígitos de área
+    return len(req) >= 3 and len(cand) >= 3 and req[:3] == cand[:3]
+
+
+def _result_locality_names(result):
+    """Nombres de localidad posibles en un hit de Nominatim."""
+    address = result.get("address") or {}
+    names = [
+        address.get("city"),
+        address.get("town"),
+        address.get("village"),
+        address.get("municipality"),
+        address.get("suburb"),
+        address.get("neighbourhood"),
+    ]
+    return [_normalize_place_name(n) for n in names if n]
+
+
+def _score_geocode_result(result, city, postal_code, province_name=None):
+    """
+    Puntúa un hit de Nominatim priorizando match de ciudad y CP.
+    Evita elegir p.ej. Mendoza 163 en Carlos Paz cuando city=Córdoba.
+    """
+    if not result or not result.get("lat") or not result.get("lon"):
+        return -1
+
+    address = result.get("address") or {}
+    score = 0
+    city_norm = _normalize_place_name(city)
+    locality_names = _result_locality_names(result)
+
+    if city_norm:
+        if city_norm in locality_names:
+            score += 100
+        elif any(city_norm in name or name in city_norm for name in locality_names if name):
+            # Match parcial (ej. "carlos paz" vs "villa carlos paz" ya normalizado)
+            score += 80
+        else:
+            # Ciudad pedida no aparece en el hit → penalizar fuerte
+            score -= 50
+
+    if postal_code and _postal_codes_compatible(postal_code, address.get("postcode")):
+        score += 40
+
+    if province_name:
+        state_norm = _normalize_place_name(address.get("state"))
+        prov_norm = _normalize_place_name(province_name)
+        if state_norm and prov_norm and (state_norm == prov_norm or prov_norm in state_norm):
+            score += 10
+
+    return score
+
+
+def _pick_best_geocode_result(results, city, postal_code, province_name=None):
+    """Elige el mejor hit entre varios resultados de Nominatim."""
+    if not results:
+        return None
+
+    scored = []
+    for result in results:
+        score = _score_geocode_result(result, city, postal_code, province_name)
+        scored.append((score, result))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, best = scored[0]
+
+    # Si pedimos ciudad y el mejor score es muy bajo, no devolver un match ambiguo
+    # (mejor caer al fallback ciudad+provincia).
+    if city and best_score < 50:
+        return None
+
+    return best
+
+
+def _nominatim_search(params):
+    """GET a Nominatim respetando rate limit. Retorna lista de resultados o []."""
+    time.sleep(1)  # Nominatim: 1 req/s
+    response = requests.get(
+        NOMINATIM_URL,
+        params={
+            **params,
+            "format": "json",
+            "limit": NOMINATIM_RESULT_LIMIT,
+            "addressdetails": 1,
+            "countrycodes": "ar",
+        },
+        headers=NOMINATIM_HEADERS,
+        timeout=10,
+    )
+    if response.status_code != 200:
+        return []
+    data = response.json()
+    return data if isinstance(data, list) else []
+
+
 def get_lat_lon_from_address(street, number, city, postal_code, province_name=None):
     """
-    Obtiene latitud y longitud de una dirección usando Nominatim (OpenStreetMap)
-    Retorna un string en formato "lat,lon" o None si no se puede obtener
+    Obtiene latitud y longitud de una dirección usando Nominatim (OpenStreetMap).
+    Usa búsqueda estructurada (street/city/state/postalcode) y, si hace falta,
+    free-form. Entre varios hits elige el que mejor matchea ciudad/CP para
+    evitar ambigüedades (ej. misma calle en Córdoba capital vs Carlos Paz).
+    Retorna "lat,lon" o None.
     """
     try:
-        # Construir la dirección completa
-        address_parts = []
-        if street:
-            address_parts.append(street)
-        if number:
-            address_parts.append(number)
+        street_line = " ".join(
+            part for part in [street, str(number) if number not in (None, "") else None] if part
+        ).strip()
+
+        results = []
+
+        # 1) Search estructurado: city + province como campos separados
+        structured = {"country": "Argentina"}
+        if street_line:
+            structured["street"] = street_line
         if city:
-            address_parts.append(city)
-        if postal_code:
-            address_parts.append(postal_code)
+            structured["city"] = city
         if province_name:
-            address_parts.append(province_name)
-        address_parts.append("Argentina")
-        
-        query = ", ".join(address_parts)
-        
-        # Usar Nominatim API (gratuita, sin API key)
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {
-            "q": query,
-            "format": "json",
-            "limit": 1,
-            "addressdetails": 1
-        }
-        headers = {
-            "User-Agent": "BausingApp/1.0"  # Nominatim requiere User-Agent
-        }
-        
-        # Hacer la petición con un pequeño delay para respetar rate limits
-        time.sleep(1)  # Nominatim permite 1 request por segundo
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data and len(data) > 0:
-                lat = data[0].get("lat")
-                lon = data[0].get("lon")
-                if lat and lon:
-                    return f"{lat},{lon}"
-        
+            structured["state"] = province_name
+        if postal_code:
+            structured["postalcode"] = postal_code
+
+        if city or street_line:
+            results = _nominatim_search(structured)
+
+        # 2) Fallback free-form si estructurado no dio nada útil
+        if not results:
+            address_parts = []
+            if street:
+                address_parts.append(street)
+            if number not in (None, ""):
+                address_parts.append(str(number))
+            if city:
+                address_parts.append(city)
+            if postal_code:
+                address_parts.append(str(postal_code))
+            if province_name:
+                address_parts.append(province_name)
+            address_parts.append("Argentina")
+            results = _nominatim_search({"q": ", ".join(address_parts)})
+
+        best = _pick_best_geocode_result(results, city, postal_code, province_name)
+        if not best:
+            return None
+
+        lat = best.get("lat")
+        lon = best.get("lon")
+        if lat and lon:
+            return f"{lat},{lon}"
+
         return None
-    except Exception as e:
+    except Exception:
         # Si falla la geocodificación, no fallar la creación de la dirección
         return None
+
 
 def geocode_address_with_fallback(street, number, city, postal_code, province_name=None):
     """
