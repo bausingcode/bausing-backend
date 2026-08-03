@@ -159,6 +159,36 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
 
     catalog, catalog_id = catalog_for_locality(locality.id)
     is_pais = str(catalog_id) == PAIS_CATALOG_ID if catalog_id else False
+    delivery = estimated_delivery_payload(catalog)
+
+    # Solo 2 envíos pagos: tercerizado y Vía Cargo. El resto es gratuito.
+    if is_third_party and shipping_price is not None:
+        shipping_summary = {
+            "kind": "third_party",
+            "is_free": False,
+            "cost": float(shipping_price),
+            "cost_label": _format_ars(float(shipping_price)),
+            "message": f"Envío tercerizado: {_format_ars(float(shipping_price))}",
+        }
+    elif is_pais:
+        shipping_summary = {
+            "kind": "viacargo",
+            "is_free": False,
+            "cost": None,
+            "cost_label": None,
+            "message": (
+                "Envío Vía Cargo: para el monto exacto hace falta cotizar "
+                "con los productos y el código postal"
+            ),
+        }
+    else:
+        shipping_summary = {
+            "kind": "free",
+            "is_free": True,
+            "cost": 0.0,
+            "cost_label": "$0",
+            "message": "Envío gratuito",
+        }
 
     return {
         "locality": {
@@ -168,10 +198,12 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
         "coordinates": {"lon": lon, "lat": lat},
         "crm_zone_id": crm_zone_id,
         "catalog_id": catalog_id,
+        "catalog_name": catalog.name if catalog else None,
         "is_pais_catalog": is_pais,
         "is_third_party_transport": is_third_party,
-        "shipping_price": shipping_price,
-        "estimated_delivery": estimated_delivery_payload(catalog),
+        "shipping_price": shipping_price if is_third_party else None,
+        "estimated_delivery": delivery,
+        "shipping_summary": shipping_summary,
     }
 
 

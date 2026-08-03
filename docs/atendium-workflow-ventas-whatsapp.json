@@ -8,7 +8,7 @@
       "name": "Cómo configurar",
       "type": "note",
       "config": {
-        "text": "Flujo: Bienvenida → Zona (contar plazo) → Catálogo+Cotizar envío → Cotizar → Orden/Handoff\nCupón opcional (nodo aparte no está en el camino feliz).\nNunca pedir DNI/email sin cotización OK de envío/plazo/total."
+        "text": "Entrada: Router → Bienvenida → Zona.\nSi preguntan envío/días: Resolver Zona y responder estimated_delivery + shipping_summary. NO ir a catálogo salvo que pidan productos.\nDías = admin Días Estimados de Entrega (por catálogo).\nEnvío pago: tercerizado o Vía Cargo; si no, gratuito."
       },
       "position": {
         "x": 20,
@@ -93,11 +93,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp: cálido, claro y humano.\n\nCuando te escriben:\n- Saludá y preguntá cómo está.\n- Preguntá qué está buscando / en qué lo ayudás.\n- Hablá como en un chat de ventas normal, no como un bot ni un sistema.\n\nNunca uses frases de sistema (\"procederé\", \"hubo un problema al buscar\", \"intentá con otra palabra o estilo\").\nNo pidas la dirección todavía.\nMensajes cortos (1-3 oraciones).\nNunca digas \"CP\": decí siempre \"código postal\".\n\nSi el cliente escribe con typos, entendé la intención igual (ej. \"colchon\" = colchón, \"2 plsas\" = 2 plazas).\n\nPROHIBIDO ABSOLUTO (nunca digas esto):\n- \"Lamento la confusión\", \"parece que hubo un error\", \"el sistema\", \"generalmente...\"\n- Inventar días de entrega o costo de envío\n- Decir que el envío es gratuito, \"incluido en el precio del producto\", o \"suele ser gratis\"\n- Cualquier plazo inventado tipo \"3 a 5 días\" si no salió de la tool\n\nSolo podés hablar de envío/plazo con datos reales de:\n- Resolver Zona → estimated_delivery\n- Cotizar Pedido → shipping_cost, estimated_delivery, total\nSi la tool falla: pedí disculpas cortas y reintentá o pedí un dato que falte (producto/dirección/medio de pago). No inventes números.\n",
+        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nPrimera respuesta: saludá y preguntá en qué lo ayudás.\nSi pregunta costo de envío y/o días de entrega (aunque tenga typos), pedile la dirección para calcularlo.\nNO muestres catálogo ni productos todavía.\nNO pidas cupón.\nNunca digas \"CP\": decí siempre \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "Ya saludaste y el cliente te contó qué desea (comprar, ver productos, cotizar, un tipo de mueble, etc.). No avances si solo hubo un saludo.",
+        "continueCondition": "El cliente dijo qué necesita (envío/días, productos, etc.). Si solo saludó, no continues.",
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": true
@@ -187,11 +187,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nPedí dirección (calle, número, ciudad, provincia y código postal).\n\n\nDIRECCIÓN — reglas duras:\n- Los nombres de calle/persona se copian tal cual (solo corregí mayúsculas menores).\n- Si dijo \"rodolfo martinez\", mandá street=\"Rodolfo Martinez\". NUNCA lo cambies a Rodrigo, Roberto, ni otro nombre.\n- Solo normalizá ciudad/provincia con typos obvios (corodba/cba capital → Córdoba).\n- No reinventes la dirección.\n\n\nEjemplo correcto:\nCliente: \"rodolfo martinez 6034, corodba capital, 5021\"\nTool:\n- street: \"Rodolfo Martinez\"\n- number: \"6034\"\n- city: \"Córdoba\"\n- province: \"Córdoba\"\n- postal_code: \"5021\"\n\nLlamá \"Bausing - Resolver Zona\".\nDespués:\n- Contá el plazo: estimated_delivery.label\n- Si is_third_party_transport: contá el envío tercerizado con shipping_price\n- Si is_pais_catalog: el envío Vía Cargo se cotiza después con el producto\n- Si no es tercerizado ni país: no inventes un costo de envío todavía\n\n\nENVÍO — solo hay 2 formas de envío pago en Bausing:\n1) Tercerizado: is_third_party_transport=true → usar shipping_price / en quote shipping_kind=\"third_party\" y shipping_cost.\n2) Vía Cargo: is_pais_catalog=true → cotizar con Cotizar Pedido (código postal + items) → shipping_kind=\"viacargo\".\n\nSi no es ninguno de esos dos, el envío de la cotización es shipping_cost de la tool (puede ser 0). \nNUNCA digas otras modalidades inventadas, ni que el envío está \"incluido en el precio del producto\".\nDías: siempre estimated_delivery.label de la tool (zona o cotización).\n\n\nPROHIBIDO: cambiar Rodolfo→Rodrigo; inventar envío/días; \"parece que...\".\nNunca digas \"CP\": decí siempre \"código postal\".",
+        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSi el cliente pregunta envío y/o días de entrega:\n1) Pedí dirección completa si falta.\n2) Interpretá typos de ciudad, pero NO cambies nombres de calle\n   (\"rodolfo martinez\" → \"Rodolfo Martinez\", nunca Rodrigo).\n3) Llamá \"Bausing - Resolver Zona\".\n4) Respondé SOLO con datos de la tool, sin catálogo:\n\nEjemplo si shipping_summary.kind = free:\n\"A tu zona el envío es gratuito y la entrega tarda 1 a 2 días hábiles.\"\n(usá estimated_delivery.label y shipping_summary.message / cost_label)\n\nSi kind = third_party:\n\"El envío a tu zona es tercerizado: $X. La entrega tarda {estimated_delivery.label}.\"\n\nSi kind = viacargo:\n\"En tu zona el envío es por Vía Cargo; el monto exacto se cotiza según los productos. La entrega tarda {estimated_delivery.label}.\"\n\nLos días salen del catálogo de esa zona (admin → Días Estimados de Entrega): estimated_delivery.\nEnvío pago solo tercerizado o Vía Cargo; si no es ninguno → gratuito.\n\nPROHIBIDO:\n- Listar productos/colchones si solo preguntó envío/días\n- Inventar plazos o costos\n- \"Parece que hubo un problema...\"\n- Pedir DNI/email\n\nSi después pregunta por productos, ahí sí ofrecé buscar catálogo.\nNunca digas \"CP\": decí siempre \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "Llamaste Resolver Zona OK, le contaste estimated_delivery.label, y el cliente indicó qué producto busca (o ya lo había dicho y le confirmaste que vas a mostrarle opciones).",
+        "continueCondition": "SOLO continues al catálogo si el cliente pidió ver/comprar productos. Si solo preguntó envío o días de entrega y ya se lo respondiste con Resolver Zona, NO continues.",
         "dataSourceConfigs": {
           "101": {
             "id": "101",
@@ -365,11 +365,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nUsá locality_id y la dirección YA dicha (sin cambiar nombres de calle).\n\n\nDIRECCIÓN — reglas duras:\n- Los nombres de calle/persona se copian tal cual (solo corregí mayúsculas menores).\n- Si dijo \"rodolfo martinez\", mandá street=\"Rodolfo Martinez\". NUNCA lo cambies a Rodrigo, Roberto, ni otro nombre.\n- Solo normalizá ciudad/provincia con typos obvios (corodba/cba capital → Córdoba).\n- No reinventes la dirección.\n\n\n1) \"Bausing - Buscar Catalogo\" con q + locality_id.\n2) Listá con SALTOS DE LÍNEA, solo nombre + precio (sin descripción).\n\nEstas son algunas opciones:\n\n1) Colchón ... — $...\n2) Colchón ... — $...\n\nSi querés, te muestro otras, más info, o la foto de alguna.\n\nSi elige una (ej. \"la 2\") y pide envío/días:\n- Confirmá nombre + precio (sin descripción)\n- Guardá product_id UUID real\n- Llamá YA \"Bausing - Cotizar Pedido\" con address exacta + items\n- Respondé solo con shipping_cost, estimated_delivery.label y total de la tool\n\n\nENVÍO — solo hay 2 formas de envío pago en Bausing:\n1) Tercerizado: is_third_party_transport=true → usar shipping_price / en quote shipping_kind=\"third_party\" y shipping_cost.\n2) Vía Cargo: is_pais_catalog=true → cotizar con Cotizar Pedido (código postal + items) → shipping_kind=\"viacargo\".\n\nSi no es ninguno de esos dos, el envío de la cotización es shipping_cost de la tool (puede ser 0). \nNUNCA digas otras modalidades inventadas, ni que el envío está \"incluido en el precio del producto\".\nDías: siempre estimated_delivery.label de la tool (zona o cotización).\n\n\nPROHIBIDO pedir DNI/email antes de cotizar; inventar envío; cambiar Rodolfo→Rodrigo.\nNunca digas \"CP\": decí siempre \"código postal\".",
+        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nEste paso es SOLO si el cliente quiere ver o comprar productos.\nSi en realidad solo pregunta envío/días y todavía no eligió producto:\n- No listes el catálogo.\n- Usá \"Bausing - Resolver Zona\" o los datos de zona ya obtenidos:\n  estimated_delivery.label + shipping_summary (free / third_party / viacargo).\n- Respondé eso y listo.\n\nSi sí quiere productos:\n1) Buscá catálogo con locality_id.\n2) Listá con saltos de línea: nombre — precio (sin descripción).\n3) Si elige uno y pide envío otra vez, cotizá con \"Bausing - Cotizar Pedido\".\n\nEnvío: solo tercerizado o Vía Cargo son pagos; si no, gratuito.\nNunca digas \"CP\": decí siempre \"código postal\".\nPROHIBIDO: \"parece que hubo un problema\"; inventar envío.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "El cliente ya eligió producto Y ya le diste envío+plazo+total con Bausing - Cotizar Pedido OK, o pidió explícitamente cerrar/comprar después de ver la cotización. Si pidió envío/días y la cotización falló, NO continues: reintentá el quote.",
+        "continueCondition": "El cliente eligió un producto y, si pidió envío/total, ya cotizaste OK. Si solo quería info de envío/días sin comprar, no forces catálogo ni continues.",
         "dataSourceConfigs": {
           "102": {
             "id": "102",
@@ -477,170 +477,6 @@
       }
     },
     {
-      "id": "5",
-      "name": "3. Cupón / referido",
-      "type": "agent",
-      "config": {
-        "tools": [],
-        "factKeys": [
-          "coupon_code",
-          "referral_code"
-        ],
-        "factLabels": {
-          "coupon_code": "Cupón",
-          "referral_code": "Referido"
-        },
-        "ragEnabled": false,
-        "dataSources": [
-          {
-            "id": "104",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/validate-coupon",
-                "body": {
-                  "coupon_code": "@AI(\"código de cupón solo si el cliente lo dio\", optional:true)",
-                  "items": "@AI(\"array [{product_id, quantity, price}] solo si hay cupón a validar\", optional:true)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 15000
-              },
-              "custom_title": "Bausing - Validar Cupon",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "Validar cupón SOLO si el cliente dio un código. Es opcional: si no hay cupón, no uses esta tool. POST /validate-coupon.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          },
-          {
-            "id": "105",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/validate-referral",
-                "body": {
-                  "referral_code": "@AI(\"código de referido solo si el cliente lo dio\", optional:true)",
-                  "customer_email": "@AI(\"email del cliente si ya lo dio\", optional:true)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 15000
-              },
-              "custom_title": "Bausing - Validar Referido",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "Validar referido SOLO si el cliente dio un código. Es opcional. POST /validate-referral.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          }
-        ],
-        "outputSchema": {
-          "type": "object",
-          "required": [
-            "output"
-          ],
-          "properties": {
-            "output": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nCupón/referido OPCIONALES. Preguntá una sola vez:\n\"¿Tenés algún cupón o código de referido? Si no, seguimos igual.\"\n\nSi dice que no:\n- NO llames tools de cupón.\n- NO digas que falló un cálculo.\n- Seguí al paso de cotizar (envío/total) con el producto y la dirección ya conocidos.\n\nSi da cupón/referido: validalo.\nNunca digas \"CP\": decí siempre \"código postal\".\nPROHIBIDO: \"Necesito código de cupón\", \"lamento la confusión\", inventar envío.",
-        "executionMode": "wait_for_user",
-        "requiredSlots": [],
-        "savedVariables": [],
-        "continueCondition": "El cliente respondió sobre cupón/referido (tiene o no). Si no tiene, continues de inmediato a cotizar sin pedir más datos.",
-        "dataSourceConfigs": {
-          "104": {
-            "id": "104",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/validate-coupon",
-                "body": {
-                  "coupon_code": "@AI(\"código de cupón solo si el cliente lo dio\", optional:true)",
-                  "items": "@AI(\"array [{product_id, quantity, price}] solo si hay cupón a validar\", optional:true)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 15000
-              },
-              "custom_title": "Bausing - Validar Cupon",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "Validar cupón SOLO si el cliente dio un código. Es opcional: si no hay cupón, no uses esta tool. POST /validate-coupon.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          },
-          "105": {
-            "id": "105",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/validate-referral",
-                "body": {
-                  "referral_code": "@AI(\"código de referido solo si el cliente lo dio\", optional:true)",
-                  "customer_email": "@AI(\"email del cliente si ya lo dio\", optional:true)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 15000
-              },
-              "custom_title": "Bausing - Validar Referido",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "Validar referido SOLO si el cliente dio un código. Es opcional. POST /validate-referral.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          }
-        },
-        "captureFactsEnabled": true,
-        "waitForUserResponse": true
-      },
-      "position": {
-        "x": 1018.125,
-        "y": -15
-      }
-    },
-    {
       "id": "6",
       "name": "4. Cotizar pedido",
       "type": "agent",
@@ -724,7 +560,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nCotizá con \"Bausing - Cotizar Pedido\" usando la dirección EXACTA ya dicha y el product_id elegido.\n\nDIRECCIÓN — reglas duras:\n- Los nombres de calle/persona se copian tal cual (solo corregí mayúsculas menores).\n- Si dijo \"rodolfo martinez\", mandá street=\"Rodolfo Martinez\". NUNCA lo cambies a Rodrigo, Roberto, ni otro nombre.\n- Solo normalizá ciudad/provincia con typos obvios (corodba/cba capital → Córdoba).\n- No reinventes la dirección.\n\n\nENVÍO — solo hay 2 formas de envío pago en Bausing:\n1) Tercerizado: is_third_party_transport=true → usar shipping_price / en quote shipping_kind=\"third_party\" y shipping_cost.\n2) Vía Cargo: is_pais_catalog=true → cotizar con Cotizar Pedido (código postal + items) → shipping_kind=\"viacargo\".\n\nSi no es ninguno de esos dos, el envío de la cotización es shipping_cost de la tool (puede ser 0). \nNUNCA digas otras modalidades inventadas, ni que el envío está \"incluido en el precio del producto\".\nDías: siempre estimated_delivery.label de la tool (zona o cotización).\n\n\nContá:\n- envío = shipping_cost (aclará si shipping_kind es third_party o viacargo)\n- días = estimated_delivery.label\n- total = total\n\nNo pidas DNI/email/teléfono acá.\nSi falla, reintentá quote; no inventes.\nNunca digas \"CP\": decí siempre \"código postal\".",
+        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSi solo quieren envío/días y YA hay Resolver Zona:\n- Contá estimated_delivery.label\n- Contá shipping_summary (gratuito / tercerizado $X / Vía Cargo a cotizar)\n- No pidas productos ni datos personales.\n\nSi ya eligieron producto: Cotizar Pedido y usá shipping_cost + estimated_delivery + total.\n\nEnvío pago solo third_party o viacargo; si shipping_kind=none/free → gratuito (no digas \"incluido en el precio\").\nPROHIBIDO frases de sistema o inventar números.\nNunca digas \"CP\": decí siempre \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -879,7 +715,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSolo pedí nombre/apellido/DNI/email/teléfono si YA hubo cotización OK y quiere comprar.\nSi pide envío/días: cotizá primero, no pidas datos personales.\n\n\nDIRECCIÓN — reglas duras:\n- Los nombres de calle/persona se copian tal cual (solo corregí mayúsculas menores).\n- Si dijo \"rodolfo martinez\", mandá street=\"Rodolfo Martinez\". NUNCA lo cambies a Rodrigo, Roberto, ni otro nombre.\n- Solo normalizá ciudad/provincia con typos obvios (corodba/cba capital → Córdoba).\n- No reinventes la dirección.\n\n\nENVÍO — solo hay 2 formas de envío pago en Bausing:\n1) Tercerizado: is_third_party_transport=true → usar shipping_price / en quote shipping_kind=\"third_party\" y shipping_cost.\n2) Vía Cargo: is_pais_catalog=true → cotizar con Cotizar Pedido (código postal + items) → shipping_kind=\"viacargo\".\n\nSi no es ninguno de esos dos, el envío de la cotización es shipping_cost de la tool (puede ser 0). \nNUNCA digas otras modalidades inventadas, ni que el envío está \"incluido en el precio del producto\".\nDías: siempre estimated_delivery.label de la tool (zona o cotización).\n\n\nAl crear orden, usá la misma dirección exacta (Rodolfo Martinez, no Rodrigo).\nNunca digas \"CP\": decí siempre \"código postal\".",
+        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSolo pedí nombre/apellido/DNI/email/teléfono si YA hubo cotización OK y quiere comprar.\nSi pide envío/días: cotizá primero, no pidas datos personales.\n\n\nDIRECCIÓN — reglas duras:\n- Los nombres de calle/persona se copian tal cual (solo corregí mayúsculas menores).\n- Si dijo \"rodolfo martinez\", mandá street=\"Rodolfo Martinez\". NUNCA lo cambies a Rodrigo, Roberto, ni otro nombre.\n- Solo normalizá ciudad/provincia con typos obvios (corodba/cba capital → Córdoba).\n- No reinventes la dirección.\n\n\nENVÍO — solo hay 2 formas de envío pago en Bausing:\n1) Tercerizado: is_third_party_transport=true → usar shipping_price / en quote shipping_kind=\"third_party\" y shipping_cost.\n2) Vía Cargo: is_pais_catalog=true → cotizar con Cotizar Pedido (código postal + items) → shipping_kind=\"viacargo\".\n\nSi no es ninguno de esos dos, el envío de la cotización es shipping_cost de la tool (puede ser 0). \nNUNCA digas otras modalidades inventadas, ni que el envío está \"incluido en el precio del producto\".\nDías: siempre estimated_delivery.label de la tool (zona o cotización).\n\n\nAl crear orden, usá la misma dirección exacta (Rodolfo Martinez, no Rodrigo).\nNunca digas \"CP\": decí siempre \"código postal\".\n\nCupón/referido opcionales solo si el cliente los menciona. No los exijas.",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -1240,5 +1076,7 @@
       }
     },
     "additionalProperties": false
-  }
+  },
+  "startNodeId": "2",
+  "entryNodeId": "2"
 }
