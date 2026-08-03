@@ -95,6 +95,32 @@ def catalog_for_locality(locality_id) -> Tuple[Optional[Catalog], Optional[str]]
     return row.catalog, str(row.catalog_id)
 
 
+def _normalize_locality_id(locality_id: Optional[str]) -> Optional[str]:
+    if locality_id in (None, ""):
+        return None
+    loc = str(locality_id).strip()
+    if loc in ("null", "undefined", "None"):
+        return None
+    return loc
+
+
+def _positive_price(*candidates) -> Optional[float]:
+    for raw in candidates:
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def _format_ars(value: float) -> str:
+    return f"${value:,.0f}".replace(",", ".")
+
+
 def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
     from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 
@@ -149,20 +175,199 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
     }
 
 
+def _normalize_city_province(city: str, province_name: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Normaliza typos frecuentes del bot (corodba, cba capital, etc.)."""
+    import re
+    import unicodedata
+
+    def _norm(value: str) -> str:
+        text = unicodedata.normalize("NFKD", value or "")
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        return re.sub(r"\s+", " ", text).strip().lower()
+
+    city_clean = (city or "").strip()
+    prov_clean = (province_name or "").strip() or None
+    city_n = _norm(city_clean)
+
+    # Typos / variantes Córdoba Capital
+    cordoba_aliases = {
+        "cordoba",
+        "cba",
+        "cordoba capital",
+        "cba capital",
+        "capital cordoba",
+        "capital de cordoba",
+        "corodba",
+        "corodba capital",
+        "cordova",
+        "cordova capital",
+    }
+    if city_n in cordoba_aliases or city_n.replace(" ", "") in {
+        "cordobacapital",
+        "corodbacapital",
+        "cbacapital",
+    }:
+        city_clean = "Córdoba"
+        if not prov_clean:
+            prov_clean = "Córdoba"
+    elif "cordoba" in city_n or "corodba" in city_n or "cordova" in city_n:
+        # "Villa Carlos Paz, Cordoba" ya viene separado; si city trae typo suelto
+        if city_n.startswith("corodba") or city_n.startswith("cordova"):
+            city_clean = city_clean.replace("corodba", "córdoba").replace("Corodba", "Córdoba")
+            city_clean = city_clean.replace("cordova", "córdoba").replace("Cordova", "Córdoba")
+        if not prov_clean and "capital" in city_n:
+            city_clean = "Córdoba"
+            prov_clean = "Córdoba"
+
+    return city_clean, prov_clean
+
+
+def parse_freeform_address(text: str) -> Dict[str, str]:
+    """
+    Parsea frases típicas de WhatsApp:
+    "rodolfo martinez 6034, cordoba capital, 5021"
+    "Rodolfo Martínez 6034 Córdoba Capital CP 5021"
+    """
+    import re
+
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if not raw:
+        return {}
+
+    postal_code = ""
+    # Preferir CP explícito o el de 4 dígitos al FINAL (no la altura de la calle)
+    cp_explicit = re.search(
+        r"(?:cp|codigo postal|código postal)\s*([A-Z]?\d{4})\b", raw, re.I
+    )
+    if cp_explicit:
+        postal_code = cp_explicit.group(1)
+    else:
+        cp_tail = re.search(r"(?:,\s*|\s+)([A-Z]?\d{4})\s*$", raw, re.I)
+        if cp_tail:
+            postal_code = cp_tail.group(1)
+
+    # Partes por coma
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    street = ""
+    number = ""
+    city = ""
+
+    if parts:
+        head = parts[0]
+        num_match = re.search(r"^(.*?)[\s,]+(\d+[a-zA-Z]?)\s*$", head)
+        if num_match:
+            street = num_match.group(1).strip(" ,")
+            number = num_match.group(2).strip()
+        else:
+            street = head
+        # Ciudad: primera parte que no sea el head ni un CP puro
+        for part in parts[1:]:
+            compact = part.replace(" ", "")
+            if re.fullmatch(r"[A-Z]?\d{4}", compact, re.I):
+                if not postal_code:
+                    postal_code = compact
+                continue
+            if re.fullmatch(r"(?:cp|codigo postal|código postal)\s*[A-Z]?\d{4}", part, re.I):
+                continue
+            city = part
+            break
+    else:
+        street = raw
+
+    # Si no hubo comas, intentar "... 6034 cordoba capital 5021"
+    if not city:
+        m = re.search(
+            r"^(?P<street>.+?)\s+(?P<number>\d+[a-zA-Z]?)\s+(?P<city>.+?)(?:\s+(?P<cp>[A-Z]?\d{4}))?$",
+            raw,
+            re.I,
+        )
+        if m:
+            street = m.group("street").strip(" ,")
+            number = m.group("number")
+            city = m.group("city").strip(" ,")
+            if m.group("cp"):
+                postal_code = m.group("cp")
+            # sacar CP del final de city si quedó pegado
+            city = re.sub(
+                r"\s*(?:cp|codigo postal|código postal)?\s*[A-Z]?\d{4}\s*$",
+                "",
+                city,
+                flags=re.I,
+            ).strip(" ,")
+
+    # Si el CP quedó igual a la altura, descartarlo (ej. tomó 6034 por error)
+    if postal_code and number and postal_code.lstrip("XxYy") == number:
+        # Buscar otro candidato al final del texto original
+        candidates = re.findall(r"\b([A-Z]?\d{4})\b", raw, re.I)
+        postal_code = ""
+        for cand in reversed(candidates):
+            if cand != number:
+                postal_code = cand
+                break
+
+    city, province = _normalize_city_province(city, None)
+    out = {
+        "street": street,
+        "number": number,
+        "city": city,
+        "postal_code": postal_code,
+    }
+    if province:
+        out["province"] = province
+    return {k: v for k, v in out.items() if v}
+
+
 def resolve_zone_from_address(address: Dict[str, Any]) -> Dict[str, Any]:
     lat = address.get("lat")
     lon = address.get("lon")
-    if lat is not None and lon is not None:
-        try:
+    # lat/lon vacíos del bot ("", null) no cuentan
+    try:
+        if lat not in (None, "") and lon not in (None, ""):
             return build_zone_from_coords(float(lon), float(lat))
-        except (TypeError, ValueError):
-            pass
+    except (TypeError, ValueError):
+        pass
 
     street = (address.get("street") or "").strip()
     number = str(address.get("number") or "").strip()
     city = (address.get("city") or address.get("locality") or "").strip()
     postal_code = str(address.get("postal_code") or "").strip()
     province_name = (address.get("province") or address.get("province_name") or "").strip() or None
+
+    # Frase completa en address / full_address / o street sin city
+    freeform = (
+        address.get("address")
+        or address.get("full_address")
+        or address.get("direccion")
+        or ""
+    ).strip()
+    if (not street or not city) and freeform:
+        parsed = parse_freeform_address(freeform)
+        street = street or parsed.get("street", "")
+        number = number or parsed.get("number", "")
+        city = city or parsed.get("city", "")
+        postal_code = postal_code or parsed.get("postal_code", "")
+        province_name = province_name or parsed.get("province")
+
+    if street and not city:
+        # "rodolfo martinez 6034, cordoba capital, 5021" metido solo en street
+        parsed = parse_freeform_address(street if not number else f"{street} {number}")
+        if parsed.get("city"):
+            street = parsed.get("street") or street
+            number = number or parsed.get("number", "")
+            city = parsed.get("city", "")
+            postal_code = postal_code or parsed.get("postal_code", "")
+            province_name = province_name or parsed.get("province")
+
+    city, province_name = _normalize_city_province(city, province_name)
+
+    # number pegado en street: "Rodolfo Martinez 6034"
+    if street and not number:
+        import re
+
+        m = re.search(r"^(.*?)[\s,]+(\d+[a-zA-Z]?)\s*$", street)
+        if m:
+            street = m.group(1).strip(" ,")
+            number = m.group(2).strip()
 
     if not street or not city:
         raise ValueError("Se requiere street y city (o lat/lon) para resolver la zona")
@@ -488,13 +693,24 @@ def search_products(
     )
     products = pagination.items
     ids = [str(p.id) for p in products]
-    prices_map = _build_homepage_prices_map(ids, locality_id) if ids else {}
-    catalog, _cid = catalog_for_locality(locality_id) if locality_id else (None, None)
+    loc = _normalize_locality_id(locality_id)
+    prices_map = _build_homepage_prices_map(ids, loc) if ids else {}
+    catalog, _cid = catalog_for_locality(loc) if loc else (None, None)
     delivery = estimated_delivery_payload(catalog)
 
     items = []
     for p in products:
         info = prices_map.get(str(p.id)) or {}
+        price_transfer = _positive_price(
+            info.get("min_transfer_price"), info.get("min_price")
+        )
+        price_card = _positive_price(
+            info.get("min_card_price"), info.get("min_price"), price_transfer
+        )
+        price = price_transfer or price_card
+        # No devolver productos sin precio al bot (evita que arme listas con $0)
+        if price is None:
+            continue
         items.append(
             {
                 "id": str(p.id),
@@ -502,8 +718,10 @@ def search_products(
                 "description": (p.description or "")[:280] if p.description else None,
                 "category_id": str(p.category_id) if p.category_id else None,
                 "main_image": p.get_main_image(),
-                "price_transfer": info.get("min_transfer_price") or info.get("min_price"),
-                "price_card": info.get("min_card_price") or info.get("min_price"),
+                "price": price,
+                "price_label": _format_ars(price),
+                "price_transfer": price_transfer,
+                "price_card": price_card,
                 "promos": info.get("promos") or [],
             }
         )
@@ -511,6 +729,7 @@ def search_products(
     return {
         "products": items,
         "estimated_delivery": delivery,
+        "locality_id": loc,
         "pagination": {
             "page": page,
             "per_page": per_page,
@@ -528,19 +747,30 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
     product = Product.query.filter_by(id=pid, is_active=True).first()
     if not product:
         raise ValueError("Producto no encontrado")
-    prices_map = _build_homepage_prices_map([str(pid)], locality_id)
+    loc = _normalize_locality_id(locality_id)
+    prices_map = _build_homepage_prices_map([str(pid)], loc)
     info = prices_map.get(str(pid)) or {}
-    catalog, _cid = catalog_for_locality(locality_id) if locality_id else (None, None)
+    catalog, _cid = catalog_for_locality(loc) if loc else (None, None)
+    price_transfer = _positive_price(
+        info.get("min_transfer_price"), info.get("min_price")
+    )
+    price_card = _positive_price(
+        info.get("min_card_price"), info.get("min_price"), price_transfer
+    )
+    price = price_transfer or price_card
     return {
         "id": str(product.id),
         "name": product.name,
         "description": product.description,
         "category_id": str(product.category_id) if product.category_id else None,
         "main_image": product.get_main_image(),
-        "price_transfer": info.get("min_transfer_price") or info.get("min_price"),
-        "price_card": info.get("min_card_price") or info.get("min_price"),
+        "price": price,
+        "price_label": _format_ars(price) if price is not None else None,
+        "price_transfer": price_transfer,
+        "price_card": price_card,
         "promos": info.get("promos") or [],
         "estimated_delivery": estimated_delivery_payload(catalog),
+        "locality_id": loc,
         "prices_raw": info,
     }
 

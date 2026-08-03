@@ -621,7 +621,8 @@ def _build_homepage_prices_map(product_ids, locality_id):
                 target_catalog_id = locality_catalog.catalog_id
         except Exception:
             pass
-    else:
+    # Sin localidad, o localidad inválida / sin catálogo: mismo fallback que la web
+    if not target_catalog_id:
         target_catalog_id = get_cordoba_capital_catalog_id()
 
     transfer_map = {}
