@@ -121,12 +121,92 @@ def _format_ars(value: float) -> str:
     return f"${value:,.0f}".replace(",", ".")
 
 
+def _shipping_summary_payload(
+    *,
+    is_third_party: bool,
+    shipping_price: Optional[float],
+    is_pais: bool,
+) -> Dict[str, Any]:
+    """Solo 2 envíos pagos: tercerizado y Vía Cargo. El resto es gratuito."""
+    if is_third_party and shipping_price is not None:
+        return {
+            "kind": "third_party",
+            "is_free": False,
+            "cost": float(shipping_price),
+            "cost_label": _format_ars(float(shipping_price)),
+            "message": f"Envío tercerizado: {_format_ars(float(shipping_price))}",
+        }
+    if is_pais:
+        return {
+            "kind": "viacargo",
+            "is_free": False,
+            "cost": None,
+            "cost_label": None,
+            "message": (
+                "Envío Vía Cargo: para el monto exacto hace falta cotizar "
+                "con los productos y el código postal"
+            ),
+        }
+    return {
+        "kind": "free",
+        "is_free": True,
+        "cost": 0.0,
+        "cost_label": "$0",
+        "message": "Envío gratuito",
+    }
+
+
+def _build_pais_catalog_zone(lon: float, lat: float) -> Dict[str, Any]:
+    """
+    Fallback cuando el punto no cae en ningún polígono de zona:
+    misma lógica que /detect-locality → Catálogo País.
+    """
+    import uuid as uuid_lib
+
+    try:
+        pais_uuid = uuid_lib.UUID(PAIS_CATALOG_ID)
+    except (ValueError, TypeError):
+        raise ValueError("Catálogo País no configurado")
+
+    catalog = Catalog.query.get(pais_uuid)
+    if not catalog:
+        raise ValueError("Catálogo País no encontrado")
+
+    locality_assoc = LocalityCatalog.query.filter_by(catalog_id=catalog.id).first()
+    locality = locality_assoc.locality if locality_assoc else None
+    delivery = estimated_delivery_payload(catalog)
+
+    return {
+        "locality": {
+            "id": str(locality.id) if locality else None,
+            "name": locality.name if locality else "Catálogo País",
+        },
+        "coordinates": {"lon": lon, "lat": lat},
+        "crm_zone_id": None,
+        "catalog_id": str(catalog.id),
+        "catalog_name": catalog.name,
+        "is_pais_catalog": True,
+        "is_third_party_transport": False,
+        "shipping_price": None,
+        "estimated_delivery": delivery,
+        "shipping_summary": _shipping_summary_payload(
+            is_third_party=False, shipping_price=None, is_pais=True
+        ),
+        "fallback": "pais_catalog",
+        "fallback_reason": (
+            "No se encontró zona de entrega para las coordenadas; "
+            "se usa Catálogo País (Vía Cargo)"
+        ),
+    }
+
+
 def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
     from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
 
     locality, shipping_zone_locality = find_locality_by_coordinates(lon, lat)
     if not locality:
-        raise ValueError("No se encontró una localidad para las coordenadas proporcionadas")
+        # Paridad con la web (/detect-locality): fuera de polígono → Catálogo País
+        return _build_pais_catalog_zone(lon, lat)
 
     is_third_party = False
     shipping_price = None
@@ -158,37 +238,17 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
         crm_zone_id = get_crm_zone_id_from_locality(locality.name)
 
     catalog, catalog_id = catalog_for_locality(locality.id)
-    is_pais = str(catalog_id) == PAIS_CATALOG_ID if catalog_id else False
-    delivery = estimated_delivery_payload(catalog)
+    # Si la localidad no tiene catálogo mapeado, también País
+    if not catalog_id:
+        return _build_pais_catalog_zone(lon, lat)
 
-    # Solo 2 envíos pagos: tercerizado y Vía Cargo. El resto es gratuito.
-    if is_third_party and shipping_price is not None:
-        shipping_summary = {
-            "kind": "third_party",
-            "is_free": False,
-            "cost": float(shipping_price),
-            "cost_label": _format_ars(float(shipping_price)),
-            "message": f"Envío tercerizado: {_format_ars(float(shipping_price))}",
-        }
-    elif is_pais:
-        shipping_summary = {
-            "kind": "viacargo",
-            "is_free": False,
-            "cost": None,
-            "cost_label": None,
-            "message": (
-                "Envío Vía Cargo: para el monto exacto hace falta cotizar "
-                "con los productos y el código postal"
-            ),
-        }
-    else:
-        shipping_summary = {
-            "kind": "free",
-            "is_free": True,
-            "cost": 0.0,
-            "cost_label": "$0",
-            "message": "Envío gratuito",
-        }
+    is_pais = str(catalog_id) == PAIS_CATALOG_ID
+    delivery = estimated_delivery_payload(catalog)
+    shipping_summary = _shipping_summary_payload(
+        is_third_party=is_third_party,
+        shipping_price=shipping_price,
+        is_pais=is_pais,
+    )
 
     return {
         "locality": {
