@@ -8,7 +8,7 @@
       "name": "Cómo configurar",
       "type": "note",
       "config": {
-        "text": "Entrada: Router → Bienvenida → Zona.\nSi preguntan envío/días: Resolver Zona y responder estimated_delivery + shipping_summary. NO ir a catálogo salvo que pidan productos.\nDías = admin Días Estimados de Entrega (por catálogo).\nEnvío pago: tercerizado o Vía Cargo; si no, gratuito."
+        "text": "Flujo: Router→Bienvenida→Zona (siempre contar días+shipping_summary)→Catálogo solo si piden productos→Cotizar→Orden.\nFuera de polígono = Catálogo País / Vía Cargo.\nSin markdown/fotos en listados. Sin inventar. Sin DNI antes de cotizar.\nstartNodeId=2"
       },
       "position": {
         "x": 20,
@@ -93,11 +93,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nPrimera respuesta: saludá y preguntá en qué lo ayudás.\nSi pregunta costo de envío y/o días de entrega (aunque tenga typos), pedile la dirección para calcularlo.\nNO muestres catálogo ni productos todavía.\nNO pidas cupón.\nNunca digas \"CP\": decí siempre \"código postal\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp: humano y breve.\n\nSaludá y preguntá en qué lo ayudás.\n\nSi quiere productos (ej. colchones):\n- Preguntá la medida/subcategoría antes de buscar (ej. 1 plaza, 1 plaza y media, 2 plazas, queen, king).\n- No listes el catálogo hasta tener medida.\n\nSi pregunta envío/días o ya tiene medida y quiere ver opciones:\n- Pedí la dirección POR PARTES, una o dos por mensaje, no todo de una:\n  1) calle y número\n  2) ciudad\n  3) provincia\n  4) código postal\n- Esperá cada dato. No asumas.\n\nNO pidas cupón ni DNI al inicio.\nNunca digas \"CP\": decí \"código postal\".\nPROHIBIDO: markdown, inventar envío/días, \"parece que...\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "El cliente dijo qué necesita (envío/días, productos, etc.). Si solo saludó, no continues.",
+        "continueCondition": "Ya sabés qué busca (y la medida si es producto) o pidió envío/días. Si falta la medida del producto, pedila y no continues.",
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": true
@@ -145,14 +145,14 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle\", optional:true)",
-                  "number": "@AI(\"número / altura\", optional:true)",
-                  "city": "@AI(\"ciudad\", optional:true)",
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
                   "province": "@AI(\"provincia\", optional:true)",
-                  "postal_code": "@AI(\"código postal\", optional:true)",
-                  "lat": "@AI(\"latitud si compartió ubicación de WhatsApp\", optional:true)",
-                  "lon": "@AI(\"longitud si compartió ubicación de WhatsApp\", optional:true)",
-                  "address": "@AI(\"frase completa de dirección si el cliente la mandó junta\", optional:true)"
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -165,7 +165,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "Resolver localidad, catálogo y días estimados a partir de la dirección. POST /resolve-zone. Requiere lat+lon O street+city.",
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -187,11 +187,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSi el cliente pregunta envío y/o días de entrega:\n1) Pedí dirección completa si falta.\n2) Interpretá typos de ciudad, pero NO cambies nombres de calle\n   (\"rodolfo martinez\" → \"Rodolfo Martinez\", nunca Rodrigo).\n3) Llamá \"Bausing - Resolver Zona\".\n4) Respondé SOLO con datos de la tool, sin catálogo:\n\nEjemplo si shipping_summary.kind = free:\n\"A tu zona el envío es gratuito y la entrega tarda 1 a 2 días hábiles.\"\n(usá estimated_delivery.label y shipping_summary.message / cost_label)\n\nSi kind = third_party:\n\"El envío a tu zona es tercerizado: $X. La entrega tarda {estimated_delivery.label}.\"\n\nSi kind = viacargo:\n\"En tu zona el envío es por Vía Cargo; el monto exacto se cotiza según los productos. La entrega tarda {estimated_delivery.label}.\"\n\nLos días salen del catálogo de esa zona (admin → Días Estimados de Entrega): estimated_delivery.\nEnvío pago solo tercerizado o Vía Cargo; si no es ninguno → gratuito.\n\nPROHIBIDO:\n- Listar productos/colchones si solo preguntó envío/días\n- Inventar plazos o costos\n- \"Parece que hubo un problema...\"\n- Pedir DNI/email\n\nSi después pregunta por productos, ahí sí ofrecé buscar catálogo.\nNunca digas \"CP\": decí siempre \"código postal\".\n\nSi Resolver Zona devuelve fallback pais_catalog / is_pais_catalog=true:\n- Es Catálogo País (fuera de zona propia).\n- Días: estimated_delivery.label del catálogo País.\n- Envío: Vía Cargo (shipping_summary); el monto exacto se cotiza con productos + código postal.\n- Avisá que la venta la termina un asesor si intenta comprar (requires_human_handoff).\nNo digas que \"no hay cobertura\" si vino Catálogo País.\n",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nPedí la dirección POR CAMPOS SEPARADOS (no pidas todo en una sola frase):\n1) ¿Calle y número?\n2) ¿Ciudad?\n3) ¿Provincia?\n4) ¿Código postal?\n\nSi el cliente manda todo junto igual, parsealo, pero preferí pedirlo de a partes.\nNo cambies nombres de calle (Rodolfo ≠ Rodrigo). Solo corregí typos de ciudad (corodba→Córdoba).\n\nCuando tengas street+number+city (y ojalá province + código postal), llamá \"Bausing - Resolver Zona\".\n\nRespondé con la tool:\n- Días: estimated_delivery.label\n- Envío: shipping_summary (free / third_party / viacargo-pais)\n\nSi también quiere productos y todavía no dijo medida (1 plaza, 2 plazas, etc.), pedila antes de ir al catálogo.\n\nSi cambia de ciudad: pedí de nuevo los campos y volvé a Resolver Zona.\nPROHIBIDO inventar, markdown, pedir DNI acá.\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "SOLO continues al catálogo si el cliente pidió ver/comprar productos. Si solo preguntó envío o días de entrega y ya se lo respondiste con Resolver Zona, NO continues.",
+        "continueCondition": "Ya llamaste Resolver Zona, le contaste estimated_delivery y shipping_summary, Y el cliente quiere ver/comprar productos. Si solo preguntaba envío/días (o una ciudad nueva) y ya respondiste, NO continues al catálogo.",
         "dataSourceConfigs": {
           "101": {
             "id": "101",
@@ -200,14 +200,14 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle\", optional:true)",
-                  "number": "@AI(\"número / altura\", optional:true)",
-                  "city": "@AI(\"ciudad\", optional:true)",
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
                   "province": "@AI(\"provincia\", optional:true)",
-                  "postal_code": "@AI(\"código postal\", optional:true)",
-                  "lat": "@AI(\"latitud si compartió ubicación de WhatsApp\", optional:true)",
-                  "lon": "@AI(\"longitud si compartió ubicación de WhatsApp\", optional:true)",
-                  "address": "@AI(\"frase completa de dirección si el cliente la mandó junta\", optional:true)"
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -220,7 +220,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "Resolver localidad, catálogo y días estimados a partir de la dirección. POST /resolve-zone. Requiere lat+lon O street+city.",
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -263,8 +263,8 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
-                  "q": "@AI(\"texto de búsqueda del producto que pidió el cliente, ej colchon 2 plazas\", optional:false)",
-                  "locality_id": "@AI(\"locality_id UUID guardado de Resolver Zona data.locality.id\", optional:false)"
+                  "q": "@AI(\"búsqueda fiel a lo pedido, ej colchón 1 plaza\", optional:false)",
+                  "locality_id": "@AI(\"UUID locality_id de Resolver Zona\", optional:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -323,14 +323,15 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle corregida ya dicha\", optional:false)",
+                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
                     "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad corregida\", optional:false)",
-                    "province": "@AI(\"provincia corregida\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)"
+                    "city": "@AI(\"ciudad\", optional:false)",
+                    "province": "@AI(\"provincia\", optional:true)",
+                    "postal_code": "@AI(\"código postal\", optional:true)",
+                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
                   },
-                  "items": "@AI(\"[{product_id, quantity}] del producto elegido, UUIDs reales del catálogo\", optional:false)",
-                  "payment_method": "@AI(\"cash|transfer|card; si no dijo, transfer\", optional:true)"
+                  "items": "@AI(\"lista [{product_id, quantity}] con UUID real del catálogo\", optional:false)",
+                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -344,6 +345,42 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Cotizar envío, plazo y total. Requiere address + items con product_id real. Sin lat/lon, sin email, sin cupón. POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
+                  "province": "@AI(\"provincia\", optional:true)",
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -365,11 +402,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nEste paso es SOLO si el cliente quiere ver o comprar productos.\nSi en realidad solo pregunta envío/días y todavía no eligió producto:\n- No listes el catálogo.\n- Usá \"Bausing - Resolver Zona\" o los datos de zona ya obtenidos:\n  estimated_delivery.label + shipping_summary (free / third_party / viacargo).\n- Respondé eso y listo.\n\nSi sí quiere productos:\n1) Buscá catálogo con locality_id.\n2) Listá con saltos de línea: nombre — precio (sin descripción).\n3) Si elige uno y pide envío otra vez, cotizá con \"Bausing - Cotizar Pedido\".\n\nEnvío: solo tercerizado o Vía Cargo son pagos; si no, gratuito.\nNunca digas \"CP\": decí siempre \"código postal\".\nPROHIBIDO: \"parece que hubo un problema\"; inventar envío.",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nAntes de buscar:\n- Si pidió una categoría general (colchones, sommiers, etc.) y NO dijo medida/subcategoría,\n  preguntá la medida (1 plaza, 1 plaza y media, 2 plazas, queen, king, etc.).\n- No busques hasta tener eso.\n\nBuscá con q = producto + medida (ej. \"colchón 1 plaza\") y locality_id.\nSi dijo 1 plaza, NO listes 1 plaza y media u otras medidas.\n\nFormato listado (saltos de línea, sin fotos ni markdown):\n\nEstas son algunas opciones:\n\n1) Nombre — $precio\n2) Nombre — $precio\n\nSi querés, te muestro otras, más info, o la foto de alguna.\n\nEnvío/días u otra ciudad: Resolver Zona con dirección por campos; contá shipping_summary + estimated_delivery.\nSin DNI.\nPROHIBIDO inventar; \"parece que...\".\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "El cliente eligió un producto y, si pidió envío/total, ya cotizaste OK. Si solo quería info de envío/días sin comprar, no forces catálogo ni continues.",
+        "continueCondition": "El cliente eligió un producto concreto (con product_id) y quiere cotizar/cerrar. Si pregunta envío/días de otra ciudad, resolvé zona y NO continues a crear orden.",
         "dataSourceConfigs": {
           "102": {
             "id": "102",
@@ -378,8 +415,8 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
-                  "q": "@AI(\"texto de búsqueda del producto que pidió el cliente, ej colchon 2 plazas\", optional:false)",
-                  "locality_id": "@AI(\"locality_id UUID guardado de Resolver Zona data.locality.id\", optional:false)"
+                  "q": "@AI(\"búsqueda fiel a lo pedido, ej colchón 1 plaza\", optional:false)",
+                  "locality_id": "@AI(\"UUID locality_id de Resolver Zona\", optional:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -438,14 +475,15 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle corregida ya dicha\", optional:false)",
+                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
                     "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad corregida\", optional:false)",
-                    "province": "@AI(\"provincia corregida\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)"
+                    "city": "@AI(\"ciudad\", optional:false)",
+                    "province": "@AI(\"provincia\", optional:true)",
+                    "postal_code": "@AI(\"código postal\", optional:true)",
+                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
                   },
-                  "items": "@AI(\"[{product_id, quantity}] del producto elegido, UUIDs reales del catálogo\", optional:false)",
-                  "payment_method": "@AI(\"cash|transfer|card; si no dijo, transfer\", optional:true)"
+                  "items": "@AI(\"lista [{product_id, quantity}] con UUID real del catálogo\", optional:false)",
+                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -459,6 +497,42 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Cotizar envío, plazo y total. Requiere address + items con product_id real. Sin lat/lon, sin email, sin cupón. POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "101": {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
+                  "province": "@AI(\"provincia\", optional:true)",
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -508,14 +582,15 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle corregida ya dicha\", optional:false)",
+                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
                     "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad corregida\", optional:false)",
-                    "province": "@AI(\"provincia corregida\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)"
+                    "city": "@AI(\"ciudad\", optional:false)",
+                    "province": "@AI(\"provincia\", optional:true)",
+                    "postal_code": "@AI(\"código postal\", optional:true)",
+                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
                   },
-                  "items": "@AI(\"[{product_id, quantity}] del producto elegido, UUIDs reales del catálogo\", optional:false)",
-                  "payment_method": "@AI(\"cash|transfer|card; si no dijo, transfer\", optional:true)"
+                  "items": "@AI(\"lista [{product_id, quantity}] con UUID real del catálogo\", optional:false)",
+                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -529,6 +604,42 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Cotizar carrito con dirección e items ya conocidos. NO requiere email, lat/lon ni cupón. POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
+                  "province": "@AI(\"provincia\", optional:true)",
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -560,11 +671,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSi solo quieren envío/días y YA hay Resolver Zona:\n- Contá estimated_delivery.label\n- Contá shipping_summary (gratuito / tercerizado $X / Vía Cargo a cotizar)\n- No pidas productos ni datos personales.\n\nSi ya eligieron producto: Cotizar Pedido y usá shipping_cost + estimated_delivery + total.\n\nEnvío pago solo third_party o viacargo; si shipping_kind=none/free → gratuito (no digas \"incluido en el precio\").\nPROHIBIDO frases de sistema o inventar números.\nNunca digas \"CP\": decí siempre \"código postal\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nPrioridad:\nA) Si pregunta envío/días (misma o nueva dirección): Resolver Zona y responder shipping_summary + estimated_delivery. Sin DNI.\nB) Si ya hay producto elegido y quiere total/envío del pedido: Cotizar Pedido con address + items UUID.\n\nNunca inventes. Si is_pais_catalog, envío Vía Cargo (cotizar con productos+CP).\nSi shipping_summary.kind=free o shipping_cost=0: \"envío gratuito\" (no \"incluido en el precio\").\n\n\nPROHIBIDO ABSOLUTO:\n- Markdown: **negrita**, ![imagen](url), links\n- Pegar URLs de fotos en el listado (solo si pide foto explícitamente, ahí sí main_image)\n- Frases: \"parece que\", \"hubo un error\", \"lamento la confusión\", \"generalmente\", \"el sistema\", \"Necesito X para continuar\" con nombres internos de campos\n- Inventar días (ej. 3 a 5) o costos de envío\n- Decir que el envío está \"incluido en el precio\"\n- Pedir DNI/email/teléfono/nombre si todavía pregunta envío o días\n- Mostrar productos si solo preguntó envío/días\n\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "SOLO si Cotizar Pedido respondió OK y le contaste shipping_cost + estimated_delivery + total. Si el cliente todavía pregunta envío/días o el quote falló, NO continues.",
+        "continueCondition": "Cotizaste un pedido concreto OK (items+total) y el cliente quiere confirmar compra. Preguntas de envío/días solas NO habilitan continuar a crear orden.",
         "dataSourceConfigs": {
           "106": {
             "id": "106",
@@ -574,14 +685,15 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle corregida ya dicha\", optional:false)",
+                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
                     "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad corregida\", optional:false)",
-                    "province": "@AI(\"provincia corregida\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)"
+                    "city": "@AI(\"ciudad\", optional:false)",
+                    "province": "@AI(\"provincia\", optional:true)",
+                    "postal_code": "@AI(\"código postal\", optional:true)",
+                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
                   },
-                  "items": "@AI(\"[{product_id, quantity}] del producto elegido, UUIDs reales del catálogo\", optional:false)",
-                  "payment_method": "@AI(\"cash|transfer|card; si no dijo, transfer\", optional:true)"
+                  "items": "@AI(\"lista [{product_id, quantity}] con UUID real del catálogo\", optional:false)",
+                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -595,6 +707,42 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Cotizar carrito con dirección e items ya conocidos. NO requiere email, lat/lon ni cupón. POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "101": {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
+                  "province": "@AI(\"provincia\", optional:true)",
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -660,27 +808,23 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
                 "body": {
                   "customer": {
-                    "first_name": "@AI(\"nombre\", optional:false)",
-                    "last_name": "@AI(\"apellido\", optional:false)",
-                    "email": "@AI(\"email\", optional:false)",
-                    "phone": "@AI(\"teléfono\", optional:false)",
-                    "dni": "@AI(\"DNI\", optional:false)",
+                    "first_name": "@AI(\"nombre del cliente\", optional:false)",
+                    "last_name": "@AI(\"apellido del cliente\", optional:false)",
+                    "email": "@AI(\"email del cliente\", optional:false)",
+                    "phone": "@AI(\"teléfono del cliente\", optional:false)",
+                    "dni": "@AI(\"DNI del cliente\", optional:false)",
                     "document_type": "DNI"
                   },
                   "address": {
-                    "street": "@AI(\"calle corregida ya conocida\", optional:false)",
+                    "street": "@AI(\"calle sin cambiar el nombre\", optional:false)",
                     "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad corregida\", optional:false)",
-                    "province": "@AI(\"provincia corregida\", optional:false)",
-                    "postal_code": "@AI(\"código postal\", optional:true)",
-                    "address": "@AI(\"frase completa si hace falta\", optional:true)"
+                    "city": "@AI(\"ciudad\", optional:false)",
+                    "province": "@AI(\"provincia\", optional:false)",
+                    "postal_code": "@AI(\"código postal\", optional:true)"
                   },
-                  "items": "@AI(\"array [{product_id, quantity}]\", optional:false)",
-                  "payment_method": "@AI(\"cash | transfer | card\", optional:false)",
-                  "total": "@AI(\"total de la cotización si lo tenés\", optional:true)",
-                  "coupon_code": "@AI(\"solo si ya había cupón; si no omitir\", optional:true)",
-                  "referral_code": "@AI(\"solo si ya había referido; si no omitir\", optional:true)",
-                  "observations": "@AI(\"notas opcionales\", optional:true)"
+                  "items": "@AI(\"[{product_id, quantity}] cotizados\", optional:false)",
+                  "payment_method": "@AI(\"cash, transfer o card\", optional:false)",
+                  "total": "@AI(\"total cotizado\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -694,6 +838,42 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Crear la venta luego de cotizar y confirmar datos. POST /orders. Solo si can_create_order=true.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
+                  "province": "@AI(\"provincia\", optional:true)",
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -715,42 +895,11 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor real de Bausing por WhatsApp.\n\nSolo pedí nombre/apellido/DNI/email/teléfono si YA hubo cotización OK y quiere comprar.\nSi pide envío/días: cotizá primero, no pidas datos personales.\n\n\nDIRECCIÓN — reglas duras:\n- Los nombres de calle/persona se copian tal cual (solo corregí mayúsculas menores).\n- Si dijo \"rodolfo martinez\", mandá street=\"Rodolfo Martinez\". NUNCA lo cambies a Rodrigo, Roberto, ni otro nombre.\n- Solo normalizá ciudad/provincia con typos obvios (corodba/cba capital → Córdoba).\n- No reinventes la dirección.\n\n\nENVÍO — solo hay 2 formas de envío pago en Bausing:\n1) Tercerizado: is_third_party_transport=true → usar shipping_price / en quote shipping_kind=\"third_party\" y shipping_cost.\n2) Vía Cargo: is_pais_catalog=true → cotizar con Cotizar Pedido (código postal + items) → shipping_kind=\"viacargo\".\n\nSi no es ninguno de esos dos, el envío de la cotización es shipping_cost de la tool (puede ser 0). \nNUNCA digas otras modalidades inventadas, ni que el envío está \"incluido en el precio del producto\".\nDías: siempre estimated_delivery.label de la tool (zona o cotización).\n\n\nAl crear orden, usá la misma dirección exacta (Rodolfo Martinez, no Rodrigo).\nNunca digas \"CP\": decí siempre \"código postal\".\n\nCupón/referido opcionales solo si el cliente los menciona. No los exijas.",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nSOLO pedí nombre, apellido, DNI, email y teléfono si:\n1) Ya hubo cotización OK de un producto (total/envío/días contados), y\n2) El cliente quiere confirmar la compra.\n\nSi pregunta envío, días u otra ciudad:\n- NO pidas datos personales.\n- Usá Resolver Zona / Cotizar y respondé eso.\n\nSi is_pais_catalog / requires_human_handoff: derivá a asesor, no armes la orden vos.\n\n\nPROHIBIDO ABSOLUTO:\n- Markdown: **negrita**, ![imagen](url), links\n- Pegar URLs de fotos en el listado (solo si pide foto explícitamente, ahí sí main_image)\n- Frases: \"parece que\", \"hubo un error\", \"lamento la confusión\", \"generalmente\", \"el sistema\", \"Necesito X para continuar\" con nombres internos de campos\n- Inventar días (ej. 3 a 5) o costos de envío\n- Decir que el envío está \"incluido en el precio\"\n- Pedir DNI/email/teléfono/nombre si todavía pregunta envío o días\n- Mostrar productos si solo preguntó envío/días\n\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "customer_first_name",
-            "label": "Nombre",
-            "description": "Nombre"
-          },
-          {
-            "id": "customer_last_name",
-            "label": "Apellido",
-            "description": "Apellido"
-          },
-          {
-            "id": "customer_dni",
-            "label": "DNI",
-            "description": "Documento"
-          },
-          {
-            "id": "customer_email",
-            "label": "Email",
-            "description": "Email de contacto"
-          },
-          {
-            "id": "customer_phone",
-            "label": "Teléfono",
-            "description": "Teléfono de contacto"
-          },
-          {
-            "id": "payment_method",
-            "label": "Medio de pago",
-            "description": "cash, transfer o card"
-          }
-        ],
+        "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "Ya existía una cotización OK, el cliente confirmó comprar, creaste la orden y le diste el número, o el cliente canceló. Si pedía envío/días, NO continues.",
+        "continueCondition": "Creaste la orden OK y diste el número, o el cliente canceló. Si pedía envío/días, no continues.",
         "dataSourceConfigs": {
           "107": {
             "id": "107",
@@ -760,27 +909,23 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
                 "body": {
                   "customer": {
-                    "first_name": "@AI(\"nombre\", optional:false)",
-                    "last_name": "@AI(\"apellido\", optional:false)",
-                    "email": "@AI(\"email\", optional:false)",
-                    "phone": "@AI(\"teléfono\", optional:false)",
-                    "dni": "@AI(\"DNI\", optional:false)",
+                    "first_name": "@AI(\"nombre del cliente\", optional:false)",
+                    "last_name": "@AI(\"apellido del cliente\", optional:false)",
+                    "email": "@AI(\"email del cliente\", optional:false)",
+                    "phone": "@AI(\"teléfono del cliente\", optional:false)",
+                    "dni": "@AI(\"DNI del cliente\", optional:false)",
                     "document_type": "DNI"
                   },
                   "address": {
-                    "street": "@AI(\"calle corregida ya conocida\", optional:false)",
+                    "street": "@AI(\"calle sin cambiar el nombre\", optional:false)",
                     "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad corregida\", optional:false)",
-                    "province": "@AI(\"provincia corregida\", optional:false)",
-                    "postal_code": "@AI(\"código postal\", optional:true)",
-                    "address": "@AI(\"frase completa si hace falta\", optional:true)"
+                    "city": "@AI(\"ciudad\", optional:false)",
+                    "province": "@AI(\"provincia\", optional:false)",
+                    "postal_code": "@AI(\"código postal\", optional:true)"
                   },
-                  "items": "@AI(\"array [{product_id, quantity}]\", optional:false)",
-                  "payment_method": "@AI(\"cash | transfer | card\", optional:false)",
-                  "total": "@AI(\"total de la cotización si lo tenés\", optional:true)",
-                  "coupon_code": "@AI(\"solo si ya había cupón; si no omitir\", optional:true)",
-                  "referral_code": "@AI(\"solo si ya había referido; si no omitir\", optional:true)",
-                  "observations": "@AI(\"notas opcionales\", optional:true)"
+                  "items": "@AI(\"[{product_id, quantity}] cotizados\", optional:false)",
+                  "payment_method": "@AI(\"cash, transfer o card\", optional:false)",
+                  "total": "@AI(\"total cotizado\", optional:true)"
                 },
                 "method": "POST",
                 "headers": {
@@ -794,6 +939,42 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Crear la venta luego de cotizar y confirmar datos. POST /orders. Solo si can_create_order=true.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "101": {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "street": "@AI(\"calle exactamente como la dijo el cliente\", optional:true)",
+                  "number": "@AI(\"número de altura\", optional:true)",
+                  "city": "@AI(\"ciudad (corregir solo typos tipo corodba→Córdoba)\", optional:true)",
+                  "province": "@AI(\"provincia\", optional:true)",
+                  "postal_code": "@AI(\"código postal de 4 dígitos\", optional:true)",
+                  "address": "@AI(\"dirección completa en una frase si vino junta\", optional:true)",
+                  "lat": "@AI(\"latitud solo si compartió ubicación\", optional:true)",
+                  "lon": "@AI(\"longitud solo si compartió ubicación\", optional:true)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
