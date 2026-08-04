@@ -42,6 +42,11 @@ def _err(message, http_status=400, data=None):
 def atendium_api_key_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        print(
+            f"[atendium] IN {request.method} {request.path} "
+            f"body={request.get_json(silent=True)} args={dict(request.args)}"
+        )
+
         api_key = None
         if "X-API-Key" in request.headers:
             api_key = request.headers["X-API-Key"]
@@ -51,12 +56,9 @@ def atendium_api_key_required(f):
 
         expected = Config.API_KEY
         if not api_key or api_key != expected:
+            print(f"[atendium] {request.method} {request.path} -> 401 (api key inválida o ausente)")
             return _err("Token inválido o no proporcionado", 401)
 
-        print(
-            f"[atendium] {request.method} {request.path} "
-            f"body={request.get_json(silent=True)} args={dict(request.args)}"
-        )
         response = f(*args, **kwargs)
         status = response[1] if isinstance(response, tuple) else 200
         print(f"[atendium] {request.method} {request.path} -> {status}")
