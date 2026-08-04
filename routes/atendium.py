@@ -52,7 +52,15 @@ def atendium_api_key_required(f):
         expected = Config.API_KEY
         if not api_key or api_key != expected:
             return _err("Token inválido o no proporcionado", 401)
-        return f(*args, **kwargs)
+
+        print(
+            f"[atendium] {request.method} {request.path} "
+            f"body={request.get_json(silent=True)} args={dict(request.args)}"
+        )
+        response = f(*args, **kwargs)
+        status = response[1] if isinstance(response, tuple) else 200
+        print(f"[atendium] {request.method} {request.path} -> {status}")
+        return response
 
     return decorated
 
