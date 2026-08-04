@@ -11,8 +11,11 @@ from functools import wraps
 
 from flask import Blueprint, jsonify, request
 
+from sqlalchemy.orm import joinedload
+
 from config import Config
 from database import db
+from models.category import Category
 from models.order import Order
 from models.user import User
 from routes.orders import create_order_for_user, order_to_dict
@@ -94,6 +97,45 @@ def catalog_search():
         return _ok(result)
     except Exception as e:
         return _err(f"Error al buscar catálogo: {e}", 500)
+
+
+@atendium_bp.route("/categories", methods=["GET"])
+@atendium_api_key_required
+def categories_list():
+    """Categorías principales + subcategorías + opciones (medidas/tamaños) para que el
+    bot sepa qué preguntar antes de buscar en el catálogo."""
+    try:
+        parents = (
+            Category.query.filter_by(parent_id=None)
+            .options(
+                joinedload(Category.options),
+                joinedload(Category.children).joinedload(Category.options),
+            )
+            .order_by(Category.order, Category.name)
+            .all()
+        )
+
+        def _category_payload(cat):
+            return {
+                "id": str(cat.id),
+                "name": cat.name,
+                "options": [
+                    opt.value for opt in sorted(cat.options, key=lambda o: o.position)
+                ],
+            }
+
+        data = []
+        for cat in parents:
+            item = _category_payload(cat)
+            item["subcategories"] = [
+                _category_payload(child)
+                for child in sorted(cat.children, key=lambda c: (c.order, c.name))
+            ]
+            data.append(item)
+
+        return _ok(data)
+    except Exception as e:
+        return _err(f"Error al obtener categorías: {e}", 500)
 
 
 @atendium_bp.route("/catalog/<product_id>", methods=["GET"])

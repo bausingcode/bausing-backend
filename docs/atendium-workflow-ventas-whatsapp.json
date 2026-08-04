@@ -8,7 +8,7 @@
       "name": "Cómo configurar",
       "type": "note",
       "config": {
-        "text": "Flujo: Router→Bienvenida→Zona (siempre contar días+shipping_summary)→Catálogo solo si piden productos→Cotizar→Orden.\nFuera de polígono = Catálogo País / Vía Cargo.\nSin markdown/fotos en listados. Sin inventar. Sin DNI antes de cotizar.\nstartNodeId=2"
+        "text": "Flujo: Router->Bienvenida->Zona (siempre contar días+shipping_summary)->Catálogo solo si piden productos->Cotizar->Orden.\nFuera de polígono = Catálogo País / Vía Cargo.\nLa dirección se pide SIEMPRE completa en un solo mensaje (calle, número, ciudad, provincia, código postal), nunca por partes.\nAntes de preguntar medida/subcategoría de un producto, consultar 'Bausing - Categorías y Subcategorías' y usar solo esas opciones reales.\nLos datos que van directo a un parámetro de una tool (customer, address, items, etc.) no se piden con un checklist manual en el prompt: los completa la tool a partir de la conversación según su propia config de parámetros (@AI(...), optional:false/true).\nSin markdown/fotos en listados. Prohibido inventar cualquier dato (medidas, categorías, zona, envío, días, precios, stock, datos del cliente). Sin DNI antes de cotizar.\nstartNodeId=2"
       },
       "position": {
         "x": 20,
@@ -80,7 +80,34 @@
           "customer_intent": "Qué busca el cliente"
         },
         "ragEnabled": false,
-        "dataSources": [],
+        "dataSources": [
+          {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Listar categorías, subcategorías y medidas/opciones reales del catálogo (ej: Colchones -> 1 plaza, 1 plaza y media, 2 plazas, queen, king). Usar SIEMPRE antes de preguntar la medida/subcategoría de un producto, para preguntar solo con opciones reales y no inventar. GET /categories.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        ],
         "outputSchema": {
           "type": "object",
           "required": [
@@ -93,12 +120,39 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp: humano y breve.\n\nSaludá y preguntá en qué lo ayudás.\n\nSi quiere productos (ej. colchones):\n- Preguntá la medida/subcategoría antes de buscar (ej. 1 plaza, 1 plaza y media, 2 plazas, queen, king).\n- No listes el catálogo hasta tener medida.\n\nSi pregunta envío/días o ya tiene medida y quiere ver opciones:\n- Pedí la dirección POR PARTES, una o dos por mensaje, no todo de una:\n  1) calle y número\n  2) ciudad\n  3) provincia\n  4) código postal\n- Esperá cada dato. No asumas.\n\nNO pidas cupón ni DNI al inicio.\nNunca digas \"CP\": decí \"código postal\".\nPROHIBIDO: markdown, inventar envío/días, \"parece que...\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp: humano y breve.\n\nSaludá y preguntá en qué lo ayudás.\n\nCUÁNDO USAR CADA HERRAMIENTA:\n- \"Bausing - Categorías y Subcategorías\": llamala apenas el cliente menciona un producto genérico (ej. colchones, sommiers) y todavía no dijo medida/subcategoría. Te dice qué medidas/subcategorías existen de verdad.\n\nSi quiere productos:\n- Si no dijo medida/subcategoría, consultá \"Bausing - Categorías y Subcategorías\" y preguntala usando SOLO las opciones reales que te devuelve la tool. Nunca inventes medidas ni categorías.\n- No listes el catálogo hasta tener la medida.\n\nSi pregunta envío/días o ya tiene medida y quiere ver opciones:\n- Pedí la dirección COMPLETA en un solo mensaje (calle y número, ciudad, provincia y código postal). Ejemplo: \"¿Me pasás tu dirección completa? Calle y número, ciudad, provincia y código postal.\"\n- No la pidas por partes ni en mensajes separados.\n\nNO pidas cupón ni DNI al inicio.\nNunca digas \"CP\": decí \"código postal\".\nPROHIBIDO: inventar cualquier dato (medidas, categorías, envío, días, precios, stock); markdown; fotos; \"parece que...\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
-        "continueCondition": "Ya sabés qué busca (y la medida si es producto) o pidió envío/días. Si falta la medida del producto, pedila y no continues.",
-        "dataSourceConfigs": {},
+        "continueCondition": "Ya sabés qué busca (y la medida real, confirmada con la tool de categorías, si es producto) o pidió envío/días. Si falta la medida del producto, pedila con opciones reales y no continues.",
+        "dataSourceConfigs": {
+          "110": {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Listar categorías, subcategorías y medidas/opciones reales del catálogo (ej: Colchones -> 1 plaza, 1 plaza y media, 2 plazas, queen, king). Usar SIEMPRE antes de preguntar la medida/subcategoría de un producto, para preguntar solo con opciones reales y no inventar. GET /categories.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        },
         "captureFactsEnabled": true,
         "waitForUserResponse": true
       },
@@ -173,6 +227,32 @@
             },
             "templateName": "custom_api_rest",
             "selected_credentials": {}
+          },
+          {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Listar categorías, subcategorías y medidas/opciones reales del catálogo (ej: Colchones -> 1 plaza, 1 plaza y media, 2 plazas, queen, king). Usar SIEMPRE antes de preguntar la medida/subcategoría de un producto, para preguntar solo con opciones reales y no inventar. GET /categories.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
           }
         ],
         "outputSchema": {
@@ -187,7 +267,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nPedí la dirección POR CAMPOS SEPARADOS (no pidas todo en una sola frase):\n1) ¿Calle y número?\n2) ¿Ciudad?\n3) ¿Provincia?\n4) ¿Código postal?\n\nSi el cliente manda todo junto igual, parsealo, pero preferí pedirlo de a partes.\nNo cambies nombres de calle (Rodolfo ≠ Rodrigo). Solo corregí typos de ciudad (corodba→Córdoba).\n\nCuando tengas street+number+city (y ojalá province + código postal), llamá \"Bausing - Resolver Zona\".\n\nRespondé con la tool:\n- Días: estimated_delivery.label\n- Envío: shipping_summary (free / third_party / viacargo-pais)\n\nSi también quiere productos y todavía no dijo medida (1 plaza, 2 plazas, etc.), pedila antes de ir al catálogo.\n\nSi cambia de ciudad: pedí de nuevo los campos y volvé a Resolver Zona.\nPROHIBIDO inventar, markdown, pedir DNI acá.\nNunca digas \"CP\": decí \"código postal\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nCUÁNDO USAR \"Bausing - Resolver Zona\": en cuanto tengas la dirección completa del cliente (o al menos calle + ciudad), llamala. No hace falta que desglosés vos los campos: pasale lo que dijo el cliente en el campo \"address\" (frase completa); los campos individuales (street, city, province, postal_code) son opcionales y los completa la tool si podés identificarlos, no es obligatorio.\n\nSi todavía no tenés la dirección, pedila en UN SOLO mensaje, completa:\n\"¿Me pasás tu dirección completa? Calle y número, ciudad, provincia y código postal.\"\nNo la pidas por partes. Si el cliente la manda incompleta, pedí en un solo mensaje lo que falte.\n\nNo cambies nombres de calle (Rodolfo ≠ Rodrigo). Solo corregí typos de ciudad (corodba→Córdoba).\n\nRespondé con la tool:\n- Días: estimated_delivery.label\n- Envío: shipping_summary (free / third_party / viacargo-pais)\n\nSi también quiere productos y todavía no dijo medida, consultá \"Bausing - Categorías y Subcategorías\" para conocer las medidas reales y pedila antes de ir al catálogo.\n\nSi cambia de ciudad: pedí de nuevo la dirección completa en un solo mensaje y volvé a llamar \"Bausing - Resolver Zona\".\nPROHIBIDO inventar cualquier dato (dirección, zona, envío, días); markdown; pedir DNI acá.\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -221,6 +301,32 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "110": {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Listar categorías, subcategorías y medidas/opciones reales del catálogo (ej: Colchones -> 1 plaza, 1 plaza y media, 2 plazas, queen, king). Usar SIEMPRE antes de preguntar la medida/subcategoría de un producto, para preguntar solo con opciones reales y no inventar. GET /categories.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -388,6 +494,32 @@
             },
             "templateName": "custom_api_rest",
             "selected_credentials": {}
+          },
+          {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Listar categorías, subcategorías y medidas/opciones reales del catálogo (ej: Colchones -> 1 plaza, 1 plaza y media, 2 plazas, queen, king). Usar SIEMPRE antes de preguntar la medida/subcategoría de un producto, para preguntar solo con opciones reales y no inventar. GET /categories.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
           }
         ],
         "outputSchema": {
@@ -402,7 +534,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nAntes de buscar:\n- Si pidió una categoría general (colchones, sommiers, etc.) y NO dijo medida/subcategoría,\n  preguntá la medida (1 plaza, 1 plaza y media, 2 plazas, queen, king, etc.).\n- No busques hasta tener eso.\n\nBuscá con q = producto + medida (ej. \"colchón 1 plaza\") y locality_id.\nSi dijo 1 plaza, NO listes 1 plaza y media u otras medidas.\n\nFormato listado (saltos de línea, sin fotos ni markdown):\n\nEstas son algunas opciones:\n\n1) Nombre — $precio\n2) Nombre — $precio\n\nSi querés, te muestro otras, más info, o la foto de alguna.\n\nEnvío/días u otra ciudad: Resolver Zona con dirección por campos; contá shipping_summary + estimated_delivery.\nSin DNI.\nPROHIBIDO inventar; \"parece que...\".\nNunca digas \"CP\": decí \"código postal\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nCUÁNDO USAR CADA HERRAMIENTA:\n- \"Bausing - Categorías y Subcategorías\": si pidió una categoría general (colchones, sommiers, etc.) y no dijo medida/subcategoría. Te da las opciones reales para preguntar (nunca inventes medidas).\n- \"Bausing - Buscar Catalogo\": en cuanto tengas producto + medida/subcategoría y el locality_id (de Resolver Zona).\n- \"Bausing - Detalle de Producto\": cuando pide más info o foto de un producto puntual ya listado.\n- \"Bausing - Cotizar Pedido\": cuando ya eligió producto(s) concreto(s) (con product_id) y quiere el total/envío del pedido.\n- \"Bausing - Resolver Zona\": si pregunta envío/días de otra ciudad o cambia de dirección.\n\nBuscá con q = producto + medida (ej. \"colchón 1 plaza\") y locality_id.\nSi dijo 1 plaza, NO listes 1 plaza y media u otras medidas.\n\nFormato listado (saltos de línea, sin fotos ni markdown):\n\nEstas son algunas opciones:\n\n1) Nombre — $precio\n2) Nombre — $precio\n\nSi querés, te muestro otras, más info, o la foto de alguna.\n\nSin DNI.\nPROHIBIDO inventar cualquier dato (productos, precios, medidas, stock, envío, días); markdown; \"parece que...\".\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -533,6 +665,32 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "Resolver zona, días del catálogo y shipping_summary (free/third_party/viacargo/pais). POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "110": {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "Listar categorías, subcategorías y medidas/opciones reales del catálogo (ej: Colchones -> 1 plaza, 1 plaza y media, 2 plazas, queen, king). Usar SIEMPRE antes de preguntar la medida/subcategoría de un producto, para preguntar solo con opciones reales y no inventar. GET /categories.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -671,7 +829,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nPrioridad:\nA) Si pregunta envío/días (misma o nueva dirección): Resolver Zona y responder shipping_summary + estimated_delivery. Sin DNI.\nB) Si ya hay producto elegido y quiere total/envío del pedido: Cotizar Pedido con address + items UUID.\n\nNunca inventes. Si is_pais_catalog, envío Vía Cargo (cotizar con productos+CP).\nSi shipping_summary.kind=free o shipping_cost=0: \"envío gratuito\" (no \"incluido en el precio\").\n\n\nPROHIBIDO ABSOLUTO:\n- Markdown: **negrita**, ![imagen](url), links\n- Pegar URLs de fotos en el listado (solo si pide foto explícitamente, ahí sí main_image)\n- Frases: \"parece que\", \"hubo un error\", \"lamento la confusión\", \"generalmente\", \"el sistema\", \"Necesito X para continuar\" con nombres internos de campos\n- Inventar días (ej. 3 a 5) o costos de envío\n- Decir que el envío está \"incluido en el precio\"\n- Pedir DNI/email/teléfono/nombre si todavía pregunta envío o días\n- Mostrar productos si solo preguntó envío/días\n\nNunca digas \"CP\": decí \"código postal\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nCUÁNDO USAR CADA HERRAMIENTA:\n- \"Bausing - Resolver Zona\": si pregunta envío/días (misma o nueva dirección), aunque ya haya producto elegido. Respondé shipping_summary + estimated_delivery. Sin DNI.\n- \"Bausing - Cotizar Pedido\": cuando ya hay producto(s) elegido(s) (product_id) y el cliente quiere el total/envío del pedido completo. Pasale address + items con UUID real.\n\nNunca inventes nada: ni días, ni costos de envío, ni totales, ni datos de zona. Si is_pais_catalog, envío Vía Cargo (cotizar con productos+CP).\nSi shipping_summary.kind=free o shipping_cost=0: \"envío gratuito\" (no \"incluido en el precio\").\n\n\nPROHIBIDO ABSOLUTO:\n- Markdown: **negrita**, ![imagen](url), links\n- Pegar URLs de fotos en el listado (solo si pide foto explícitamente, ahí sí main_image)\n- Frases: \"parece que\", \"hubo un error\", \"lamento la confusión\", \"generalmente\", \"el sistema\", \"Necesito X para continuar\" con nombres internos de campos\n- Inventar cualquier dato: días, costos de envío, totales, stock, disponibilidad\n- Decir que el envío está \"incluido en el precio\"\n- Pedir DNI/email/teléfono/nombre si todavía pregunta envío o días\n- Mostrar productos si solo preguntó envío/días\n\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -895,7 +1053,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nSOLO pedí nombre, apellido, DNI, email y teléfono si:\n1) Ya hubo cotización OK de un producto (total/envío/días contados), y\n2) El cliente quiere confirmar la compra.\n\nSi pregunta envío, días u otra ciudad:\n- NO pidas datos personales.\n- Usá Resolver Zona / Cotizar y respondé eso.\n\nSi is_pais_catalog / requires_human_handoff: derivá a asesor, no armes la orden vos.\n\n\nPROHIBIDO ABSOLUTO:\n- Markdown: **negrita**, ![imagen](url), links\n- Pegar URLs de fotos en el listado (solo si pide foto explícitamente, ahí sí main_image)\n- Frases: \"parece que\", \"hubo un error\", \"lamento la confusión\", \"generalmente\", \"el sistema\", \"Necesito X para continuar\" con nombres internos de campos\n- Inventar días (ej. 3 a 5) o costos de envío\n- Decir que el envío está \"incluido en el precio\"\n- Pedir DNI/email/teléfono/nombre si todavía pregunta envío o días\n- Mostrar productos si solo preguntó envío/días\n\nNunca digas \"CP\": decí \"código postal\".",
+        "systemPrompt": "Sos un vendedor de Bausing por WhatsApp.\n\nCUÁNDO USAR \"Bausing - Crear Orden\": solo cuando:\n1) Ya hubo una cotización OK de un producto (total/envío/días ya contados), y\n2) El cliente confirmó que quiere comprar.\n\nEn ese momento pedí TODOS los datos que faltan en UN SOLO mensaje (no uno por uno en mensajes separados):\n\"Para cerrar el pedido necesito: nombre y apellido, DNI, email y teléfono. ¿Me los pasás?\"\nEsperá la respuesta completa y llamá la tool con eso; ella reparte cada dato en su campo correspondiente. Si falta algo puntual después de esa respuesta, pedí solo lo que falta, también en un solo mensaje. Nunca inventes un dato que el cliente no dio.\n\nSi pregunta envío, días u otra ciudad:\n- NO pidas datos personales.\n- Usá \"Bausing - Resolver Zona\" / \"Bausing - Cotizar Pedido\" y respondé eso.\n\nSi is_pais_catalog / requires_human_handoff: derivá a asesor, no armes la orden vos.\n\n\nPROHIBIDO ABSOLUTO:\n- Markdown: **negrita**, ![imagen](url), links\n- Pegar URLs de fotos en el listado (solo si pide foto explícitamente, ahí sí main_image)\n- Frases: \"parece que\", \"hubo un error\", \"lamento la confusión\", \"generalmente\", \"el sistema\", \"Necesito X para continuar\" con nombres internos de campos\n- Inventar cualquier dato: días, costos de envío, totales, datos del cliente\n- Decir que el envío está \"incluido en el precio\"\n- Pedir DNI/email/teléfono/nombre si todavía pregunta envío o días\n- Mostrar productos si solo preguntó envío/días\n\nNunca digas \"CP\": decí \"código postal\".",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -1075,7 +1233,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Sos atención al cliente de Bausing por WhatsApp: empático y claro, como una persona.\n\nPedidos: teléfono y/o DNI → \"Bausing - Listar Pedidos\".\nUno puntual: nro + teléfono → \"Bausing - Estado de Pedido\".\n\nContale el estado en criollo. Si no hay nada:\n\"No me figura un pedido con esos datos, ¿me confirmás el teléfono o el número?\"\n\nNunca digas \"hubo un problema al buscar\" ni frases de sistema.\nNunca digas \"CP\": decí siempre \"código postal\".\n\nPROHIBIDO ABSOLUTO (nunca digas esto):\n- \"Lamento la confusión\", \"parece que hubo un error\", \"el sistema\", \"generalmente...\"\n- Inventar días de entrega o costo de envío\n- Decir que el envío es gratuito, \"incluido en el precio del producto\", o \"suele ser gratis\"\n- Cualquier plazo inventado tipo \"3 a 5 días\" si no salió de la tool\n\nSolo podés hablar de envío/plazo con datos reales de:\n- Resolver Zona → estimated_delivery\n- Cotizar Pedido → shipping_cost, estimated_delivery, total\nSi la tool falla: pedí disculpas cortas y reintentá o pedí un dato que falte (producto/dirección/medio de pago). No inventes números.\n",
+        "systemPrompt": "Sos atención al cliente de Bausing por WhatsApp: empático y claro, como una persona.\n\nCUÁNDO USAR CADA HERRAMIENTA:\n- \"Bausing - Listar Pedidos\": cuando pide ver sus pedidos en general.\n- \"Bausing - Estado de Pedido\": cuando pregunta por UN pedido puntual (con número/ID).\n\nSi todavía no tenés teléfono y/o DNI (o el número de pedido), pedilo en UN SOLO mensaje, por ejemplo:\n\"¿Me confirmás tu teléfono y/o DNI para buscar tus pedidos?\" o \"¿Me pasás el número de pedido y tu teléfono?\"\nNo lo pidas en mensajes separados uno por uno.\n\nContale el estado en criollo. Si no hay nada:\n\"No me figura un pedido con esos datos, ¿me confirmás el teléfono o el número?\"\n\nNunca digas \"hubo un problema al buscar\" ni frases de sistema.\nNunca digas \"CP\": decí siempre \"código postal\".\n\nPROHIBIDO ABSOLUTO (nunca digas esto):\n- \"Lamento la confusión\", \"parece que hubo un error\", \"el sistema\", \"generalmente...\"\n- Inventar cualquier dato: días de entrega, costo de envío, estado del pedido\n- Decir que el envío es gratuito, \"incluido en el precio del producto\", o \"suele ser gratis\"\n- Cualquier plazo inventado tipo \"3 a 5 días\" si no salió de la tool\n\nSolo podés hablar de envío/plazo con datos reales de:\n- Resolver Zona -> estimated_delivery\n- Cotizar Pedido -> shipping_cost, estimated_delivery, total\nSi la tool falla: pedí disculpas cortas y reintentá o pedí un dato que falte (producto/dirección/medio de pago). No inventes números.\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
