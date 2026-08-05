@@ -514,12 +514,18 @@ def price_lines_for_items(
     locality_id: Optional[str],
     payment_method: str,
 ) -> Tuple[List[Dict[str, Any]], float]:
-    product_ids = [str(it.get("product_id")) for it in items if it.get("product_id")]
+    # El bot a veces reusa la clave "id" (la que devuelve el catálogo) en vez de
+    # "product_id" (la que espera esta tool). Aceptamos ambas.
+    product_ids = [
+        str(it.get("product_id") or it.get("id"))
+        for it in items
+        if it.get("product_id") or it.get("id")
+    ]
     prices_map = _build_homepage_prices_map(product_ids, locality_id)
     lines = []
     subtotal = 0.0
     for it in items:
-        pid = str(it.get("product_id") or "")
+        pid = str(it.get("product_id") or it.get("id") or "")
         try:
             qty = int(it.get("quantity") or 1)
         except (TypeError, ValueError):
