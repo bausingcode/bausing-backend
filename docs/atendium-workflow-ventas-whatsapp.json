@@ -114,7 +114,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -188,7 +188,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -330,10 +330,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar (normalmente UNO solo) — NUNCA todos los productos de un listado de búsqueda. La clave es product_id (no 'id'). quantity = cantidad real, normalmente 1.\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -362,7 +362,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -423,7 +423,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO — DOS COSAS QUE NUNCA HACÉS SIN ZONA RESUELTA:\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) NUNCA muestres un precio (ni de referencia) hasta que hayas llamado \"Bausing - Resolver Zona\" con la dirección real del cliente Y \"Bausing - Cotizar Pedido\". Mientras tanto, listá SOLO nombres de producto, sin precio y sin fotos.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n1) Cliente menciona categoría general (ej. colchones) → llamá \"Bausing - Categorías y Subcategorías\", mostrale los nombres reales de subcategorías/medidas y preguntale cuál quiere (nunca asumas).\n2) Elige medida → llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id REAL de esa subcategoría (nunca lo inventes; si no lo tenés, volvé a llamar Categorías).\n3) Si en cambio nombra un producto puntual por su nombre → usá \"Bausing - Buscar Producto\" con ese nombre (q), nunca Buscar Catalogo.\n4) La tool puede devolver muchos productos, pero vos mostrale al cliente SOLO 3 o 4 nombres reales de esa lista (no la tool completa), sin precio, sin descripciones inventadas, y ofrecele ver más si quiere:\n   Estas son algunas opciones:\n   1) Nombre\n   2) Nombre\n   3) Nombre\n   Si querés te muestro más opciones.\n   Si el cliente pide más, mostrale otros 3-4 que no hayas mostrado todavía (misma respuesta de la tool, no vuelvas a llamarla).\n5) Cuando el cliente pida precio: pedile la dirección completa en un solo mensaje (calle y número, ciudad, provincia y código postal) y llamá Resolver Zona; para el total real de un producto puntual, llamá después \"Bausing - Cotizar Pedido\" con items = SOLO el/los product_id que el cliente confirmó explícitamente (nunca todos los del listado). Si todavía NO confirmó ningún producto puntual, NO llames esta tool — preguntale primero cuál de las opciones quiere.\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles.",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO — DOS COSAS QUE NUNCA HACÉS SIN ZONA RESUELTA:\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) NUNCA muestres un precio (ni de referencia) hasta que hayas llamado \"Bausing - Resolver Zona\" con la dirección real del cliente Y \"Bausing - Cotizar Pedido\". Mientras tanto, listá SOLO nombres de producto, sin precio y sin fotos.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n1) Cliente menciona categoría general (ej. colchones) → llamá \"Bausing - Categorías y Subcategorías\", mostrale los nombres reales de subcategorías/medidas y preguntale cuál quiere (nunca asumas).\n2) Elige medida → llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id REAL de esa subcategoría (nunca lo inventes; si no lo tenés, volvé a llamar Categorías).\n3) Si en cambio nombra un producto puntual por su nombre → usá \"Bausing - Buscar Producto\" con ese nombre (q), nunca Buscar Catalogo.\n4) La tool puede devolver muchos productos, pero vos mostrale al cliente SOLO 3 o 4 nombres reales de esa lista (no la tool completa), sin precio, sin descripciones inventadas, y ofrecele ver más si quiere:\n   Estas son algunas opciones:\n   1) Nombre\n   2) Nombre\n   3) Nombre\n   Si querés te muestro más opciones.\n   Si el cliente pide más, mostrale otros 3-4 que no hayas mostrado todavía (misma respuesta de la tool, no vuelvas a llamarla).\n5) Antes de dar cualquier precio, el cliente tiene que haber elegido UN producto puntual de la lista (si pidió \"los precios\" de varios o de toda la lista, preguntale primero cuál le interesa — no cotices más de uno salvo que confirme explícitamente que quiere combinar varios en el mismo pedido). Una vez que elige uno, llamá \"Bausing - Resolver Zona\" y \"Bausing - Cotizar Pedido\" con items = SOLO ese product_id (cantidad 1 salvo que haya pedido más) — cada tool ya sabe pedirte lo que le falta (dirección, forma de pago) a través de sus propios parámetros, vos no armes esa pregunta a mano. Si todavía NO confirmó ningún producto puntual, NO llames Cotizar Pedido.\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -493,10 +493,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar (normalmente UNO solo) — NUNCA todos los productos de un listado de búsqueda. La clave es product_id (no 'id'). quantity = cantidad real, normalmente 1.\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -525,7 +525,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -643,10 +643,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar (normalmente UNO solo) — NUNCA todos los productos de un listado de búsqueda. La clave es product_id (no 'id'). quantity = cantidad real, normalmente 1.\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -675,7 +675,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -720,7 +720,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nEste nodo da el ÚNICO precio real que se le puede decir al cliente. Nunca uses el precio de catálogo como si fuera el final.\n\nSi el cliente pregunta envío/días (misma o nueva dirección) o si todavía no tenés su dirección real: pedila completa en un solo mensaje (calle y número, ciudad, provincia, código postal) y llamá \"Bausing - Resolver Zona\". Respondé shipping_summary + estimated_delivery, sin DNI.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\nCuando ya tengas dirección real y el/los producto(s) que el cliente confirmó (con product_id), llamá \"Bausing - Cotizar Pedido\" con esa address + items = SOLO esos productos confirmados explícitamente (nunca todos los que aparecieron en un listado de búsqueda). Si todavía NO tenés ningún product_id confirmado, NO llames esta tool — preguntale primero cuál producto quiere.\n\nSi is_pais_catalog, envío es Vía Cargo. Si shipping_summary.kind=free o shipping_cost=0, decí \"envío gratuito\" (nunca \"incluido en el precio\"). No muestres productos ni fotos acá, solo el resultado de la cotización.",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nEste nodo da el ÚNICO precio real que se le puede decir al cliente. Nunca uses el precio de catálogo como si fuera el final.\n\nSi el cliente pregunta envío/días (misma o nueva dirección): pedila completa en un solo mensaje (calle y número, ciudad, provincia, código postal) y llamá \"Bausing - Resolver Zona\". Respondé shipping_summary + estimated_delivery, sin DNI.\n\nSi en cambio ya eligió un producto puntual y querés cotizarlo: llamá directamente \"Bausing - Cotizar Pedido\" con ese product_id — la tool ya sabe pedirte lo que le falta (dirección, forma de pago) a través de sus propios parámetros, vos no armes esa pregunta a mano.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\nCuando ya tengas dirección real, método de pago y el producto puntual que el cliente confirmó (UN solo product_id, salvo que haya pedido explícitamente combinar varios), llamá \"Bausing - Cotizar Pedido\" con esa address + items = SOLO ese/esos productos confirmados (nunca todos los de un listado de búsqueda). Si todavía NO tenés ningún product_id confirmado, NO llames esta tool — preguntale primero cuál producto quiere.\n\nSi is_pais_catalog, envío es Vía Cargo. Si shipping_summary.kind=free o shipping_cost=0, decí \"envío gratuito\" (nunca \"incluido en el precio\"). No muestres productos ni fotos acá, solo el resultado de la cotización.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -734,10 +734,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar (normalmente UNO solo) — NUNCA todos los productos de un listado de búsqueda. La clave es product_id (no 'id'). quantity = cantidad real, normalmente 1.\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -766,7 +766,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -845,18 +845,18 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
                 "body": {
                   "customer": {
-                    "first_name": "@AI(\"nombre del cliente\", optional:false)",
-                    "last_name": "@AI(\"apellido del cliente\", optional:false)",
-                    "email": "@AI(\"email del cliente\", optional:false)",
-                    "phone": "@AI(\"teléfono del cliente\", optional:false)",
-                    "dni": "@AI(\"DNI del cliente\", optional:false)",
+                    "first_name": "@AI(\"nombre\", optional:false)",
+                    "last_name": "@AI(\"apellido\", optional:false)",
+                    "email": "@AI(\"email\", optional:false)",
+                    "phone": "@AI(\"teléfono\", optional:false)",
+                    "dni": "@AI(\"DNI\", optional:false)",
                     "document_type": "DNI"
                   },
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] EXACTAMENTE igual a los items que se cotizaron y confirmaron con 'Bausing - Cotizar Pedido'. La clave es product_id (no 'id').\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -885,7 +885,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -915,10 +915,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar (normalmente UNO solo) — NUNCA todos los productos de un listado de búsqueda. La clave es product_id (no 'id'). quantity = cantidad real, normalmente 1.\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -967,18 +967,18 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
                 "body": {
                   "customer": {
-                    "first_name": "@AI(\"nombre del cliente\", optional:false)",
-                    "last_name": "@AI(\"apellido del cliente\", optional:false)",
-                    "email": "@AI(\"email del cliente\", optional:false)",
-                    "phone": "@AI(\"teléfono del cliente\", optional:false)",
-                    "dni": "@AI(\"DNI del cliente\", optional:false)",
+                    "first_name": "@AI(\"nombre\", optional:false)",
+                    "last_name": "@AI(\"apellido\", optional:false)",
+                    "email": "@AI(\"email\", optional:false)",
+                    "phone": "@AI(\"teléfono\", optional:false)",
+                    "dni": "@AI(\"DNI\", optional:false)",
                     "document_type": "DNI"
                   },
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] EXACTAMENTE igual a los items que se cotizaron y confirmaron con 'Bausing - Cotizar Pedido'. La clave es product_id (no 'id').\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1007,7 +1007,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1037,10 +1037,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
                   },
                   "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar (normalmente UNO solo) — NUNCA todos los productos de un listado de búsqueda. La clave es product_id (no 'id'). quantity = cantidad real, normalmente 1.\", optional:false)",
-                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
