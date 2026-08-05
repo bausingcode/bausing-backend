@@ -8,7 +8,7 @@
       "name": "Cómo configurar",
       "type": "note",
       "config": {
-        "text": "Flujo: Router->Bienvenida->Catálogo (precios de referencia, sin pedir dirección)->Cotizar (ahí sí se pide dirección/Resolver Zona si falta)->Orden.\nFuera de polígono = Catálogo País / Vía Cargo.\nLa dirección NO se pide para mostrar catálogo. Se pide (siempre completa, en un solo mensaje) recién cuando el cliente pregunta envío/días puntualmente, o cuando va a cotizar/cerrar la compra.\nAntes de preguntar medida/subcategoría de un producto, consultar 'Bausing - Categorías y Subcategorías' y usar solo esas opciones reales.\nLos datos que van directo a un parámetro de una tool (customer, address, items, etc.) se piden todos juntos en un solo mensaje natural, nunca campo por campo; la tool los reparte según su propia config de parámetros (@AI(...), optional:false/true).\nNunca pedir latitud/longitud ni ubicación por texto: solo se completa si el cliente comparte ubicación nativa de WhatsApp.\nSin markdown/fotos en listados. Prohibido inventar cualquier dato (medidas, categorías, zona, envío, días, precios, stock, datos del cliente). Sin DNI antes de cotizar.\nstartNodeId=2"
+        "text": "Flujo: Router->Bienvenida->Catálogo (precios de referencia, sin pedir dirección)->Cotizar (ahí sí se pide dirección/Resolver Zona si falta)->Orden.\nFuera de polígono = Catálogo País / Vía Cargo.\nLa dirección NO se pide para mostrar catálogo. Se pide (siempre completa, en un solo mensaje) recién cuando el cliente pregunta envío/días puntualmente, o cuando va a cotizar/cerrar la compra.\nAntes de preguntar medida/subcategoría de un producto, consultar 'Bausing - Categorías y Subcategorías' y usar solo esas opciones reales.\nLos datos que van directo a un parámetro de una tool (customer, address, items, etc.) se piden todos juntos en un solo mensaje natural, nunca campo por campo; la tool los reparte según su propia config de parámetros (@AI(...), optional:false/true).\nNunca pedir latitud/longitud ni ubicación por texto.\nSin markdown/fotos en listados. Prohibido inventar cualquier dato (medidas, categorías, zona, envío, días, precios, stock, datos del cliente). Sin DNI antes de cotizar.\nstartNodeId=2"
       },
       "position": {
         "x": 20,
@@ -114,14 +114,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -156,7 +149,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nSOS EL PRIMER CONTACTO: tu primer mensaje en la conversación TIENE que ser un saludo real (ej. \"Hola! ¿en qué te ayudo?\") antes de cualquier otra cosa. No saltees directo a pedir datos, buscar productos ni avanzar de nodo aunque el cliente ya haya escrito todo lo que necesitás en su primer mensaje — primero saludá y confirmá qué necesita, recién en el intercambio siguiente podés avanzar.\n\nSi quiere productos: si no dijo medida/subcategoría, llamá \"Bausing - Categorías y Subcategorías\" y preguntala usando SOLO las opciones reales que te devuelve. No hace falta pedir la dirección para esto.\n\nSi pregunta envío/días puntualmente (sin pedir productos): pedí la dirección COMPLETA en un solo mensaje (calle y número, ciudad, provincia y código postal) y llamá \"Bausing - Resolver Zona\".\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. Todos los campos de \"Bausing - Resolver Zona\" van siempre con string: si no tenés dato para alguno (típicamente lat/lon), poné string vacío, nunca null.\n\nNunca digas un precio (ni de referencia): eso siempre sale más adelante, después de resolver la zona y cotizar. NO pidas cupón ni DNI acá.\n\ncontinueCondition: solo avanza cuando ya saludaste Y sabés qué busca el cliente (medida real si es producto, o ya resolviste zona si preguntó envío).",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nSOS EL PRIMER CONTACTO: tu primer mensaje en la conversación TIENE que ser un saludo real (ej. \"Hola! ¿en qué te ayudo?\") antes de cualquier otra cosa. No saltees directo a pedir datos, buscar productos ni avanzar de nodo aunque el cliente ya haya escrito todo lo que necesitás en su primer mensaje — primero saludá y confirmá qué necesita, recién en el intercambio siguiente podés avanzar.\n\nSi quiere productos: si no dijo medida/subcategoría, llamá \"Bausing - Categorías y Subcategorías\" y preguntala usando SOLO las opciones reales que te devuelve. No hace falta pedir la dirección para esto.\n\nSi pregunta envío/días puntualmente (sin pedir productos): pedí la dirección COMPLETA en un solo mensaje (calle y número, ciudad, provincia y código postal) y llamá \"Bausing - Resolver Zona\".\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\nNunca digas un precio (ni de referencia): eso siempre sale más adelante, después de resolver la zona y cotizar. NO pidas cupón ni DNI acá.\n\ncontinueCondition: solo avanza cuando ya saludaste Y sabés qué busca el cliente (medida real si es producto, o ya resolviste zona si preguntó envío).",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -195,14 +188,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -258,7 +244,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
-                  "subcategory_id": "@AI(\"UUID de la subcategoría/medida elegida (ej. la de 'Dos plazas'), tal cual la devolvió 'Bausing - Categorías y Subcategorías' dentro de las subcategorías de la categoría elegida (nunca el id de la categoría padre, nunca la inventes). SIEMPRE tiene que tener un id real de esa tool.\", optional:false)"
+                  "subcategory_id": "@AI(\"id de la subcategoría/medida que eligió el cliente\", optional:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -287,7 +273,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
-                  "q": "@AI(\"término de búsqueda LIMPIO armado por vos a partir del producto puntual que nombró el cliente (ej. 'sommier Rosen'). Nunca copies el mensaje textual completo del cliente (con typos, verbos como 'busco'/'quiero', saludos pegados, etc.), armá solo el nombre del producto.\", optional:false)"
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -344,15 +330,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
-                    "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad\", optional:false)",
-                    "province": "@AI(\"provincia\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)",
-                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                   },
-                  "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar — NUNCA incluyas todos los productos que aparecieron en un listado de búsqueda, solo los que el cliente eligió uno por uno. quantity = la cantidad real que pidió (normalmente 1). product_id = UUID real del catálogo.\", optional:false)",
-                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
+                  "items": "@AI(\"productos y cantidades que el cliente confirmó (no todo un listado)\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -381,14 +362,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -449,7 +423,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO — DOS COSAS QUE NUNCA HACÉS SIN ZONA RESUELTA:\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) NUNCA muestres un precio (ni de referencia) hasta que hayas llamado \"Bausing - Resolver Zona\" con la dirección real del cliente Y \"Bausing - Cotizar Pedido\". Mientras tanto, listá SOLO nombres de producto, sin precio y sin fotos.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n1) Cliente menciona categoría general (ej. colchones) → llamá \"Bausing - Categorías y Subcategorías\", mostrale los nombres reales de subcategorías/medidas y preguntale cuál quiere (nunca asumas).\n2) Elige medida → llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id REAL de esa subcategoría (nunca lo inventes; si no lo tenés, volvé a llamar Categorías).\n3) Si en cambio nombra un producto puntual por su nombre → usá \"Bausing - Buscar Producto\" con ese nombre (q), nunca Buscar Catalogo.\n4) Listá TODOS los nombres que devolvió la tool (no solo uno), sin precio, sin descripciones inventadas:\n   Estas son algunas opciones:\n   1) Nombre\n   2) Nombre\n5) Cuando el cliente pida precio: pedile la dirección completa en un solo mensaje y llamá Resolver Zona; para el total real de un producto puntual, llamá después \"Bausing - Cotizar Pedido\" con items = SOLO el/los product_id que el cliente confirmó explícitamente (nunca todos los del listado).\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. Todos los campos de \"Bausing - Resolver Zona\" van siempre con string: si no tenés dato para alguno (típicamente lat/lon), poné string vacío, nunca null.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles.",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO — DOS COSAS QUE NUNCA HACÉS SIN ZONA RESUELTA:\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) NUNCA muestres un precio (ni de referencia) hasta que hayas llamado \"Bausing - Resolver Zona\" con la dirección real del cliente Y \"Bausing - Cotizar Pedido\". Mientras tanto, listá SOLO nombres de producto, sin precio y sin fotos.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n1) Cliente menciona categoría general (ej. colchones) → llamá \"Bausing - Categorías y Subcategorías\", mostrale los nombres reales de subcategorías/medidas y preguntale cuál quiere (nunca asumas).\n2) Elige medida → llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id REAL de esa subcategoría (nunca lo inventes; si no lo tenés, volvé a llamar Categorías).\n3) Si en cambio nombra un producto puntual por su nombre → usá \"Bausing - Buscar Producto\" con ese nombre (q), nunca Buscar Catalogo.\n4) Listá TODOS los nombres que devolvió la tool (no solo uno), sin precio, sin descripciones inventadas:\n   Estas son algunas opciones:\n   1) Nombre\n   2) Nombre\n5) Cuando el cliente pida precio: pedile la dirección completa en un solo mensaje y llamá Resolver Zona; para el total real de un producto puntual, llamá después \"Bausing - Cotizar Pedido\" con items = SOLO el/los product_id que el cliente confirmó explícitamente (nunca todos los del listado).\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -462,7 +436,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
-                  "subcategory_id": "@AI(\"UUID de la subcategoría/medida elegida (ej. la de 'Dos plazas'), tal cual la devolvió 'Bausing - Categorías y Subcategorías' dentro de las subcategorías de la categoría elegida (nunca el id de la categoría padre, nunca la inventes). SIEMPRE tiene que tener un id real de esa tool.\", optional:false)"
+                  "subcategory_id": "@AI(\"id de la subcategoría/medida que eligió el cliente\", optional:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -519,15 +493,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
-                    "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad\", optional:false)",
-                    "province": "@AI(\"provincia\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)",
-                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                   },
-                  "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar — NUNCA incluyas todos los productos que aparecieron en un listado de búsqueda, solo los que el cliente eligió uno por uno. quantity = la cantidad real que pidió (normalmente 1). product_id = UUID real del catálogo.\", optional:false)",
-                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
+                  "items": "@AI(\"productos y cantidades que el cliente confirmó (no todo un listado)\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -556,14 +525,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -618,7 +580,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
-                  "q": "@AI(\"término de búsqueda LIMPIO armado por vos a partir del producto puntual que nombró el cliente (ej. 'sommier Rosen'). Nunca copies el mensaje textual completo del cliente (con typos, verbos como 'busco'/'quiero', saludos pegados, etc.), armá solo el nombre del producto.\", optional:false)"
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -681,15 +643,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
-                    "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad\", optional:false)",
-                    "province": "@AI(\"provincia\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)",
-                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                   },
-                  "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar — NUNCA incluyas todos los productos que aparecieron en un listado de búsqueda, solo los que el cliente eligió uno por uno. quantity = la cantidad real que pidió (normalmente 1). product_id = UUID real del catálogo.\", optional:false)",
-                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
+                  "items": "@AI(\"productos y cantidades que el cliente confirmó (no todo un listado)\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -718,14 +675,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -770,7 +720,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nEste nodo da el ÚNICO precio real que se le puede decir al cliente. Nunca uses el precio de catálogo como si fuera el final.\n\nSi el cliente pregunta envío/días (misma o nueva dirección) o si todavía no tenés su dirección real: pedila completa en un solo mensaje (calle y número, ciudad, provincia, código postal) y llamá \"Bausing - Resolver Zona\". Respondé shipping_summary + estimated_delivery, sin DNI.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. Todos los campos de \"Bausing - Resolver Zona\" van siempre con string: si no tenés dato para alguno (típicamente lat/lon), poné string vacío, nunca null.\n\nCuando ya tengas dirección real y el/los producto(s) que el cliente confirmó (con product_id), llamá \"Bausing - Cotizar Pedido\" con esa address + items = SOLO esos productos confirmados explícitamente (nunca todos los que aparecieron en un listado de búsqueda).\n\nSi is_pais_catalog, envío es Vía Cargo. Si shipping_summary.kind=free o shipping_cost=0, decí \"envío gratuito\" (nunca \"incluido en el precio\"). No muestres productos ni fotos acá, solo el resultado de la cotización.",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nEste nodo da el ÚNICO precio real que se le puede decir al cliente. Nunca uses el precio de catálogo como si fuera el final.\n\nSi el cliente pregunta envío/días (misma o nueva dirección) o si todavía no tenés su dirección real: pedila completa en un solo mensaje (calle y número, ciudad, provincia, código postal) y llamá \"Bausing - Resolver Zona\". Respondé shipping_summary + estimated_delivery, sin DNI.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\nCuando ya tengas dirección real y el/los producto(s) que el cliente confirmó (con product_id), llamá \"Bausing - Cotizar Pedido\" con esa address + items = SOLO esos productos confirmados explícitamente (nunca todos los que aparecieron en un listado de búsqueda).\n\nSi is_pais_catalog, envío es Vía Cargo. Si shipping_summary.kind=free o shipping_cost=0, decí \"envío gratuito\" (nunca \"incluido en el precio\"). No muestres productos ni fotos acá, solo el resultado de la cotización.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -784,15 +734,10 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
                   "address": {
-                    "street": "@AI(\"calle del cliente sin cambiar el nombre\", optional:false)",
-                    "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad\", optional:false)",
-                    "province": "@AI(\"provincia\", optional:true)",
-                    "postal_code": "@AI(\"código postal\", optional:true)",
-                    "address": "@AI(\"dirección completa si hace falta\", optional:true)"
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                   },
-                  "items": "@AI(\"lista [{product_id, quantity}] SOLO con el/los producto(s) puntuales que el cliente CONFIRMÓ explícitamente que quiere comprar/cotizar — NUNCA incluyas todos los productos que aparecieron en un listado de búsqueda, solo los que el cliente eligió uno por uno. quantity = la cantidad real que pidió (normalmente 1). product_id = UUID real del catálogo.\", optional:false)",
-                  "payment_method": "@AI(\"cash, transfer o card; si no dijo usar transfer\", optional:true)"
+                  "items": "@AI(\"productos y cantidades que el cliente confirmó (no todo un listado)\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -821,14 +766,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -915,15 +853,10 @@
                     "document_type": "DNI"
                   },
                   "address": {
-                    "street": "@AI(\"calle sin cambiar el nombre\", optional:false)",
-                    "number": "@AI(\"número\", optional:true)",
-                    "city": "@AI(\"ciudad\", optional:false)",
-                    "province": "@AI(\"provincia\", optional:false)",
-                    "postal_code": "@AI(\"código postal\", optional:true)"
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                   },
-                  "items": "@AI(\"lista [{product_id, quantity}] EXACTAMENTE igual a los items que se cotizaron y confirmaron con 'Bausing - Cotizar Pedido' — nunca todos los productos de un listado de búsqueda, solo los confirmados por el cliente.\", optional:false)",
-                  "payment_method": "@AI(\"cash, transfer o card\", optional:false)",
-                  "total": "@AI(\"total cotizado\", optional:true)"
+                  "items": "@AI(\"productos y cantidades ya cotizados y confirmados por el cliente\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -952,14 +885,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -973,6 +899,39 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "106",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
+                "body": {
+                  "address": {
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  },
+                  "items": "@AI(\"productos y cantidades que el cliente confirmó (no todo un listado)\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Cotizar Pedido",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió uno o más productos concretos (con product_id real) y necesitás el total final con envío y plazo antes de crear la orden. Requiere address + items; NO requiere email, lat/lon ni cupón. NO la confundas con Resolver Zona (esa es solo para saber días/envío de una dirección sin productos). POST /quote.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -994,7 +953,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nLlamá \"Bausing - Crear Orden\" SOLO cuando: 1) ya hubo una cotización OK de un producto (total/envío/días ya contados por \"Bausing - Cotizar Pedido\"), y 2) el cliente confirmó que quiere comprar.\n\nEn ese momento pedí TODOS los datos que falten en UN SOLO mensaje: \"Para cerrar el pedido necesito: nombre y apellido, DNI, email y teléfono. ¿Me los pasás?\". items tiene que ser EXACTAMENTE lo que se cotizó y confirmó, nunca productos nuevos ni de un listado sin confirmar.\n\nSi pregunta envío/días u otra ciudad en vez de confirmar: NO pidas datos personales, llamá \"Bausing - Resolver Zona\" y respondé eso.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. Todos los campos de \"Bausing - Resolver Zona\" van siempre con string: si no tenés dato para alguno (típicamente lat/lon), poné string vacío, nunca null.\n\nSi is_pais_catalog o requires_human_handoff: derivá a asesor, no armes la orden vos.",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato, pedilo con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo. Si una tool falla, no uses frases robóticas (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\"): explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO: \"Bausing - Crear Orden\" es la ÚNICA tool de todo el flujo que genera una COMPRA REAL. Nunca la llames solo porque el cliente pregunta un precio, menciona otro producto, o hace cualquier pregunta que no sea confirmar explícitamente que quiere comprar. Si tenés la más mínima duda de si confirmó o no, NO la llames — preguntale primero.\n\nLlamá \"Bausing - Crear Orden\" SOLO cuando: 1) ya hubo una cotización OK de un producto (total/envío/días ya contados por \"Bausing - Cotizar Pedido\"), y 2) el cliente confirmó EXPLÍCITAMENTE que quiere comprar (ej. \"sí, lo quiero\", \"dale, confirmo\", \"comprémoslo\").\n\nSi el cliente pregunta el precio de un producto (el mismo que se estaba por comprar, u otro distinto), eso NO es confirmar una compra: usá \"Bausing - Cotizar Pedido\" para darle el precio, nunca \"Bausing - Crear Orden\".\n\nEn el momento de confirmar la compra, pedí TODOS los datos que falten en UN SOLO mensaje: \"Para cerrar el pedido necesito: nombre y apellido, DNI, email y teléfono. ¿Me los pasás?\". items tiene que ser EXACTAMENTE lo que se cotizó y confirmó, nunca productos nuevos ni de un listado sin confirmar.\n\nSi pregunta envío/días u otra ciudad en vez de confirmar: NO pidas datos personales, llamá \"Bausing - Resolver Zona\" y respondé eso.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual.\n\nSi is_pais_catalog o requires_human_handoff: derivá a asesor, no armes la orden vos.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -1016,15 +975,10 @@
                     "document_type": "DNI"
                   },
                   "address": {
-                    "street": "@AI(\"nombre de la calle\", optional:false)",
-                    "number": "@AI(\"número de calle\", optional:true)",
-                    "city": "@AI(\"ciudad\", optional:false)",
-                    "province": "@AI(\"provincia\", optional:false)",
-                    "postal_code": "@AI(\"código postal\", optional:true)"
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                   },
-                  "items": "@AI(\"lista [{product_id, quantity}] EXACTAMENTE igual a los items que se cotizaron y confirmaron con 'Bausing - Cotizar Pedido' — nunca todos los productos de un listado de búsqueda, solo los confirmados por el cliente.\", optional:false)",
-                  "payment_method": "@AI(\"cash, transfer o card\", optional:false)",
-                  "total": "@AI(\"total cotizado\", optional:true)"
+                  "items": "@AI(\"productos y cantidades ya cotizados y confirmados por el cliente\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1053,14 +1007,7 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
                 "body": {
-                  "street": "@AI(\"calle exactamente como la dijo el cliente. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "number": "@AI(\"número de altura. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "city": "@AI(\"ciudad (corregir solo typos). Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "province": "@AI(\"provincia. Si no la tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "postal_code": "@AI(\"código postal de 4 dígitos. Si no lo tenés todavía, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "address": "@AI(\"dirección completa en una frase si vino junta. Si no aplica, poné un STRING VACÍO (nunca null, nunca omitas el campo).\", optional:false)",
-                  "lat": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)",
-                  "lon": "@AI(\"SOLO completar si el cliente compartió su ubicación nativa de WhatsApp (pin/GPS ya trae lat/lon en el mensaje). Si no compartió ubicación (el caso normal), poné un STRING VACÍO — NUNCA null, NUNCA le preguntes al cliente por esto ni le pidas que escriba coordenadas.\", optional:false)"
+                  "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1074,6 +1021,39 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "106": {
+            "id": "106",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
+                "body": {
+                  "address": {
+                    "address": "@AI(\"dirección completa que escribió el cliente\", optional:false)"
+                  },
+                  "items": "@AI(\"productos y cantidades que el cliente confirmó (no todo un listado)\", optional:false)",
+                  "payment_method": "@AI(\"método de pago: cash, transfer o card. Si el cliente no lo especificó, usá 'transfer' por default.\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Cotizar Pedido",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió uno o más productos concretos (con product_id real) y necesitás el total final con envío y plazo antes de crear la orden. Requiere address + items; NO requiere email, lat/lon ni cupón. NO la confundas con Resolver Zona (esa es solo para saber días/envío de una dirección sin productos). POST /quote.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"

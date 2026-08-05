@@ -301,6 +301,18 @@ def create_order():
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 
+    # El bot a veces solo manda la frase completa (address.address) sin desglosar
+    # street/city/etc. Completamos los campos estructurados a partir de esa frase
+    # antes de armar la orden real.
+    if isinstance(address, dict) and not (address.get("street") and address.get("city")):
+        freeform = address.get("address") or address.get("full_address") or ""
+        if freeform:
+            parsed = commerce.parse_freeform_address(freeform)
+            for key in ("street", "number", "city", "postal_code"):
+                address.setdefault(key, parsed.get(key, ""))
+            if parsed.get("province") and not address.get("province"):
+                address["province"] = parsed["province"]
+
     if not customer or not address or not items:
         return _err("customer, address e items son requeridos")
 
