@@ -818,18 +818,17 @@ def search_products(
         # No devolver productos sin precio al bot (evita que arme listas con $0)
         if price is None:
             continue
+        # Intencional: NO se incluyen price/price_label/price_transfer/price_card ni
+        # main_image acá. Este endpoint es para que el bot liste nombres nada más;
+        # precio real sale de build_full_quote (Cotizar Pedido) con zona resuelta,
+        # y la foto solo se expone en product_detail (Detalle de Producto) cuando el
+        # cliente la pide explícitamente para un producto puntual.
         items.append(
             {
                 "id": str(p.id),
                 "name": p.name,
                 "description": (p.description or "")[:280] if p.description else None,
                 "category_id": str(p.category_id) if p.category_id else None,
-                "main_image": p.get_main_image(),
-                "price": price,
-                "price_label": _format_ars(price),
-                "price_transfer": price_transfer,
-                "price_card": price_card,
-                "promos": info.get("promos") or [],
             }
         )
 
@@ -855,30 +854,19 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
     if not product:
         raise ValueError("Producto no encontrado")
     loc = _normalize_locality_id(locality_id)
-    prices_map = _build_homepage_prices_map([str(pid)], loc)
-    info = prices_map.get(str(pid)) or {}
     catalog, _cid = catalog_for_locality(loc) if loc else (None, None)
-    price_transfer = _positive_price(
-        info.get("min_transfer_price"), info.get("min_price")
-    )
-    price_card = _positive_price(
-        info.get("min_card_price"), info.get("min_price"), price_transfer
-    )
-    price = price_transfer or price_card
+    # Intencional: NO se incluye precio acá. Esta es la única respuesta del bot que
+    # trae main_image (foto), reservada para cuando el cliente la pide explícitamente
+    # sobre un producto puntual; el precio real sale siempre de build_full_quote
+    # (Cotizar Pedido) con la zona resuelta.
     return {
         "id": str(product.id),
         "name": product.name,
         "description": product.description,
         "category_id": str(product.category_id) if product.category_id else None,
         "main_image": product.get_main_image(),
-        "price": price,
-        "price_label": _format_ars(price) if price is not None else None,
-        "price_transfer": price_transfer,
-        "price_card": price_card,
-        "promos": info.get("promos") or [],
         "estimated_delivery": estimated_delivery_payload(catalog),
         "locality_id": loc,
-        "prices_raw": info,
     }
 
 
