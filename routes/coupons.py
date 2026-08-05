@@ -565,6 +565,53 @@ def admin_update_coupon(coupon_id):
         return jsonify({"success": False, "error": "Error interno del servidor"}), 500
 
 
+@coupons_bp.route("/admin/coupons/<uuid:coupon_id>/usages", methods=["GET"])
+@admin_required
+def admin_list_coupon_usages(coupon_id):
+    """Lista los clientes/órdenes que usaron un cupón determinado."""
+    try:
+        from models.order import Order
+        from models.user import User
+
+        c = db.session.get(Coupon, coupon_id)
+        if not c:
+            return jsonify({"success": False, "error": "Cupón no encontrado"}), 404
+
+        rows = (
+            db.session.query(Order, User)
+            .join(User, User.id == Order.user_id)
+            .filter(Order.coupon_id == coupon_id)
+            .order_by(Order.created_at.desc())
+            .all()
+        )
+
+        usages = []
+        for order, user in rows:
+            usages.append(
+                {
+                    "order_id": str(order.id),
+                    "crm_order_id": order.crm_order_id,
+                    "user_id": str(user.id),
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email,
+                    "order_total": float(order.total) if order.total is not None else 0.0,
+                    "discount_amount": float(order.coupon_discount_amount)
+                    if order.coupon_discount_amount is not None
+                    else None,
+                    "status": order.status,
+                    "created_at": order.created_at.isoformat() if order.created_at else None,
+                }
+            )
+
+        return jsonify({"success": True, "data": {"usages": usages}}), 200
+    except Exception as e:
+        current_app.logger.error(
+            "Error al listar usos del cupón: %s", str(e), exc_info=True
+        )
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
+
+
 @coupons_bp.route("/admin/coupons/<uuid:coupon_id>", methods=["DELETE"])
 @admin_required
 def admin_delete_coupon(coupon_id):
