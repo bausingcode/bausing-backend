@@ -17,7 +17,7 @@ from models.catalog import Catalog, LocalityCatalog
 from models.coupon import Coupon
 from models.coupon_category_discount import CouponCategoryDiscount
 from models.locality import Locality
-from models.product import Product
+from models.product import Product, ProductSubcategory
 from models.settings import SystemSettings
 from models.user import User
 from models.wallet import Wallet
@@ -761,6 +761,7 @@ def search_products(
     q: Optional[str],
     locality_id: Optional[str],
     category_id: Optional[str],
+    subcategory_id: Optional[str] = None,
     page: int = 1,
     per_page: int = 20,
 ) -> Dict[str, Any]:
@@ -781,6 +782,16 @@ def search_products(
             cat_uuid = uuid.UUID(str(category_id))
             cat_ids = _descendant_category_ids_including_root(cat_uuid)
             query = query.filter(Product.category_id.in_(cat_ids))
+        except (ValueError, TypeError):
+            pass
+    if subcategory_id:
+        try:
+            sub_uuid = uuid.UUID(str(subcategory_id))
+            query = (
+                query.join(ProductSubcategory, Product.id == ProductSubcategory.product_id)
+                .filter(ProductSubcategory.subcategory_id == sub_uuid)
+                .distinct()
+            )
         except (ValueError, TypeError):
             pass
 

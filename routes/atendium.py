@@ -101,6 +101,7 @@ def catalog_search():
             q=request.args.get("q"),
             locality_id=request.args.get("locality_id"),
             category_id=request.args.get("category_id"),
+            subcategory_id=request.args.get("subcategory_id"),
             page=request.args.get("page", 1, type=int),
             per_page=request.args.get("per_page", 20, type=int),
         )
