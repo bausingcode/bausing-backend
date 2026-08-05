@@ -776,7 +776,11 @@ def search_products(
             query = query.filter(filt)
     if category_id:
         try:
-            query = query.filter(Product.category_id == uuid.UUID(str(category_id)))
+            from routes.products import _descendant_category_ids_including_root
+
+            cat_uuid = uuid.UUID(str(category_id))
+            cat_ids = _descendant_category_ids_including_root(cat_uuid)
+            query = query.filter(Product.category_id.in_(cat_ids))
         except (ValueError, TypeError):
             pass
 
