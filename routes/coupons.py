@@ -568,7 +568,10 @@ def admin_update_coupon(coupon_id):
 @coupons_bp.route("/admin/coupons/<uuid:coupon_id>/usages", methods=["GET"])
 @admin_required
 def admin_list_coupon_usages(coupon_id):
-    """Lista los clientes/órdenes que usaron un cupón determinado."""
+    """
+    Lista paginada de los clientes/órdenes que usaron un cupón determinado.
+    Query params: page (default 1), per_page (default 20, max 100).
+    """
     try:
         from models.order import Order
         from models.user import User
@@ -577,13 +580,22 @@ def admin_list_coupon_usages(coupon_id):
         if not c:
             return jsonify({"success": False, "error": "Cupón no encontrado"}), 404
 
-        rows = (
+        page = request.args.get("page", 1, type=int)
+        per_page = min(request.args.get("per_page", 20, type=int), 100)
+        if page < 1:
+            page = 1
+        if per_page < 1:
+            per_page = 20
+
+        query = (
             db.session.query(Order, User)
             .join(User, User.id == Order.user_id)
             .filter(Order.coupon_id == coupon_id)
             .order_by(Order.created_at.desc())
-            .all()
         )
+
+        total = query.count()
+        rows = query.offset((page - 1) * per_page).limit(per_page).all()
 
         usages = []
         for order, user in rows:
@@ -604,7 +616,22 @@ def admin_list_coupon_usages(coupon_id):
                 }
             )
 
-        return jsonify({"success": True, "data": {"usages": usages}}), 200
+        total_pages = (total + per_page - 1) // per_page if total > 0 else 0
+
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "usages": usages,
+                    "pagination": {
+                        "page": page,
+                        "per_page": per_page,
+                        "total": total,
+                        "total_pages": total_pages,
+                    },
+                },
+            }
+        ), 200
     except Exception as e:
         current_app.logger.error(
             "Error al listar usos del cupón: %s", str(e), exc_info=True
