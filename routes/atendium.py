@@ -41,13 +41,20 @@ def _err(message, http_status=400, data=None):
 
 
 def _coerce_list(value):
-    """El bot a veces manda arrays (items) serializados como string JSON en vez de
-    array real. Si es un string parseable a lista, lo convertimos; si no, lo dejamos igual."""
+    """El bot a veces manda arrays (items) serializados como string en vez de array
+    real (JSON válido o incluso estilo Python con comillas simples). Si es un string
+    parseable a lista, lo convertimos; si no, lo dejamos igual."""
     if isinstance(value, str):
+        parsed = None
         try:
             parsed = json.loads(value)
         except (TypeError, ValueError):
-            return value
+            try:
+                import ast
+
+                parsed = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                return value
         if isinstance(parsed, list):
             return parsed
     return value
