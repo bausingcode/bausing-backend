@@ -6,6 +6,7 @@ Auth: X-API-Key o Authorization Bearer (API_KEY).
 """
 from __future__ import annotations
 
+import json
 import uuid
 from functools import wraps
 
@@ -37,6 +38,19 @@ def _err(message, http_status=400, data=None):
     if data is not None:
         body["data"] = data
     return jsonify(body), http_status
+
+
+def _coerce_list(value):
+    """El bot a veces manda arrays (items) serializados como string JSON en vez de
+    array real. Si es un string parseable a lista, lo convertimos; si no, lo dejamos igual."""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return value
+        if isinstance(parsed, list):
+            return parsed
+    return value
 
 
 def atendium_api_key_required(f):
@@ -240,7 +254,7 @@ def validate_referral():
 def quote():
     body = request.get_json(silent=True) or {}
     address = body.get("address") or body
-    items = body.get("items")
+    items = _coerce_list(body.get("items"))
     payment_method = body.get("payment_method") or "transfer"
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
@@ -282,7 +296,7 @@ def create_order():
     body = request.get_json(silent=True) or {}
     customer = body.get("customer") or {}
     address = body.get("address") or {}
-    items = body.get("items") or []
+    items = _coerce_list(body.get("items")) or []
     payment_method = (body.get("payment_method") or "transfer").lower()
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
