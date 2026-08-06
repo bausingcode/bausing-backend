@@ -328,6 +328,21 @@ def card_installment():
         text = "".join(ch for ch in text if not unicodedata.combining(ch))
         return " ".join(text.strip().lower().split())
 
+    def _strip_prefix(value, prefix):
+        n = _norm(value)
+        if n.startswith(prefix):
+            n = n[len(prefix):]
+        return n.strip()
+
+    def _norm_bank(value):
+        # El cliente casi nunca dice "Banco Santander" completo, dice "Santander" a
+        # secas — le sacamos el prefijo "banco " de los dos lados antes de comparar.
+        return _strip_prefix(value, "banco ")
+
+    def _norm_card_type(value):
+        # Mismo caso con "Tarjeta Naranja": el cliente suele decir solo "Naranja".
+        return _strip_prefix(value, "tarjeta ")
+
     body = request.get_json(silent=True) or {}
     card_type_raw = (body.get("card_type") or "").strip()
     bank_raw = (body.get("bank") or "").strip()
@@ -349,7 +364,9 @@ def card_installment():
         (
             ct
             for ct in card_types
-            if _norm(ct.name) == _norm(card_type_raw) or _norm(ct.code) == _norm(card_type_raw)
+            if _norm(ct.name) == _norm(card_type_raw)
+            or _norm(ct.code) == _norm(card_type_raw)
+            or _norm_card_type(ct.name) == _norm_card_type(card_type_raw)
         ),
         None,
     )
@@ -381,7 +398,7 @@ def card_installment():
             data={"card_type": ct_match.name, "banks": [b.name for b in banks]},
         )
 
-    bank_match = next((b for b in banks if _norm(b.name) == _norm(bank_raw)), None)
+    bank_match = next((b for b in banks if _norm_bank(b.name) == _norm_bank(bank_raw)), None)
     if not bank_match:
         return _err(
             f"El banco '{bank_raw}' no está disponible para {ct_match.name}",
