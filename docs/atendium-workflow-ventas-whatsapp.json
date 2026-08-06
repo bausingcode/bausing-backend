@@ -127,7 +127,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -201,7 +201,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -386,7 +386,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -586,7 +586,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -777,7 +777,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -904,7 +904,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -1063,7 +1063,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -1226,7 +1226,7 @@
               "custom_title": "Bausing - Resolver Zona",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pregunta puntualmente por envío/días para una dirección, o cuando ya eligió producto(s) y estás por cotizar/cerrar la compra y necesitás su dirección real para el total. NO hace falta llamarla solo para mostrar el catálogo con precios de referencia. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"

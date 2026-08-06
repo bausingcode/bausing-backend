@@ -40,6 +40,16 @@ def _err(message, http_status=400, data=None):
     return jsonify(body), http_status
 
 
+def _strip_gps(address):
+    """El bot de Atendium nunca debe resolver zona por lat/lon: no se le pide
+    ubicación GPS al cliente (solo dirección en texto), así que si el modelo manda
+    coordenadas igual (inventadas, para saltarse pedir la dirección real) las
+    ignoramos acá y forzamos el geocoding por el texto real que escribió el cliente."""
+    if not isinstance(address, dict):
+        return address
+    return {k: v for k, v in address.items() if k not in ("lat", "lon")}
+
+
 def _coerce_list(value):
     """El bot a veces manda arrays (items) serializados como string en vez de array
     real (JSON válido o incluso estilo Python con comillas simples). Si es un string
@@ -104,7 +114,7 @@ def health():
 @atendium_bp.route("/resolve-zone", methods=["POST"])
 @atendium_api_key_required
 def resolve_zone():
-    data = request.get_json(silent=True) or {}
+    data = _strip_gps(request.get_json(silent=True) or {})
     try:
         zone = commerce.resolve_zone_from_address(data)
         return _ok(zone, "Zona resuelta")
@@ -260,7 +270,7 @@ def validate_referral():
 @atendium_api_key_required
 def quote():
     body = request.get_json(silent=True) or {}
-    address = body.get("address") or body
+    address = _strip_gps(body.get("address") or body)
     items = _coerce_list(body.get("items"))
     payment_method = body.get("payment_method") or "transfer"
     coupon_code = body.get("coupon_code")
@@ -278,7 +288,7 @@ def quote():
 
     try:
         result = commerce.build_full_quote(
-            address=address if body.get("address") else body,
+            address=address,
             items=items,
             payment_method=payment_method,
             coupon_code=coupon_code,
@@ -419,7 +429,7 @@ def card_installment():
 def create_order():
     body = request.get_json(silent=True) or {}
     customer = body.get("customer") or {}
-    address = body.get("address") or {}
+    address = _strip_gps(body.get("address") or {})
     items = _coerce_list(body.get("items")) or []
     payment_method = (body.get("payment_method") or "transfer").lower()
     coupon_code = body.get("coupon_code")
