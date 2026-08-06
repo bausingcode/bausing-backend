@@ -876,6 +876,9 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
     }
 
 
+MAX_QUOTE_ITEMS = 5
+
+
 def build_full_quote(
     address: Dict[str, Any],
     items: List[Dict[str, Any]],
@@ -886,6 +889,12 @@ def build_full_quote(
 ) -> Dict[str, Any]:
     if not items:
         raise ValueError("items es requerido")
+    if len(items) > MAX_QUOTE_ITEMS:
+        raise ValueError(
+            f"Estás mandando {len(items)} productos distintos en el mismo pedido, eso no es normal — "
+            f"confirmá con el cliente cuál o cuáles productos puntuales quiere (máximo {MAX_QUOTE_ITEMS} "
+            "por pedido) antes de volver a cotizar"
+        )
     method = (payment_method or "transfer").lower()
     if method not in ("cash", "transfer", "card"):
         raise ValueError("payment_method debe ser cash, transfer o card")
