@@ -274,7 +274,7 @@ def quote():
     body = request.get_json(silent=True) or {}
     address = _strip_gps(body.get("address") or body)
     items = _coerce_list(body.get("items"))
-    payment_method = body.get("payment_method") or "transfer"
+    payment_method = body.get("payment_method")
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 
@@ -433,7 +433,7 @@ def create_order():
     customer = body.get("customer") or {}
     address = _strip_gps(body.get("address") or {})
     items = _coerce_list(body.get("items")) or []
-    payment_method = (body.get("payment_method") or "transfer").lower()
+    payment_method = (body.get("payment_method") or "").lower() or None
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 

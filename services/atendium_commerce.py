@@ -916,7 +916,9 @@ def build_full_quote(
             f"confirmá con el cliente cuál o cuáles productos puntuales quiere (máximo {MAX_QUOTE_ITEMS} "
             "por pedido) antes de volver a cotizar"
         )
-    method = (payment_method or "transfer").lower()
+    if not payment_method:
+        raise ValueError("payment_method es requerido: cash, transfer o card")
+    method = str(payment_method).lower()
     if method not in ("cash", "transfer", "card"):
         raise ValueError("payment_method debe ser cash, transfer o card")
 

@@ -8,7 +8,7 @@
       "name": "Cómo configurar",
       "type": "note",
       "config": {
-        "text": "Flujo: Router->Bienvenida->Catálogo (pide dirección ANTES de mostrar productos, así siempre muestra precio de referencia real)->Cotizar (total final con envío)->Orden.\nFuera de polígono = Catálogo País / Vía Cargo.\nLa dirección se pide ANTES de mostrar cualquier producto puntual (no antes de mostrar categorías/medidas, eso no necesita dirección). \"Bausing - Buscar Catalogo\"/\"Buscar Producto\" ya devuelven price_transfer/price_card cuando se les pasa locality_id — mostrar productos sin precio no aporta nada.\nAntes de preguntar medida/subcategoría de un producto, consultar 'Bausing - Categorías y Subcategorías' y usar solo esas opciones reales.\nLos datos que van directo a un parámetro de una tool (customer, address, items, etc.) se piden todos juntos en un solo mensaje natural, nunca campo por campo; la tool los reparte según su propia config de parámetros (@AI(...), optional:false/true).\nNunca pedir latitud/longitud ni ubicación por texto.\nSin markdown/fotos en listados. Prohibido inventar cualquier dato (medidas, categorías, zona, envío, días, precios, stock, datos del cliente). Sin DNI antes de cotizar.\nstartNodeId=2"
+        "text": "Flujo: Router->Bienvenida->1a. Resolver Zona (nodo dedicado, con requiredSlots=[address]: no deja avanzar sin una dirección real; guarda facts.customer_address y facts.locality_id)->1. Catálogo (ya asume zona resuelta, muestra productos SIEMPRE con precio real)->2. Cotizar (total final con envío)->3. Orden.\nFuera de polígono = Catálogo País / Vía Cargo (igual requiere geocoding real, no se salta el paso de Resolver Zona).\n\"Bausing - Buscar Catalogo\"/\"Buscar Producto\" exigen locality_id válido — el backend rechaza la búsqueda si no es un id real de una localidad con catálogo asignado (no hay fallback silencioso a un catálogo por defecto).\nAntes de preguntar medida/subcategoría de un producto, consultar 'Bausing - Categorías y Subcategorías' (no necesita dirección, son solo nombres) y usar solo esas opciones reales.\nLos datos que van directo a un parámetro de una tool (customer, address, items, etc.) se piden todos juntos en un solo mensaje natural, nunca campo por campo; la tool los reparte según su propia config de parámetros (@AI(...), optional:false/true).\nNunca pedir latitud/longitud ni ubicación por texto — Resolver Zona ignora lat/lon aunque se manden.\nSin markdown/fotos en listados. Prohibido inventar cualquier dato (medidas, categorías, zona, envío, días, precios, stock, datos del cliente). Sin DNI antes de cotizar.\nstartNodeId=2"
       },
       "position": {
         "x": 20,
@@ -23,16 +23,32 @@
         "cases": [
           {
             "id": "201",
-            "label": "Nueva compra / cotizar",
+            "label": "Quiere comprar / cerrar pedido",
             "examples": [
               "quiero comprar",
-              "tienen sillones?",
-              "cuánto sale el envío",
-              "quiero cotizar",
-              "hola quiero ver el catálogo"
+              "quiero llevar el colchón Alpes",
+              "dale, lo compro",
+              "quiero cerrar el pedido",
+              "quiero pagar",
+              "lo quiero, cómo hago para comprarlo"
             ],
             "expression": "",
-            "description": "Quiere comprar, cotizar, ver productos, precios, stock, envío o armar un pedido."
+            "description": "El cliente ya decidió comprar o quiere cerrar una compra ahora — intención explícita de compra, no solo estar mirando o preguntando precios."
+          },
+          {
+            "id": "204",
+            "label": "Ver productos / consultar precios, envío o días",
+            "examples": [
+              "tienen sillones?",
+              "cuánto sale el envío",
+              "qué colchones tienen",
+              "en cuántos días llega",
+              "quiero ver el catálogo",
+              "cuánto sale el colchón X",
+              "quiero ver precios"
+            ],
+            "expression": "",
+            "description": "Quiere ver productos, consultar precios, costo de envío o días de entrega, sin haber dicho todavía que quiere comprar."
           },
           {
             "id": "202",
@@ -329,44 +345,6 @@
             "selected_credentials": {}
           },
           {
-            "id": "106",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
-                "body": {
-                  "address": {
-                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
-                  },
-                  "items": [
-                    {
-                      "product_id": "@AI(\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\", optional:false)",
-                      "quantity": "@AI(\"cantidad, normalmente 1\", optional:true)"
-                    }
-                  ],
-                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 20000
-              },
-              "custom_title": "Bausing - Cotizar Pedido",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente ya eligió uno o más productos concretos (con product_id real) y necesitás el total final con envío y plazo antes de crear la orden. Requiere address + items; NO requiere email, lat/lon ni cupón. NO la confundas con Resolver Zona (esa es solo para saber días/envío de una dirección sin productos). POST /quote.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          },
-          {
             "id": "101",
             "active": true,
             "metadata": {
@@ -465,7 +443,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO:\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) NUNCA llames \"Bausing - Buscar Catalogo\" ni \"Bausing - Buscar Producto\" (las que traen productos) sin la ZONA YA RESUELTA — así el precio que le mostrás al cliente ya es real para su ubicación, y mostrar productos sin precio no sirve de nada. Si todavía no tenés la dirección del cliente, pedísela completa (calle y número, ciudad, provincia y código postal, todo junto) y llamá \"Bausing - Resolver Zona\" ANTES de mostrar ningún producto. \"Bausing - Categorías y Subcategorías\" es la única excepción: esa sí podés llamarla sin dirección, porque solo devuelve nombres de medidas/categorías, no productos ni precios.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n1) Cliente menciona categoría general, con o sin medida en el mismo mensaje (ej. \"colchones\", o \"colchones de 2 plazas\") → llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\" (sin necesitar dirección) — incluso si el cliente ya dijo la medida en el mismo mensaje, nunca te la saltees ni asumas cuál es el id. Si el cliente ya dijo la medida, buscá en la respuesta de esa tool la subcategoría cuyo nombre coincide (ej. \"2 plazas\") y usá SU id real; si no dijo la medida, mostrale los nombres reales de subcategorías y preguntale cuál quiere (nunca asumas).\n2) Con el id real de la subcategoría elegida (o si el cliente nombró un producto puntual por su nombre): ACÁ, antes de buscar productos, si todavía no tenés la dirección del cliente en esta conversación, pedísela completa en un solo mensaje y llamá \"Bausing - Resolver Zona\". Con la zona ya resuelta, llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id real + locality_id, o \"Bausing - Buscar Producto\" con q = el nombre que dijo + locality_id si nombró un producto puntual (nunca Buscar Catalogo para eso). Si por algún motivo no tenés el id real de la subcategoría todavía, NO llames Buscar Catalogo con el texto que dijo el cliente (eso rompe el filtro y trae resultados de cualquier categoría) — volvé a llamar Categorías y Subcategorías primero.\n3) La tool puede devolver muchos productos, pero vos mostrale al cliente SOLO 3 o 4 nombres reales de esa lista (no la tool completa) junto con su precio real (price_transfer; si no hay, price_card), sin descripciones inventadas, y ofrecele ver más si quiere:\n   Estas son algunas opciones:\n   1) Nombre — $precio\n   2) Nombre — $precio\n   3) Nombre — $precio\n   Si querés te muestro más opciones.\n   Si el cliente pide más, mostrale otros 3-4 que no hayas mostrado todavía (misma respuesta de la tool, no vuelvas a llamarla). Ese precio es de referencia (todavía no incluye envío) — el total final (con envío) sigue saliendo de \"Bausing - Cotizar Pedido\" una vez que el cliente confirma un producto puntual.\n4) Antes de dar el TOTAL FINAL (con envío), el cliente tiene que haber elegido UN producto puntual de la lista (si pidió \"los precios\" de varios o de toda la lista, preguntale primero cuál le interesa — la tool de cotizar solo admite UN producto por llamada, así que nunca puede ser más de uno). \"Quiero ver los precios\" o \"dame el precio de esos\" (sobre una lista que vos mostraste) NO es pedir un combo: es pedir que le muestres el precio de a uno, así que preguntale primero cuál de esos le interesa (la tool solo cotiza un producto por llamada de todos modos). Una vez que elige uno, llamá \"Bausing - Cotizar Pedido\" con ese product_id (cantidad 1 salvo que haya pedido más) — la zona ya la tenés resuelta del paso 2, y la tool te pide lo que le falte (forma de pago) a través de sus propios parámetros, vos no armes esa pregunta a mano. Si todavía NO confirmó ningún producto puntual, NO llames Cotizar Pedido.\n\nSi el cliente dice EXPLÍCITAMENTE que quiere pagar con tarjeta (nunca lo ofrezcas de arranque, ni lo menciones solo porque preguntó un precio, ni como reacción a que otra tool falló): llamá \"Bausing - Validar Cuotas Tarjeta\" — esta tool te va a pedir directo al cliente (todo junto, en un solo mensaje natural) lo que le falte de tarjeta/banco/cuotas, y valida contra el catálogo real, así que vos NUNCA tenés que adivinar, comparar ni decidir vos si un banco o tarjeta existe. Si la tool devuelve error (dato faltante, tarjeta/banco/cuotas inexistente, o banco ambiguo entre varias tarjetas), contale al cliente las opciones reales que vino en el error y dejá que elija — nunca inventes una alternativa vos. Cuando la tool devuelve éxito, ya tenés tarjeta+banco+cuotas+recargoPorcentaje validados: llamá \"Bausing - Cotizar Pedido\" con payment_method card para obtener el precio base con tarjeta, y aplicale ese recargo: total = precio_tarjeta_base × (1 + recargoPorcentaje/100); si son varias cuotas, contale también cuánto es cada cuota (total / cuotas). Si el recargo es 0%, el total es el precio con tarjeta tal cual.\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual. Cuando \"Bausing - Resolver Zona\" (o \"Bausing - Cotizar Pedido\") te devuelva una zona válida, guardá esa dirección real tal cual la escribió el cliente como facts.customer_address — así no hace falta volver a preguntarla de cero más adelante en la conversación.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles. Sobre facts.cart_items: agregá un producto ahí SOLO cuando el cliente dijo explícitamente que lo quiere comprar/llevar (ej. \"quiero ese\", \"lo llevo\", \"dale, ese\") — nunca por haberlo mostrado en una lista, ni porque preguntó el precio, ni porque lo mencionó de pasada. Consultar precios o ver opciones NO agrega nada al carrito.\n\nDar un precio (efectivo, transferencia o tarjeta, con o sin cuotas) NO es lo mismo que cerrar una compra. Si el cliente solo está preguntando precio, forma de pago o cuotas, respondé eso y quedate ahí — nunca le preguntes \"¿querés confirmar la compra?\" ni nada parecido al final. Solo se avanza a cerrar el pedido cuando el cliente dice explícitamente que quiere comprar (ahí lo maneja el nodo de crear orden).",
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO:\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) La zona YA está resuelta cuando llegás a este nodo (el paso anterior, \"1a. Resolver Zona\", no te deja avanzar sin eso) — vas a tener facts.customer_address y facts.locality_id disponibles. Usalos directo en \"Bausing - Buscar Catalogo\"/\"Bausing - Buscar Producto\" (parámetro locality_id), nunca vuelvas a pedirle la dirección al cliente salvo que él mismo diga que quiere cambiarla o corregirla — en ese caso sí, llamá \"Bausing - Resolver Zona\" de nuevo con la dirección nueva y actualizá esos facts.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n0) NUNCA llames \"Bausing - Cotizar Pedido\" (ni ninguna tool con product_id) sin haber llamado ANTES \"Bausing - Buscar Catalogo\" o \"Bausing - Buscar Producto\" en ESTA conversación y tener el product_id real que devolvió esa tool — nunca un id armado por vos (nada de slugs tipo \"colchon-2-plazas\", eso no existe). Y NUNCA digas \"no tengo disponible\" / \"no encontré\" sin haber llamado realmente esas tools primero: decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n1) Cliente menciona categoría general, con o sin medida en el mismo mensaje (ej. \"colchones\", o \"colchones de 2 plazas\") → llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\" (sin necesitar dirección) — incluso si el cliente ya dijo la medida en el mismo mensaje, nunca te la saltees ni asumas cuál es el id. Si el cliente ya dijo la medida, buscá en la respuesta de esa tool la subcategoría cuyo nombre coincide (ej. \"2 plazas\") y usá SU id real; si no dijo la medida, mostrale los nombres reales de subcategorías y preguntale cuál quiere (nunca asumas).\n2) Con el id real de la subcategoría elegida (o si el cliente nombró un producto puntual por su nombre): llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id real + locality_id (facts.locality_id, ya resuelto), o \"Bausing - Buscar Producto\" con q = el nombre que dijo + locality_id si nombró un producto puntual (nunca Buscar Catalogo para eso). Si por algún motivo no tenés el id real de la subcategoría todavía, NO llames Buscar Catalogo con el texto que dijo el cliente (eso rompe el filtro y trae resultados de cualquier categoría) — volvé a llamar Categorías y Subcategorías primero.\n3) La tool puede devolver muchos productos, pero vos mostrale al cliente SOLO 3 o 4 nombres reales de esa lista (no la tool completa) junto con su precio real (price_transfer; si no hay, price_card), sin descripciones inventadas, y ofrecele ver más si quiere:\n   Estas son algunas opciones:\n   1) Nombre — $precio\n   2) Nombre — $precio\n   3) Nombre — $precio\n   Si querés te muestro más opciones.\n   Si el cliente pide más, mostrale otros 3-4 que no hayas mostrado todavía (misma respuesta de la tool, no vuelvas a llamarla). Ese precio es de referencia (todavía no incluye envío) — el total final (con envío) sigue saliendo de \"Bausing - Cotizar Pedido\" una vez que el cliente confirma un producto puntual.\n4) Antes de dar el TOTAL FINAL (con envío), el cliente tiene que haber elegido UN producto puntual de la lista (si pidió \"los precios\" de varios o de toda la lista, preguntale primero cuál le interesa — la tool de cotizar solo admite UN producto por llamada, así que nunca puede ser más de uno). \"Quiero ver los precios\" o \"dame el precio de esos\" (sobre una lista que vos mostraste) NO es pedir un combo: es pedir que le muestres el precio de a uno, así que preguntale primero cuál de esos le interesa (la tool solo cotiza un producto por llamada de todos modos). Una vez que elige uno, llamá \"Bausing - Cotizar Pedido\" con ese product_id (cantidad 1 salvo que haya pedido más) — la zona ya la tenés resuelta del paso 2, y la tool te pide lo que le falte (forma de pago) a través de sus propios parámetros, vos no armes esa pregunta a mano. Si todavía NO confirmó ningún producto puntual, NO llames Cotizar Pedido.\n\nSi el cliente dice EXPLÍCITAMENTE que quiere pagar con tarjeta (nunca lo ofrezcas de arranque, ni lo menciones solo porque preguntó un precio, ni como reacción a que otra tool falló): llamá \"Bausing - Validar Cuotas Tarjeta\" — esta tool te va a pedir directo al cliente (todo junto, en un solo mensaje natural) lo que le falte de tarjeta/banco/cuotas, y valida contra el catálogo real, así que vos NUNCA tenés que adivinar, comparar ni decidir vos si un banco o tarjeta existe. Si la tool devuelve error (dato faltante, tarjeta/banco/cuotas inexistente, o banco ambiguo entre varias tarjetas), contale al cliente las opciones reales que vino en el error y dejá que elija — nunca inventes una alternativa vos. Cuando la tool devuelve éxito, ya tenés tarjeta+banco+cuotas+recargoPorcentaje validados: llamá \"Bausing - Cotizar Pedido\" con payment_method card para obtener el precio base con tarjeta, y aplicale ese recargo: total = precio_tarjeta_base × (1 + recargoPorcentaje/100); si son varias cuotas, contale también cuánto es cada cuota (total / cuotas). Si el recargo es 0%, el total es el precio con tarjeta tal cual.\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi el cliente dice que quiere cambiar o corregir su dirección (ya la tenías resuelta del paso anterior): LLAMÁ \"Bausing - Resolver Zona\" de nuevo con la nueva dirección completa que te dé — no asumas antes de tenerla. Si devuelve un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual. Cuando te devuelva una zona válida, actualizá facts.customer_address y facts.locality_id con los valores nuevos.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles. Sobre facts.cart_items: agregá un producto ahí SOLO cuando el cliente dijo explícitamente que lo quiere comprar/llevar (ej. \"quiero ese\", \"lo llevo\", \"dale, ese\") — nunca por haberlo mostrado en una lista, ni porque preguntó el precio, ni porque lo mencionó de pasada. Consultar precios o ver opciones NO agrega nada al carrito.\n\nDar un precio (efectivo, transferencia o tarjeta, con o sin cuotas) NO es lo mismo que cerrar una compra. Si el cliente solo está preguntando precio, forma de pago o cuotas, respondé eso y quedate ahí — nunca le preguntes \"¿querés confirmar la compra?\" ni nada parecido al final. Solo se avanza a cerrar el pedido cuando el cliente dice explícitamente que quiere comprar (ahí lo maneja el nodo de crear orden).",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "savedVariables": [],
@@ -520,44 +498,6 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          },
-          "106": {
-            "id": "106",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
-                "body": {
-                  "address": {
-                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
-                  },
-                  "items": [
-                    {
-                      "product_id": "@AI(\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\", optional:false)",
-                      "quantity": "@AI(\"cantidad, normalmente 1\", optional:true)"
-                    }
-                  ],
-                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 20000
-              },
-              "custom_title": "Bausing - Cotizar Pedido",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente ya eligió uno o más productos concretos (con product_id real) y necesitás el total final con envío y plazo antes de crear la orden. Requiere address + items; NO requiere email, lat/lon ni cupón. NO la confundas con Resolver Zona (esa es solo para saber días/envío de una dirección sin productos). POST /quote.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -1497,14 +1437,629 @@
         "x": 2007.5,
         "y": -33.75
       }
+    },
+    {
+      "id": "12",
+      "name": "1a. Resolver Zona",
+      "type": "agent",
+      "config": {
+        "tools": [],
+        "factKeys": [
+          "customer_address",
+          "locality_id"
+        ],
+        "factLabels": {
+          "customer_address": "Dirección de entrega",
+          "locality_id": "ID de localidad"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output",
+            "zone_resolved"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "zone_resolved": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO — es un paso obligatorio, nadie pasa de acá sin dirección resuelta:\nPASO A: ¿El cliente, en ESTE mensaje o en uno anterior de esta conversación, ya escribió su dirección (calle + ciudad, aunque sea junto con otra cosa)? → SÍ: llamá \"Bausing - Resolver Zona\" AHORA MISMO con esa dirección tal cual la escribió (único parámetro: address). → NO (dijo cosas como \"quiero comprar\", \"hola\", \"dale\", \"si\", \"mostrame\", o cualquier frase sin calle/ciudad): NO llames la tool — respondé pidiéndole la dirección completa (calle y número, ciudad, provincia y código postal, todo en un mensaje) y esperá.\nNo hay un paso intermedio: o tenés calle+ciudad reales y llamás la tool, o no las tenés y solo preguntás. Nunca llames la tool con el campo address vacío o con un mensaje que no sea una dirección.\n\nSi la tool devuelve un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana.\n\nCuando la tool te devuelva una zona válida, guardá SIEMPRE: facts.customer_address = la dirección real tal cual la escribió el cliente, y facts.locality_id = el id de localidad que te devolvió la tool (zona.locality.id). Recién ahí termina este paso — el siguiente nodo ya se encarga de mostrarle el catálogo con precios reales.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "address",
+            "label": "Dirección completa",
+            "description": "Calle y número, ciudad, provincia y código postal del cliente"
+          }
+        ],
+        "savedVariables": [],
+        "continueCondition": "El cliente ya dio una dirección real (no una confirmación vaga tipo \"si\"/\"dale\"/\"mostrame\") y \"Bausing - Resolver Zona\" la resolvió con éxito, guardando facts.customer_address y facts.locality_id.",
+        "dataSourceConfigs": {
+          "101": {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 524,
+        "y": 100
+      }
+    },
+    {
+      "id": "13",
+      "name": "2a. Resolver Zona (Compra)",
+      "type": "agent",
+      "config": {
+        "tools": [],
+        "factKeys": [
+          "customer_address",
+          "locality_id"
+        ],
+        "factLabels": {
+          "customer_address": "Dirección de entrega",
+          "locality_id": "ID de localidad"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output",
+            "zone_resolved"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "zone_resolved": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO — es un paso obligatorio, nadie pasa de acá sin dirección resuelta:\nPASO A: ¿El cliente, en ESTE mensaje o en uno anterior de esta conversación, ya escribió su dirección (calle + ciudad, aunque sea junto con otra cosa)? → SÍ: llamá \"Bausing - Resolver Zona\" AHORA MISMO con esa dirección tal cual la escribió (único parámetro: address). → NO (dijo cosas como \"quiero comprar\", \"hola\", \"dale\", \"si\", \"mostrame\", o cualquier frase sin calle/ciudad): NO llames la tool — respondé pidiéndole la dirección completa (calle y número, ciudad, provincia y código postal, todo en un mensaje) y esperá.\nNo hay un paso intermedio: o tenés calle+ciudad reales y llamás la tool, o no las tenés y solo preguntás. Nunca llames la tool con el campo address vacío o con un mensaje que no sea una dirección.\n\nSi la tool devuelve un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana.\n\nCuando la tool te devuelva una zona válida, guardá SIEMPRE: facts.customer_address = la dirección real tal cual la escribió el cliente, y facts.locality_id = el id de localidad que te devolvió la tool (zona.locality.id). Recién ahí termina este paso — el siguiente nodo ya se encarga de mostrarle el catálogo (el cliente ya dijo que quiere comprar, así que priorizá ayudarlo a identificar y cerrar el producto puntual).",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "address",
+            "label": "Dirección completa",
+            "description": "Calle y número, ciudad, provincia y código postal del cliente"
+          }
+        ],
+        "savedVariables": [],
+        "continueCondition": "El cliente ya dio una dirección real (no una confirmación vaga tipo \"si\"/\"dale\"/\"mostrame\") y \"Bausing - Resolver Zona\" la resolvió con éxito, guardando facts.customer_address y facts.locality_id.",
+        "dataSourceConfigs": {
+          "101": {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 900,
+        "y": -150
+      }
+    },
+    {
+      "id": "14",
+      "name": "2b. Catálogo (Compra)",
+      "type": "agent",
+      "config": {
+        "tools": [],
+        "factKeys": [
+          "cart_items",
+          "product_id",
+          "quote_total",
+          "shipping_cost",
+          "estimated_delivery_label",
+          "customer_address",
+          "locality_id"
+        ],
+        "factLabels": {
+          "cart_items": "Items del carrito",
+          "customer_address": "Dirección de entrega",
+          "locality_id": "ID de localidad"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "102",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "subcategory_id": "@AI(\"id de la subcategoría/medida elegida\", optional:false)",
+                  "locality_id": "@AI(\"locality_id ya resuelto en esta conversación con Bausing - Resolver Zona\", optional:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Catalogo",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió una subcategoría/medida concreta de las que le mostraste (de \"Bausing - Categorías y Subcategorías\"), ej. \"2 plazas\". Filtra de forma EXACTA y estructurada por esa subcategoría (no es texto libre, es el id real). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales de cada producto — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "111",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false)",
+                  "locality_id": "@AI(\"locality_id ya resuelto en esta conversación con Bausing - Resolver Zona\", optional:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "103",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/@AI(\"product_id\", optional:false)",
+                "query": {},
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Detalle de Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pidió una categoría general de producto (ej. colchones, sommiers) y todavía no dijo la medida/subcategoría, o cuando necesités saber qué categorías/medidas existen realmente antes de preguntar. Devuelve categorías PADRE con sus subcategorías anidadas. El id de cada SUBCATEGORÍA (ej. \"Dos plazas\") es el que después pasás como subcategory_id a \"Bausing - Buscar Catalogo\" para filtrar productos de esa medida exacta. Nunca inventes medidas o categorías: preguntá solo con lo que devuelve esta tool. GET /categories.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "112",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
+                "body": {
+                  "card_type": "@AI(\"con qué tarjeta paga: Visa, Mastercard, Naranja, etc.\", optional:false)",
+                  "bank": "@AI(\"con qué banco paga\", optional:false)",
+                  "installments": "@AI(\"en cuántas cuotas paga\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Validar Cuotas Tarjeta",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO: el cliente YA dijo que quiere comprar (vino del camino de compra) — ayudalo a identificar el producto puntual lo más directo posible, sin dejar de seguir las reglas de abajo.\n\n1) NUNCA mandes ni menciones una foto/imagen de un producto salvo que el cliente la pida explícitamente para ESE producto puntual (ahí sí \"Bausing - Detalle de Producto\", su main_image).\n2) La zona YA está resuelta cuando llegás a este nodo (el paso anterior, \"1a. Resolver Zona\", no te deja avanzar sin eso) — vas a tener facts.customer_address y facts.locality_id disponibles. Usalos directo en \"Bausing - Buscar Catalogo\"/\"Bausing - Buscar Producto\" (parámetro locality_id), nunca vuelvas a pedirle la dirección al cliente salvo que él mismo diga que quiere cambiarla o corregirla — en ese caso sí, llamá \"Bausing - Resolver Zona\" de nuevo con la dirección nueva y actualizá esos facts.\n\nLa medida/subcategoría (ej. \"2 plazas\") se filtra por su ID real vía subcategory_id — filtro exacto, nunca texto libre.\n\nFLUJO:\n0) NUNCA llames \"Bausing - Cotizar Pedido\" (ni ninguna tool con product_id) sin haber llamado ANTES \"Bausing - Buscar Catalogo\" o \"Bausing - Buscar Producto\" en ESTA conversación y tener el product_id real que devolvió esa tool — nunca un id armado por vos (nada de slugs tipo \"colchon-2-plazas\", eso no existe). Y NUNCA digas \"no tengo disponible\" / \"no encontré\" sin haber llamado realmente esas tools primero: decir que algo no existe sin buscarlo es inventar igual que decir que sí existe.\n1) Cliente menciona categoría general, con o sin medida en el mismo mensaje (ej. \"colchones\", o \"colchones de 2 plazas\") → llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\" (sin necesitar dirección) — incluso si el cliente ya dijo la medida en el mismo mensaje, nunca te la saltees ni asumas cuál es el id. Si el cliente ya dijo la medida, buscá en la respuesta de esa tool la subcategoría cuyo nombre coincide (ej. \"2 plazas\") y usá SU id real; si no dijo la medida, mostrale los nombres reales de subcategorías y preguntale cuál quiere (nunca asumas).\n2) Con el id real de la subcategoría elegida (o si el cliente nombró un producto puntual por su nombre): llamá \"Bausing - Buscar Catalogo\" con subcategory_id = el id real + locality_id (facts.locality_id, ya resuelto), o \"Bausing - Buscar Producto\" con q = el nombre que dijo + locality_id si nombró un producto puntual (nunca Buscar Catalogo para eso). Si por algún motivo no tenés el id real de la subcategoría todavía, NO llames Buscar Catalogo con el texto que dijo el cliente (eso rompe el filtro y trae resultados de cualquier categoría) — volvé a llamar Categorías y Subcategorías primero.\n3) La tool puede devolver muchos productos, pero vos mostrale al cliente SOLO 3 o 4 nombres reales de esa lista (no la tool completa) junto con su precio real (price_transfer; si no hay, price_card), sin descripciones inventadas, y ofrecele ver más si quiere:\n   Estas son algunas opciones:\n   1) Nombre — $precio\n   2) Nombre — $precio\n   3) Nombre — $precio\n   Si querés te muestro más opciones.\n   Si el cliente pide más, mostrale otros 3-4 que no hayas mostrado todavía (misma respuesta de la tool, no vuelvas a llamarla). Ese precio es de referencia (todavía no incluye envío) — el total final (con envío) sigue saliendo de \"Bausing - Cotizar Pedido\" una vez que el cliente confirma un producto puntual.\n4) Antes de dar el TOTAL FINAL (con envío), el cliente tiene que haber elegido UN producto puntual de la lista (si pidió \"los precios\" de varios o de toda la lista, preguntale primero cuál le interesa — la tool de cotizar solo admite UN producto por llamada, así que nunca puede ser más de uno). \"Quiero ver los precios\" o \"dame el precio de esos\" (sobre una lista que vos mostraste) NO es pedir un combo: es pedir que le muestres el precio de a uno, así que preguntale primero cuál de esos le interesa (la tool solo cotiza un producto por llamada de todos modos). Una vez que elige uno, llamá \"Bausing - Cotizar Pedido\" con ese product_id (cantidad 1 salvo que haya pedido más) — la zona ya la tenés resuelta del paso 2, y la tool te pide lo que le falte (forma de pago) a través de sus propios parámetros, vos no armes esa pregunta a mano. Si todavía NO confirmó ningún producto puntual, NO llames Cotizar Pedido.\n\nSi el cliente dice EXPLÍCITAMENTE que quiere pagar con tarjeta (nunca lo ofrezcas de arranque, ni lo menciones solo porque preguntó un precio, ni como reacción a que otra tool falló): llamá \"Bausing - Validar Cuotas Tarjeta\" — esta tool te va a pedir directo al cliente (todo junto, en un solo mensaje natural) lo que le falte de tarjeta/banco/cuotas, y valida contra el catálogo real, así que vos NUNCA tenés que adivinar, comparar ni decidir vos si un banco o tarjeta existe. Si la tool devuelve error (dato faltante, tarjeta/banco/cuotas inexistente, o banco ambiguo entre varias tarjetas), contale al cliente las opciones reales que vino en el error y dejá que elija — nunca inventes una alternativa vos. Cuando la tool devuelve éxito, ya tenés tarjeta+banco+cuotas+recargoPorcentaje validados: llamá \"Bausing - Cotizar Pedido\" con payment_method card para obtener el precio base con tarjeta, y aplicale ese recargo: total = precio_tarjeta_base × (1 + recargoPorcentaje/100); si son varias cuotas, contale también cuánto es cada cuota (total / cuotas). Si el recargo es 0%, el total es el precio con tarjeta tal cual.\n\nSi subcategory_id no da resultados, probá una vez con \"Bausing - Buscar Producto\" (nombre genérico, ej. \"colchón\") antes de decir que no hay nada.\n\nSi el cliente dice que quiere cambiar o corregir su dirección (ya la tenías resuelta del paso anterior): LLAMÁ \"Bausing - Resolver Zona\" de nuevo con la nueva dirección completa que te dé — no asumas antes de tenerla. Si devuelve un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual. Cuando te devuelva una zona válida, actualizá facts.customer_address y facts.locality_id con los valores nuevos.\n\n\"Bausing - Buscar Catalogo\" solo necesita subcategory_id. \"Bausing - Buscar Producto\" solo necesita q. No los mezcles. Sobre facts.cart_items: agregá un producto ahí SOLO cuando el cliente dijo explícitamente que lo quiere comprar/llevar (ej. \"quiero ese\", \"lo llevo\", \"dale, ese\") — nunca por haberlo mostrado en una lista, ni porque preguntó el precio, ni porque lo mencionó de pasada. Consultar precios o ver opciones NO agrega nada al carrito.\n\nDar un precio (efectivo, transferencia o tarjeta, con o sin cuotas) NO es lo mismo que cerrar una compra. Si el cliente solo está preguntando precio, forma de pago o cuotas, respondé eso y quedate ahí — nunca le preguntes \"¿querés confirmar la compra?\" ni nada parecido al final. Solo se avanza a cerrar el pedido cuando el cliente dice explícitamente que quiere comprar (ahí lo maneja el nodo de crear orden).",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [],
+        "savedVariables": [],
+        "continueCondition": "El cliente eligió un producto concreto (con product_id) y quiere cotizar/cerrar. Si pregunta envío/días de otra ciudad, resolvé zona y NO continues a crear orden.",
+        "dataSourceConfigs": {
+          "102": {
+            "id": "102",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "subcategory_id": "@AI(\"id de la subcategoría/medida elegida\", optional:false)",
+                  "locality_id": "@AI(\"locality_id ya resuelto en esta conversación con Bausing - Resolver Zona\", optional:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Catalogo",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió una subcategoría/medida concreta de las que le mostraste (de \"Bausing - Categorías y Subcategorías\"), ej. \"2 plazas\". Filtra de forma EXACTA y estructurada por esa subcategoría (no es texto libre, es el id real). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales de cada producto — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "103": {
+            "id": "103",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/@AI(\"product_id\", optional:false)",
+                "query": {},
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Detalle de Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "101": {
+            "id": "101",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 25000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente va a ver productos puntuales (necesitás su dirección real ANTES de mostrar el catálogo con precios — ya no se muestra sin zona resuelta), pregunta puntualmente por envío/días, o está por cotizar/cerrar la compra. El único parámetro real es address (el texto tal cual escribió el cliente) — esta tool ignora lat/lon, así que nunca mandes coordenadas, solo el texto de la dirección. Hay que volver a llamarla si el cliente cambia de dirección o ciudad. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "110": {
+            "id": "110",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Categorías y Subcategorías",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pidió una categoría general de producto (ej. colchones, sommiers) y todavía no dijo la medida/subcategoría, o cuando necesités saber qué categorías/medidas existen realmente antes de preguntar. Devuelve categorías PADRE con sus subcategorías anidadas. El id de cada SUBCATEGORÍA (ej. \"Dos plazas\") es el que después pasás como subcategory_id a \"Bausing - Buscar Catalogo\" para filtrar productos de esa medida exacta. Nunca inventes medidas o categorías: preguntá solo con lo que devuelve esta tool. GET /categories.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "111": {
+            "id": "111",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false)",
+                  "locality_id": "@AI(\"locality_id ya resuelto en esta conversación con Bausing - Resolver Zona\", optional:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "112": {
+            "id": "112",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
+                "body": {
+                  "card_type": "@AI(\"con qué tarjeta paga: Visa, Mastercard, Naranja, etc.\", optional:false)",
+                  "bank": "@AI(\"con qué banco paga\", optional:false)",
+                  "installments": "@AI(\"en cuántas cuotas paga\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Validar Cuotas Tarjeta",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 1150,
+        "y": -150
+      }
     }
   ],
   "edges": [
-    {
-      "to": "11",
-      "from": "2",
-      "sourceHandle": "201"
-    },
     {
       "to": "11",
       "from": "2",
@@ -1540,7 +2095,29 @@
     },
     {
       "from": "11",
+      "to": "12"
+    },
+    {
+      "from": "12",
       "to": "4"
+    },
+    {
+      "from": "2",
+      "to": "13",
+      "sourceHandle": "201"
+    },
+    {
+      "from": "2",
+      "to": "12",
+      "sourceHandle": "204"
+    },
+    {
+      "from": "13",
+      "to": "14"
+    },
+    {
+      "from": "14",
+      "to": "6"
     }
   ],
   "finalOutputSchema": {
