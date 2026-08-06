@@ -137,6 +137,8 @@ def catalog_search():
             per_page=request.args.get("per_page", 20, type=int),
         )
         return _ok(result)
+    except ValueError as e:
+        return _err(str(e), 400)
     except Exception as e:
         return _err(f"Error al buscar catálogo: {e}", 500)
 

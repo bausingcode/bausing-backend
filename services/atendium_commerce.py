@@ -771,10 +771,28 @@ def search_products(
     page: int = 1,
     per_page: int = 20,
 ) -> Dict[str, Any]:
+    from models.catalog import LocalityCatalog
     from routes.products import product_text_search_filter
 
     page = max(1, int(page or 1))
     per_page = min(max(1, int(per_page or 20)), 50)
+
+    # El bot de Atendium tiene que mostrar SIEMPRE precios reales de la localidad del
+    # cliente, nunca un default silencioso: si locality_id no viene, no es un UUID
+    # válido, o no corresponde a ninguna localidad real con catálogo asignado, no
+    # dejamos pasar la búsqueda — así nunca se le muestra al bot (y de ahí al
+    # cliente) una lista de productos "con precio" que en realidad es un fallback
+    # genérico por no haber resuelto una dirección real todavía.
+    loc_uuid = None
+    try:
+        loc_uuid = uuid.UUID(str(locality_id)) if locality_id else None
+    except (ValueError, TypeError):
+        loc_uuid = None
+    if not loc_uuid or not LocalityCatalog.query.filter_by(locality_id=loc_uuid).first():
+        raise ValueError(
+            "locality_id inválido o faltante: hace falta una dirección real del cliente, "
+            "ya resuelta con Bausing - Resolver Zona, antes de poder mostrar productos con precio"
+        )
 
     query = Product.query.filter(Product.is_active.is_(True), Product.crm_product_id.isnot(None))
     if q and q.strip():
