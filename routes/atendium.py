@@ -297,6 +297,123 @@ def quote():
         return _err(f"Error al cotizar: {e}", 500)
 
 
+@atendium_bp.route("/card-installment", methods=["POST"])
+@atendium_api_key_required
+def card_installment():
+    """Valida tarjeta+banco+cuotas contra el catálogo real de card_bank_installments
+    y devuelve el % de recargo. A diferencia de /card-bank-installments (que vuelca
+    todo el catálogo para que el bot lo interprete), acá el backend hace el match
+    exacto — así el bot no depende de auditar él mismo un JSON grande, y si falta o
+    no existe algún dato, el error ya trae las opciones reales para esa combinación."""
+    import unicodedata
+
+    from models.bank import Bank
+    from models.card_bank_installment import CardBankInstallment
+    from models.card_type import CardType
+
+    def _norm(value):
+        text = unicodedata.normalize("NFKD", value or "")
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        return " ".join(text.strip().lower().split())
+
+    body = request.get_json(silent=True) or {}
+    card_type_raw = (body.get("card_type") or "").strip()
+    bank_raw = (body.get("bank") or "").strip()
+    installments_raw = body.get("installments")
+
+    card_types = (
+        CardType.query.filter_by(is_active=True)
+        .order_by(CardType.display_order, CardType.name)
+        .all()
+    )
+    if not card_type_raw:
+        return _err(
+            "Falta indicar con qué tarjeta paga",
+            400,
+            data={"card_types": [ct.name for ct in card_types]},
+        )
+
+    ct_match = next(
+        (
+            ct
+            for ct in card_types
+            if _norm(ct.name) == _norm(card_type_raw) or _norm(ct.code) == _norm(card_type_raw)
+        ),
+        None,
+    )
+    if not ct_match:
+        return _err(
+            f"La tarjeta '{card_type_raw}' no está entre las disponibles",
+            400,
+            data={"card_types": [ct.name for ct in card_types]},
+        )
+
+    insts_for_card = (
+        CardBankInstallment.query.filter_by(card_type_id=ct_match.id, is_active=True)
+        .order_by(CardBankInstallment.display_order, CardBankInstallment.installments)
+        .all()
+    )
+    bank_ids = {i.bank_id for i in insts_for_card}
+    banks = (
+        Bank.query.filter(Bank.id.in_(bank_ids), Bank.is_active == True)  # noqa: E712
+        .order_by(Bank.display_order, Bank.name)
+        .all()
+        if bank_ids
+        else []
+    )
+
+    if not bank_raw:
+        return _err(
+            f"Falta indicar con qué banco paga (para {ct_match.name})",
+            400,
+            data={"card_type": ct_match.name, "banks": [b.name for b in banks]},
+        )
+
+    bank_match = next((b for b in banks if _norm(b.name) == _norm(bank_raw)), None)
+    if not bank_match:
+        return _err(
+            f"El banco '{bank_raw}' no está disponible para {ct_match.name}",
+            400,
+            data={"card_type": ct_match.name, "banks": [b.name for b in banks]},
+        )
+
+    bank_insts = [i for i in insts_for_card if i.bank_id == bank_match.id]
+    inst_options = [
+        {"cuotas": i.installments, "recargoPorcentaje": float(i.surcharge_percentage)}
+        for i in bank_insts
+    ]
+
+    if installments_raw in (None, ""):
+        return _err(
+            f"Falta indicar en cuántas cuotas paga (para {ct_match.name} + {bank_match.name})",
+            400,
+            data={"card_type": ct_match.name, "bank": bank_match.name, "installments": inst_options},
+        )
+
+    try:
+        installments_int = int(installments_raw)
+    except (TypeError, ValueError):
+        return _err("La cantidad de cuotas no es válida", 400, data={"installments": inst_options})
+
+    inst_match = next((i for i in bank_insts if i.installments == installments_int), None)
+    if not inst_match:
+        return _err(
+            f"No hay opción de {installments_int} cuotas para {ct_match.name} + {bank_match.name}",
+            400,
+            data={"card_type": ct_match.name, "bank": bank_match.name, "installments": inst_options},
+        )
+
+    return _ok(
+        {
+            "card_type": ct_match.name,
+            "bank": bank_match.name,
+            "installments": inst_match.installments,
+            "recargo_porcentaje": float(inst_match.surcharge_percentage),
+        },
+        "Cuotas validadas",
+    )
+
+
 @atendium_bp.route("/orders", methods=["POST"])
 @atendium_api_key_required
 def create_order():
