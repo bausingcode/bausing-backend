@@ -50,6 +50,21 @@ def _strip_gps(address):
     return {k: v for k, v in address.items() if k not in ("lat", "lon")}
 
 
+def _items_from_body(body):
+    """El motor de Atendium a veces serializa mal el array anidado items:[{product_id,
+    quantity}] y termina mandando product_id vacío pese a que su propio log de chat
+    muestra un id real. Como estas tools ya están limitadas a UN producto por llamada,
+    aceptamos también product_id/quantity como campos planos (mucho más confiables
+    para el motor que un array anidado) y construimos el items[] acá si hace falta."""
+    items = _coerce_list(body.get("items"))
+    if isinstance(items, list) and items and any((it or {}).get("product_id") for it in items if isinstance(it, dict)):
+        return items
+    flat_product_id = body.get("product_id")
+    if flat_product_id:
+        return [{"product_id": flat_product_id, "quantity": body.get("quantity") or 1}]
+    return items
+
+
 def _coerce_list(value):
     """El bot a veces manda arrays (items) serializados como string en vez de array
     real (JSON válido o incluso estilo Python con comillas simples). Si es un string
@@ -273,7 +288,7 @@ def validate_referral():
 def quote():
     body = request.get_json(silent=True) or {}
     address = _strip_gps(body.get("address") or body)
-    items = _coerce_list(body.get("items"))
+    items = _items_from_body(body)
     payment_method = body.get("payment_method")
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
@@ -449,7 +464,7 @@ def create_order():
     body = request.get_json(silent=True) or {}
     customer = body.get("customer") or {}
     address = _strip_gps(body.get("address") or {})
-    items = _coerce_list(body.get("items")) or []
+    items = _items_from_body(body) or []
     payment_method = (body.get("payment_method") or "").lower() or None
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
