@@ -466,8 +466,34 @@ def create_order():
     address = _strip_gps(body.get("address") or {})
     items = _items_from_body(body) or []
     payment_method = (body.get("payment_method") or "").lower() or None
+    payment_method_quote = (body.get("payment_method_quote") or "").strip()
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
+
+    # El bot a veces "completa" el medio de pago con un valor por defecto en vez de
+    # preguntarlo cuando el cliente no lo dijo. Para frenar eso, exigimos también la
+    # cita textual de lo que dijo el cliente y validamos que mencione ese medio de
+    # pago — no evita un bot que decida inventar la cita también, pero le pone una
+    # traba extra a adivinar en silencio.
+    PAYMENT_KEYWORDS = {
+        "cash": ("efectivo", "cash", "contado"),
+        "transfer": ("transfer", "transferencia"),
+        "card": ("tarjeta", "card", "credito", "crédito", "debito", "débito"),
+    }
+    if payment_method:
+        if not payment_method_quote:
+            return _err(
+                "Falta payment_method_quote: la frase textual donde el cliente dijo cómo va a pagar",
+                400,
+            )
+        quote_norm = payment_method_quote.lower()
+        keywords = PAYMENT_KEYWORDS.get(payment_method, ())
+        if not any(kw in quote_norm for kw in keywords):
+            return _err(
+                f"payment_method_quote ('{payment_method_quote}') no menciona '{payment_method}' — "
+                "el cliente todavía no dijo explícitamente cómo va a pagar, hay que preguntárselo",
+                400,
+            )
 
     # El bot a veces solo manda la frase completa (address.address) sin desglosar
     # street/city/etc. Completamos los campos estructurados a partir de esa frase

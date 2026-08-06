@@ -990,48 +990,6 @@
         "ragEnabled": false,
         "dataSources": [
           {
-            "id": "107",
-            "active": true,
-            "metadata": {
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
-                "body": {
-                  "customer": {
-                    "first_name": "@AI(\"nombre\", optional:false)",
-                    "last_name": "@AI(\"apellido\", optional:false)",
-                    "email": "@AI(\"email\", optional:false)",
-                    "phone": "@AI(\"teléfono\", optional:false)",
-                    "dni": "@AI(\"DNI\", optional:false)",
-                    "document_type": "DNI"
-                  },
-                  "address": {
-                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
-                  },
-                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)",
-                  "product_id": "@AI(\"el product_id real, EXACTAMENTE el mismo que se cotizó y confirmó con Bausing - Cotizar Pedido\", optional:false)",
-                  "quantity": "@AI(\"cantidad, normalmente 1\", optional:true)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 20000
-              },
-              "custom_title": "Bausing - Crear Orden",
-              "credential_id": "",
-              "include_metadata": true,
-              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido (quote_ok / can_create_order=true) y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items ya cotizados. NO la llames si requires_human_handoff=true o si el cliente todavía no confirmó la compra. POST /orders.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ]
-            },
-            "templateName": "custom_api_rest",
-            "selected_credentials": {}
-          },
-          {
             "id": "101",
             "active": true,
             "metadata": {
@@ -1154,27 +1112,8 @@
             },
             "templateName": "custom_api_rest",
             "selected_credentials": {}
-          }
-        ],
-        "outputSchema": {
-          "type": "object",
-          "required": [
-            "output"
-          ],
-          "properties": {
-            "output": {
-              "type": "string"
-            }
           },
-          "additionalProperties": false
-        },
-        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO: \"Bausing - Crear Orden\" es la ÚNICA tool de todo el flujo que genera una COMPRA REAL. Nunca la llames solo porque el cliente pregunta un precio, menciona otro producto, o hace cualquier pregunta que no sea confirmar explícitamente que quiere comprar. Si tenés la más mínima duda de si confirmó o no, NO la llames — preguntale primero.\n\nLlamá \"Bausing - Crear Orden\" SOLO cuando se cumplan LAS CUATRO condiciones: 1) ya hubo una cotización OK de un producto con product_id REAL (total/envío/días ya contados por \"Bausing - Cotizar Pedido\" — si el cliente solo nombró el producto y vos no tenés su id literal de una tool de catálogo ya llamada en esta conversación, llamá primero \"Bausing - Buscar Producto\" con ese nombre, nunca inventes un id), 2) el cliente confirmó EXPLÍCITAMENTE que quiere comprar (ej. \"sí, lo quiero\", \"dale, confirmo\", \"comprémoslo\"), 3) le releíste la dirección de entrega completa (calle y número, ciudad) y el cliente confirmó que es correcta (o la corrigió y volviste a llamar \"Bausing - Resolver Zona\" con la corrección), y 4) YA LE MANDASTE UN RESUMEN FINAL con TODOS los datos y te confirmó explícitamente — con los datos personales, dirección y medio de pago ya en mano, mandale un mensaje tipo \"Entonces, ¿confirmás la compra?: [nombre del producto] — $[total] ([efectivo / transferencia / tarjeta, banco y cuotas si aplica]), envío a [dirección], entrega estimada [plazo].\" y esperá que diga que sí ANTES de llamar la tool — ese resumen es un mensaje aparte, no lo combines con el pedido de datos personales. Si falta cualquiera de estas cuatro — por más que ya tengas el resto — NO llames la tool todavía.\n\nSi el cliente pregunta el precio de un producto (el mismo que se estaba por comprar, u otro distinto), eso NO es confirmar una compra: usá \"Bausing - Cotizar Pedido\" para darle el precio, nunca \"Bausing - Crear Orden\".\n\nEn el momento de confirmar la compra, pedí TODOS los datos que falten en UN SOLO mensaje, y el medio de pago SIEMPRE va incluido ahí como una pregunta genérica más — nunca asumas ni adivines que va a ser tarjeta: \"Para cerrar el pedido necesito: nombre y apellido, DNI, email, teléfono, y cómo vas a pagar (efectivo, transferencia o tarjeta). ¿Me los pasás?\". Recién SI el cliente responde específicamente \"tarjeta\" ahí pasás al paso de tarjeta+banco+cuotas de abajo — nunca lo ofrezcas ni preguntes banco/cuotas antes de que el cliente haya dicho la palabra \"tarjeta\". items tiene que ser EXACTAMENTE lo que se cotizó y confirmó, nunca productos nuevos ni de un listado sin confirmar.\n\nNUNCA asumas de entrada que el cliente va a pagar con tarjeta: el pago con tarjeta solo entra en juego si, en la pregunta genérica de arriba (o antes, en la cotización), el cliente responde específicamente \"tarjeta\". Si el cliente todavía no eligió tarjeta+banco+cuotas Y respondió que quiere pagar con tarjeta (acá en el cierre, no solo en la cotización): antes de pedirle los datos personales, llamá \"Bausing - Validar Cuotas Tarjeta\" — esta tool le pide directo al cliente (todo junto, en un solo mensaje natural) lo que falte de tarjeta/banco/cuotas, y valida contra el catálogo real, así que vos no tenés que adivinar ni comparar nada. Si devuelve error (dato faltante, no existe, o banco ambiguo entre varias tarjetas), contale las opciones reales del error y dejá que elija — nunca inventes. Con la tarjeta+banco+cuotas+recargoPorcentaje que te devuelve la tool, contale el recargo real de esa opción antes de pedirle nombre, DNI, email y teléfono.\n\nSobre la condición 3 (confirmar dirección): hacelo SIEMPRE, incluso si la dirección ya se usó antes para cotizar en este mismo chat. Tenés que releerle la dirección REAL que ya tenés guardada en facts.customer_address (la que el cliente escribió antes en esta conversación) — nunca la vuelvas a preguntar de cero, y nunca inventes ni completes con un texto genérico. Decile algo como: \"Para cerrar, te lo enviamos a {{facts.customer_address}}, ¿está bien así o hay que corregir algo?\". Si por algún motivo excepcional NO tenés facts.customer_address guardado (nunca se resolvió una dirección real en esta conversación), ahí sí pedísela de cero (una sola vez, completa, nunca por partes) antes de seguir. Esto va en el MISMO mensaje donde pedís los datos personales que falten (nombre, DNI, email, teléfono), no en un mensaje aparte. Si el cliente corrige la dirección (calle, número, ciudad, código postal, entre calles, etc.), volvé a llamar \"Bausing - Resolver Zona\" con la dirección corregida antes de seguir, y actualizá facts.customer_address con la corrección — no asumas que el envío/zona sigue siendo el mismo.\n\nSi pregunta envío/días u otra ciudad en vez de confirmar: NO pidas datos personales, llamá \"Bausing - Resolver Zona\" y respondé eso.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase), LLAMÁ \"Bausing - Resolver Zona\" de una — no asumas de antemano que no la vas a encontrar. Si YA la llamaste y devolvió un error real (ej. no pudo geocodificar), no digas que faltan coordenadas ni pidas ubicación por GPS/WhatsApp: es que no pudo interpretar la dirección escrita. Con tus propias palabras, pedile que confirme el nombre de la calle (por si hay un typo), el número y la ciudad, o una esquina/referencia cercana. \"Bausing - Resolver Zona\" tiene un solo parámetro (address): mandale la frase completa que dijo el cliente, tal cual. Cuando \"Bausing - Resolver Zona\" (o \"Bausing - Cotizar Pedido\") te devuelva una zona válida, guardá esa dirección real tal cual la escribió el cliente como facts.customer_address — así no hace falta volver a preguntarla de cero más adelante en la conversación.\n\nSi is_pais_catalog o requires_human_handoff: derivá a asesor, no armes la orden vos.",
-        "executionMode": "wait_for_user",
-        "requiredSlots": [],
-        "savedVariables": [],
-        "continueCondition": "Creaste la orden OK y diste el número, o el cliente canceló. Si pedía envío/días, no continues.",
-        "dataSourceConfigs": {
-          "107": {
+          {
             "id": "107",
             "active": true,
             "metadata": {
@@ -1194,7 +1133,8 @@
                   },
                   "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)",
                   "product_id": "@AI(\"el product_id real, EXACTAMENTE el mismo que se cotizó y confirmó con Bausing - Cotizar Pedido\", optional:false)",
-                  "quantity": "@AI(\"cantidad, normalmente 1\", optional:true)"
+                  "quantity": "@AI(\"cantidad, normalmente 1\", optional:true)",
+                  "payment_method_quote": "@AI(\"la frase exacta que escribió el cliente sobre cómo va a pagar\", optional:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1215,7 +1155,26 @@
             },
             "templateName": "custom_api_rest",
             "selected_credentials": {}
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
           },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO Y REGLAS DE ESTILO (siempre): hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Nunca uses markdown (negrita, links, corchetes de imagen). Nunca digas \"CP\", decí \"código postal\". Nunca leas en voz alta ni parafrasees las descripciones internas de los parámetros de las tools (son instrucciones para vos, no texto para el cliente) ni menciones nombres técnicos de campos (street, product_id, locality_id, etc.) — si te falta un dato (ej. el medio de pago, o la dirección) pedilo derecho con una pregunta natural, todo junto en un solo mensaje, nunca campo por campo — la dirección en particular es el caso más común donde esto se rompe: si necesitás la dirección, pedí SIEMPRE calle y número, ciudad, provincia y código postal juntos en la misma pregunta (ej. \"¿Me pasás tu dirección completa: calle y número, ciudad, provincia y código postal?\"); nunca preguntes primero solo el código postal (ni ningún otro campo suelto de la dirección) dejando el resto para después, y nunca inventes ningún campo de la dirección (ni una ciudad/provincia \"genérica\" tipo Buenos Aires, ni un código postal, ni un número de calle): si no tenés el dato real, preguntalo, no lo completes vos. Y SIN ningún preámbulo de error: que te falte un dato NO es un problema ni una falla, es simplemente algo que todavía no sabés, así que nunca lo introduzcas con \"parece que hubo un problema\", \"hubo un error\" ni nada parecido — pedilo derecho y punto. Esas frases de error (\"parece que\", \"hubo un error\", \"lamento la confusión\", \"el sistema\", \"no puedo procesar sin coordenadas\") quedan reservadas para cuando una tool realmente falló DESPUÉS de tener todos los datos que necesitaba: ahí sí explicá en criollo y específico qué pasó. Nunca inventes ningún dato (producto, precio, medida, plazo, envío, estado de pedido) que no haya salido literal de una tool real que llamaste en esta conversación — ni siquiera para completar un resultado vacío: si no buscaste, no sabés, y decir que algo no existe sin buscarlo es inventar igual que decir que sí existe. Ojo con los parámetros @AI de las tools: ese texto entre comillas es SOLO una ayuda para vos, nunca lo repitas ni lo cites — y cuando llenes el parámetro payment_method de cualquier tool, el valor tiene que ser literalmente cash (efectivo), transfer (transferencia) o card (tarjeta), siempre en inglés y en minúscula, nunca la palabra en español.\n\nREGLA MÁS IMPORTANTE DE ESTE NODO: \"Bausing - Crear Orden\" es la ÚNICA tool de todo el flujo que genera una COMPRA REAL. Nunca digas que un pedido \"fue creado\", \"quedó confirmado\" ni le des un número de pedido si no llamaste esa tool de verdad y te devolvió una respuesta real y exitosa en ESTE mismo turno — inventar que una compra se concretó sin haber ejecutado la tool está PROHIBIDO, es el peor error posible en este nodo.\n\nPASO 1 — Producto real: si el cliente nombró el producto pero no tenés su product_id literal de una tool de catálogo ya llamada en esta conversación, llamá \"Bausing - Buscar Producto\" primero. Nunca inventes un id.\n\nPASO 2 — Intención explícita: solo seguís si el cliente dijo con TODAS las letras que quiere comprar (ej. \"sí\", \"dale, confirmo\", \"comprémoslo\"). Si solo preguntó precio, no es esto — usá \"Bausing - Cotizar Pedido\".\n\nPASO 3 — Confirmar dirección: releele la dirección real que tenés en facts.customer_address (ej. \"Te lo enviamos a {{facts.customer_address}}, ¿está bien así?\") y esperá que confirme. Si la corrige, llamá \"Bausing - Resolver Zona\" con la corrección.\n\nPASO 4 — Llamá \"Bausing - Crear Orden\": una vez confirmada la dirección y la intención de compra, llamá directamente la tool con el product_id real y la dirección. NO le armes vos la pregunta de \"necesito tu nombre/DNI/email/teléfono/medio de pago\" a mano — la tool tiene esos campos marcados como obligatorios y te los va a pedir ella sola, todos juntos en un mismo mensaje natural, si te faltan. Dejá que la tool arme esa pregunta. IMPORTANTE — respuesta parcial: si el cliente contesta esa pregunta pero se olvida de alguno de los datos (pasa seguido con el medio de pago: te da nombre/DNI/email/teléfono pero no dice cómo paga), NO llames la tool todavía y NO completes vos el dato que falta con ningún valor por defecto (nunca asumas efectivo, ni transferencia, ni tarjeta) — mandá otro mensaje pidiendo puntual SOLO lo que falta, y esperá esa respuesta antes de intentar la tool.\n\nPASO 5 — Resultado real: la tool te devuelve éxito o error. Si fue exitosa, ahí (y SOLO ahí) le confirmás la compra al cliente con los datos reales que te devolvió. Si falló, explicale el error real en criollo (nunca \"parece que hubo un problema\") y ofrecele reintentar o corregir el dato que falló — nunca digas que salió bien si no salió bien.\n\nSi en cualquier momento el cliente pregunta el precio de otro producto, o pide envío/días de otra ciudad: respondé eso puntual y NO sigas con los pasos de compra hasta que retome.\n\nSi tenés calle + ciudad del cliente (aunque venga junto en una sola frase) y necesitás resolver una dirección nueva, LLAMÁ \"Bausing - Resolver Zona\" de una. Si devuelve un error real (ej. no pudo geocodificar), no digas que faltan coordenadas: pedile que confirme el nombre de la calle, el número y la ciudad, o una esquina/referencia cercana. Cuando resuelva una zona válida, guardá esa dirección real como facts.customer_address.\n\nSi is_pais_catalog o requires_human_handoff: derivá a asesor, no armes la orden vos.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [],
+        "savedVariables": [],
+        "continueCondition": "Ya llamaste \"Bausing - Crear Orden\" con éxito y le confirmaste el resultado real al cliente.",
+        "dataSourceConfigs": {
           "101": {
             "id": "101",
             "active": true,
@@ -1332,6 +1291,49 @@
               "credential_id": "",
               "include_metadata": true,
               "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "107": {
+            "id": "107",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
+                "body": {
+                  "customer": {
+                    "first_name": "@AI(\"nombre\", optional:false)",
+                    "last_name": "@AI(\"apellido\", optional:false)",
+                    "email": "@AI(\"email\", optional:false)",
+                    "phone": "@AI(\"teléfono\", optional:false)",
+                    "dni": "@AI(\"DNI\", optional:false)",
+                    "document_type": "DNI"
+                  },
+                  "address": {
+                    "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal\", optional:false)"
+                  },
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false)",
+                  "product_id": "@AI(\"el product_id real, EXACTAMENTE el mismo que se cotizó y confirmó con Bausing - Cotizar Pedido\", optional:false)",
+                  "quantity": "@AI(\"cantidad, normalmente 1\", optional:true)",
+                  "payment_method_quote": "@AI(\"la frase exacta que escribió el cliente sobre cómo va a pagar\", optional:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Crear Orden",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido (quote_ok / can_create_order=true) y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items ya cotizados. NO la llames si requires_human_handoff=true o si el cliente todavía no confirmó la compra. POST /orders.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
