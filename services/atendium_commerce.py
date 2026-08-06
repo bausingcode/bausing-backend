@@ -824,17 +824,20 @@ def search_products(
         # No devolver productos sin precio al bot (evita que arme listas con $0)
         if price is None:
             continue
-        # Intencional: NO se incluyen price/price_label/price_transfer/price_card ni
-        # main_image acá. Este endpoint es para que el bot liste nombres nada más;
-        # precio real sale de build_full_quote (Cotizar Pedido) con zona resuelta,
-        # y la foto solo se expone en product_detail (Detalle de Producto) cuando el
-        # cliente la pide explícitamente para un producto puntual.
+        # El precio acá es de REFERENCIA (sin envío): sale del mismo cálculo que usa
+        # la home del sitio para esa localidad. El total final (con envío incluido)
+        # sigue saliendo de build_full_quote (Cotizar Pedido) una vez que el cliente
+        # confirma un producto puntual. Solo se incluye si ya hay locality_id resuelto
+        # (si loc es None, price_transfer/price_card ya vienen None desde el cálculo
+        # de arriba). La foto sigue reservada para product_detail (Detalle de Producto).
         items.append(
             {
                 "id": str(p.id),
                 "name": p.name,
                 "description": (p.description or "")[:280] if p.description else None,
                 "category_id": str(p.category_id) if p.category_id else None,
+                "price_transfer": price_transfer,
+                "price_card": price_card,
             }
         )
 
