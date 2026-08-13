@@ -50,6 +50,16 @@ def _strip_gps(address):
     return {k: v for k, v in address.items() if k not in ("lat", "lon")}
 
 
+def _address_from_body(body, default=None):
+    """El motor de Atendium a veces aplana el objeto anidado address:{address: "..."}
+    y termina mandando el texto de la dirección como string suelto. Si pasa eso, lo
+    reenvolvemos acá para que resolve_zone_from_address (que espera un dict) no reviente."""
+    raw = body.get("address")
+    if isinstance(raw, str):
+        raw = {"address": raw}
+    return _strip_gps(raw if raw is not None else default)
+
+
 def _items_from_body(body):
     """El motor de Atendium a veces serializa mal el array anidado items:[{product_id,
     quantity}] y termina mandando product_id vacío pese a que su propio log de chat
@@ -287,7 +297,7 @@ def validate_referral():
 @atendium_api_key_required
 def quote():
     body = request.get_json(silent=True) or {}
-    address = _strip_gps(body.get("address") or body)
+    address = _address_from_body(body, default=body)
     items = _items_from_body(body)
     payment_method = body.get("payment_method")
     coupon_code = body.get("coupon_code")
@@ -463,7 +473,7 @@ def card_installment():
 def create_order():
     body = request.get_json(silent=True) or {}
     customer = body.get("customer") or {}
-    address = _strip_gps(body.get("address") or {})
+    address = _address_from_body(body, default={})
     items = _items_from_body(body) or []
     payment_method = (body.get("payment_method") or "").lower() or None
     payment_method_quote = (body.get("payment_method_quote") or "").strip()
