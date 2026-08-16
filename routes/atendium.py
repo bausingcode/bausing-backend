@@ -60,6 +60,31 @@ def _address_from_body(body, default=None):
     return _strip_gps(raw if raw is not None else default)
 
 
+def _customer_from_body(body):
+    """La tool "Crear Orden" ya no manda customer:{...} anidado, manda los campos
+    del cliente sueltos en el nivel superior del body (first_name, last_name,
+    email, phone, dni, document_type). Los rearmamos acá en el dict anidado que
+    espera el resto del código."""
+    customer = body.get("customer")
+    if isinstance(customer, dict) and customer:
+        return customer
+    flat = {}
+    for key in (
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        "alternate_phone",
+        "dni",
+        "document_number",
+        "document_type",
+    ):
+        value = body.get(key)
+        if value not in (None, ""):
+            flat[key] = value
+    return flat
+
+
 def _items_from_body(body):
     """El motor de Atendium a veces serializa mal el array anidado items:[{product_id,
     quantity}] y termina mandando product_id vacío pese a que su propio log de chat
@@ -495,7 +520,7 @@ def card_installment():
 @atendium_api_key_required
 def create_order():
     body = request.get_json(silent=True) or {}
-    customer = body.get("customer") or {}
+    customer = _customer_from_body(body)
     address = _address_from_body(body, default={})
     items = _items_from_body(body) or []
     payment_method = _normalize_payment_method(body.get("payment_method"))
