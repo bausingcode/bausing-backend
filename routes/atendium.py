@@ -75,6 +75,29 @@ def _items_from_body(body):
     return items
 
 
+PAYMENT_METHOD_ALIASES = {
+    "efectivo": "cash",
+    "contado": "cash",
+    "cash": "cash",
+    "transferencia": "transfer",
+    "transfer": "transfer",
+    "tarjeta": "card",
+    "credito": "card",
+    "crédito": "card",
+    "debito": "card",
+    "débito": "card",
+    "card": "card",
+}
+
+
+def _normalize_payment_method(value):
+    """El bot a veces manda el medio de pago en español (tarjeta/efectivo/
+    transferencia) aunque la API espera cash|transfer|card. Lo normalizamos acá
+    para no depender de que el motor de Atendium siempre traduzca bien."""
+    v = (value or "").strip().lower()
+    return PAYMENT_METHOD_ALIASES.get(v, v or None)
+
+
 def _coerce_list(value):
     """El bot a veces manda arrays (items) serializados como string en vez de array
     real (JSON válido o incluso estilo Python con comillas simples). Si es un string
@@ -299,7 +322,7 @@ def quote():
     body = request.get_json(silent=True) or {}
     address = _address_from_body(body, default=body)
     items = _items_from_body(body)
-    payment_method = body.get("payment_method")
+    payment_method = _normalize_payment_method(body.get("payment_method"))
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 
@@ -475,7 +498,7 @@ def create_order():
     customer = body.get("customer") or {}
     address = _address_from_body(body, default={})
     items = _items_from_body(body) or []
-    payment_method = (body.get("payment_method") or "").lower() or None
+    payment_method = _normalize_payment_method(body.get("payment_method"))
     payment_method_quote = (body.get("payment_method_quote") or "").strip()
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
