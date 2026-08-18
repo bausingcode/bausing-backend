@@ -553,42 +553,49 @@ def complete_crm_product(product_id):
                     )
             db.session.flush()
         
+        # Variantes viejas que no se pudieron borrar por tener pedidos/carritos/reseñas asociados.
+        # Se reasignan a la variante nueva equivalente (mismo sku/attr_name) más abajo, una vez creada,
+        # para no dejar un duplicado "fantasma" con precios desactualizados.
+        blocked_variants = []
+        new_variants_by_sku = {}
+
         # Eliminar variantes existentes si es actualización
         if is_update:
             # Eliminar variants, options y precios (los precios se eliminan automáticamente por cascade)
             variants_to_delete = ProductVariant.query.filter_by(product_id=product.id).all()
-            
+
             # Verificar si existe la columna product_variant_id en order_items
             # y filtrar las variantes que están referenciadas
             try:
                 check_column_query = """
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'order_items' 
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'order_items'
                     AND column_name = 'product_variant_id'
                 """
                 column_check = db.session.execute(text(check_column_query))
                 has_variant_column = column_check.fetchone() is not None
             except Exception:
                 has_variant_column = False
-            
+
             for v in variants_to_delete:
                 # Verificar si la variante está referenciada en order_items
                 if has_variant_column:
                     check_ref_query = """
-                        SELECT COUNT(*) 
-                        FROM order_items 
+                        SELECT COUNT(*)
+                        FROM order_items
                         WHERE product_variant_id = :variant_id
                     """
                     ref_count = db.session.execute(
-                        text(check_ref_query), 
+                        text(check_ref_query),
                         {'variant_id': str(v.id)}
                     ).scalar()
-                    
+
                     if ref_count and ref_count > 0:
-                        # Esta variante está referenciada, no la eliminamos
+                        # Esta variante está referenciada: no la borramos todavía, se reasigna después
+                        blocked_variants.append(v)
                         continue
-                
+
                 # Eliminar opciones (los precios se eliminan automáticamente por cascade desde las opciones)
                 options_to_delete = ProductVariantOption.query.filter_by(product_variant_id=v.id).all()
                 for opt in options_to_delete:
@@ -622,7 +629,8 @@ def complete_crm_product(product_id):
                 )
                 db.session.add(default_variant)
                 db.session.flush()
-                
+                new_variants_by_sku[default_variant.sku] = default_variant
+
                 # Crear una opción default
                 default_option = ProductVariantOption(
                     product_variant_id=default_variant.id,
@@ -715,7 +723,8 @@ def complete_crm_product(product_id):
                     )
                     db.session.add(default_variant)
                     db.session.flush()
-                    
+                    new_variants_by_sku[default_variant.sku] = default_variant
+
                     # Crear una opción default para esta variante
                     default_option = ProductVariantOption(
                         product_variant_id=default_variant.id,
@@ -856,7 +865,8 @@ def complete_crm_product(product_id):
             created_variants = []
             for attr_name, variant_info in variants_dict.items():
                 variant = variant_info['variant']
-                
+                new_variants_by_sku[attr_name] = variant
+
                 # Recopilar todos los precios de todas las opciones de esta variante
                 all_prices = []
                 for option_data in variant_info['options'].values():
@@ -864,12 +874,39 @@ def complete_crm_product(product_id):
                     # Los precios están asociados a la opción (product_variant_id apunta a la opción)
                     option_prices = ProductPrice.query.filter_by(product_variant_id=option.id).all()
                     all_prices.extend([p.to_dict() for p in option_prices])
-                
+
                 created_variants.append({
                     **variant.to_dict(include_options=True),
                     'prices': all_prices  # Mantener compatibilidad con la estructura anterior
                 })
-        
+
+        # Variantes viejas que no se pudieron borrar antes (por tener pedidos/carritos/reseñas asociados):
+        # si el request creó una variante nueva equivalente (mismo sku/attr_name), reasignar las
+        # referencias históricas a la nueva y borrar la vieja para no dejar un precio duplicado/desactualizado.
+        for old_variant in blocked_variants:
+            new_variant = new_variants_by_sku.get(old_variant.sku)
+            if not new_variant or new_variant.id == old_variant.id:
+                # No hay variante nueva equivalente (ej: se borró el atributo del form):
+                # dejamos la vieja intacta para no romper el historial.
+                continue
+
+            for ref_table in ('order_items', 'cart_items', 'product_reviews'):
+                db.session.execute(
+                    text(
+                        f"UPDATE {ref_table} SET product_variant_id = :new_id "
+                        f"WHERE product_variant_id = :old_id"
+                    ),
+                    {'new_id': str(new_variant.id), 'old_id': str(old_variant.id)},
+                )
+
+            old_options = ProductVariantOption.query.filter_by(product_variant_id=old_variant.id).all()
+            for opt in old_options:
+                db.session.delete(opt)
+            db.session.delete(old_variant)
+
+        if blocked_variants:
+            db.session.flush()
+
         db.session.commit()
         
         # Procesar imágenes (siempre, incluso si está vacío para eliminar todas)
