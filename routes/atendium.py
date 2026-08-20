@@ -388,8 +388,12 @@ def card_installment():
     """Valida tarjeta+banco+cuotas contra el catálogo real de card_bank_installments
     y devuelve el % de recargo. A diferencia de /card-bank-installments (que vuelca
     todo el catálogo para que el bot lo interprete), acá el backend hace el match
-    exacto — así el bot no depende de auditar él mismo un JSON grande, y si falta o
-    no existe algún dato, el error ya trae las opciones reales para esa combinación."""
+    exacto — así el bot no depende de auditar él mismo un JSON grande.
+    Si mandan card_type+bank sin installments, es una consulta de opciones (no un
+    error): devuelve 200 con la lista de cuotas disponibles, o con
+    available:false + mensaje si ese banco no tiene cuotas para esa tarjeta.
+    Los 400 quedan solo para datos realmente inválidos (tarjeta/banco inexistente,
+    cuotas que no matchean ninguna opción real)."""
     import unicodedata
 
     from models.bank import Bank
@@ -456,7 +460,7 @@ def card_installment():
         .all()
     )
     bank_ids = {i.bank_id for i in insts_for_card}
-    banks = (
+    banks_with_installments = (
         Bank.query.filter(Bank.id.in_(bank_ids), Bank.is_active == True)  # noqa: E712
         .order_by(Bank.display_order, Bank.name)
         .all()
@@ -468,15 +472,20 @@ def card_installment():
         return _err(
             f"Falta indicar con qué banco paga (para {ct_match.name})",
             400,
-            data={"card_type": ct_match.name, "banks": [b.name for b in banks]},
+            data={"card_type": ct_match.name, "banks": [b.name for b in banks_with_installments]},
         )
 
-    bank_match = next((b for b in banks if _norm_bank(b.name) == _norm_bank(bank_raw)), None)
+    # Buscamos el banco entre TODOS los bancos activos (no solo los que ya tienen
+    # cuotas cargadas para esta tarjeta) para poder distinguir "banco inexistente"
+    # (error real, típicamente un typo) de "banco real pero sin cuotas para esta
+    # tarjeta" (no es un error, es información válida para el cliente).
+    all_banks = Bank.query.filter_by(is_active=True).order_by(Bank.display_order, Bank.name).all()
+    bank_match = next((b for b in all_banks if _norm_bank(b.name) == _norm_bank(bank_raw)), None)
     if not bank_match:
         return _err(
-            f"El banco '{bank_raw}' no está disponible para {ct_match.name}",
+            f"El banco '{bank_raw}' no está entre los disponibles",
             400,
-            data={"card_type": ct_match.name, "banks": [b.name for b in banks]},
+            data={"card_type": ct_match.name, "banks": [b.name for b in banks_with_installments]},
         )
 
     bank_insts = [i for i in insts_for_card if i.bank_id == bank_match.id]
@@ -486,10 +495,24 @@ def card_installment():
     ]
 
     if installments_raw in (None, ""):
-        return _err(
-            f"Falta indicar en cuántas cuotas paga (para {ct_match.name} + {bank_match.name})",
-            400,
-            data={"card_type": ct_match.name, "bank": bank_match.name, "installments": inst_options},
+        if not inst_options:
+            return _ok(
+                {
+                    "card_type": ct_match.name,
+                    "bank": bank_match.name,
+                    "installments": [],
+                    "available": False,
+                },
+                f"El banco {bank_match.name} no tiene cuotas disponibles para {ct_match.name}",
+            )
+        return _ok(
+            {
+                "card_type": ct_match.name,
+                "bank": bank_match.name,
+                "installments": inst_options,
+                "available": True,
+            },
+            f"Opciones de cuotas para {ct_match.name} + {bank_match.name}",
         )
 
     try:
