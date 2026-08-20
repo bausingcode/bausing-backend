@@ -392,8 +392,12 @@ def card_installment():
     Si mandan card_type+bank sin installments, es una consulta de opciones (no un
     error): devuelve 200 con la lista de cuotas disponibles, o con
     available:false + mensaje si ese banco no tiene cuotas para esa tarjeta.
-    Los 400 quedan solo para datos realmente inválidos (tarjeta/banco inexistente,
-    cuotas que no matchean ninguna opción real)."""
+    Todo caso "inválido" (tarjeta/banco inexistente, cuotas que no matchean
+    ninguna opción real, falta algún dato) también responde HTTP 200 con
+    status:false + message — la tool de Atendium que consume este endpoint
+    descarta el body entero cuando el status HTTP no es 2xx, así que un 400
+    real le esconde el mensaje útil al bot; acá siempre hay 2xx y el bot lee
+    el resultado por el campo status/message del JSON, no por el código HTTP."""
     import unicodedata
 
     from models.bank import Bank
@@ -433,7 +437,7 @@ def card_installment():
     if not card_type_raw:
         return _err(
             "Falta indicar con qué tarjeta paga",
-            400,
+            200,
             data={"card_types": [ct.name for ct in card_types]},
         )
 
@@ -450,7 +454,7 @@ def card_installment():
     if not ct_match:
         return _err(
             f"La tarjeta '{card_type_raw}' no está entre las disponibles",
-            400,
+            200,
             data={"card_types": [ct.name for ct in card_types]},
         )
 
@@ -471,7 +475,7 @@ def card_installment():
     if not bank_raw:
         return _err(
             f"Falta indicar con qué banco paga (para {ct_match.name})",
-            400,
+            200,
             data={"card_type": ct_match.name, "banks": [b.name for b in banks_with_installments]},
         )
 
@@ -484,7 +488,7 @@ def card_installment():
     if not bank_match:
         return _err(
             f"El banco '{bank_raw}' no está entre los disponibles",
-            400,
+            200,
             data={"card_type": ct_match.name, "banks": [b.name for b in banks_with_installments]},
         )
 
@@ -518,13 +522,13 @@ def card_installment():
     try:
         installments_int = int(installments_raw)
     except (TypeError, ValueError):
-        return _err("La cantidad de cuotas no es válida", 400, data={"installments": inst_options})
+        return _err("La cantidad de cuotas no es válida", 200, data={"installments": inst_options})
 
     inst_match = next((i for i in bank_insts if i.installments == installments_int), None)
     if not inst_match:
         return _err(
             f"No hay opción de {installments_int} cuotas para {ct_match.name} + {bank_match.name}",
-            400,
+            200,
             data={"card_type": ct_match.name, "bank": bank_match.name, "installments": inst_options},
         )
 
