@@ -673,7 +673,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Si puede, que agregue un punto de referencia (esquina, negocio cercano). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con facts.payment_method (cash|transfer|card). No inventes cash.\n2) Guardá quote_total (total base de la tool) y product_id.\n3) PRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá producto, envío, medio de pago (al recibir) y el PRECIO FINAL a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nSi is_pais_catalog: envío Vía Cargo. Si shipping free: \"envío gratuito\".",
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con facts.payment_method (cash|transfer|card). No inventes cash.\n2) Guardá quote_total (total base de la tool) y product_id.\n3) PRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá producto, envío, medio de pago (al recibir) y el PRECIO FINAL a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -1213,7 +1213,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Si puede, que agregue un punto de referencia (esquina, negocio cercano). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nEl cliente YA confirmó el resumen. ESTE nodo SOLO crea la orden con la tool.\n\n1) Llamá SÍ O SÍ \"Bausing - Crear Orden\" con:\n   - product_id = facts.product_id\n   - address / dirección de facts\n   - payment_method = facts.payment_method (cash|transfer|card)\n   - payment_method_quote = facts.payment_method_quote\n   - customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - installments/bank/card_type si es card\n2) SOLO si la tool responde OK: confirmá la orden con datos reales (order_id si viene).\n3) Si falla: explicá el error. NUNCA inventes \"orden creada\".\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo acá.\n\nSi es tarjeta, al confirmar la orden mencioná cuotas y que el total incluye el recargo (facts.price_final / card_surcharge_percent) si están.\n",
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nEl cliente YA confirmó el resumen. ESTE nodo SOLO crea la orden con la tool.\n\n1) Llamá SÍ O SÍ \"Bausing - Crear Orden\" con:\n   - product_id = facts.product_id\n   - address / dirección de facts\n   - payment_method = facts.payment_method (cash|transfer|card)\n   - payment_method_quote = facts.payment_method_quote\n   - customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - installments/bank/card_type si es card\n2) SOLO si la tool responde OK: confirmá la orden con datos reales (order_id si viene).\n3) Si falla: explicá el error. NUNCA inventes \"orden creada\".\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo acá.\n\nSi es tarjeta, al confirmar la orden mencioná cuotas y que el total incluye el recargo (facts.price_final / card_surcharge_percent) si están.\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -1657,7 +1657,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- OBLIGATORIO: Si ves palabras mal escritas, pregunta para confirmar la direccion interpretada.\n- Guardá el texto completo en el hecho direccion_completa (y address con el mismo valor).\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.",
+        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- Guardá el texto completo en el hecho direccion_completa (y address con el mismo valor).\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.\n\n- OBLIGATORIO: Si ves al menos una palabra mal escrita en la direccion enviada por el usuario, pregunta para confirmar la direccion interpretada.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -1701,7 +1701,7 @@
         "bodyParams": [],
         "mockNodeId": "",
         "dataSources": [],
-        "errorHandling": "continue",
+        "errorHandling": "branch",
         "ragDataSources": {},
         "savedVariables": [
           {
@@ -1838,7 +1838,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- Guardá el texto completo en el hecho direccion_completa (y address con el mismo valor).\n- OBLIGATORIO: Si ves palabras mal escritas, pregunta para confirmar la direccion interpretada.\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.",
+        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- Guardá el texto completo en el hecho direccion_completa (y address con el mismo valor).\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.\n\n- OBLIGATORIO: Si ves al menos una palabra mal escrita en la direccion enviada por el usuario, pregunta para confirmar la direccion interpretada.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -1882,7 +1882,7 @@
         "bodyParams": [],
         "mockNodeId": "",
         "dataSources": [],
-        "errorHandling": "continue",
+        "errorHandling": "branch",
         "ragDataSources": {},
         "savedVariables": [
           {
@@ -2479,7 +2479,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nContexto de categorías (fuente de verdad):\n{{categorias}}\n\nTenés el historial completo de la conversación. Tu ÚNICO trabajo: ver si el cliente YA eligió una medida/tipo.\n\nCUENTA como elegida (sinónimos OK → normalizá al nombre de {{categorias}}):\n- una plaza / 1 plaza\n- plaza y media\n- dos plazas / 2 plazas\n- queen / queen size / king / extra queen / cuna\nu otra subcategoría real de la lista.\n\nSI YA HAY medida/tipo en CUALQUIER mensaje del historial (aunque el último sea la dirección):\n1) Guardá subcategory_name (nombre canónico) y subcategory_id si aparece en {{categorias}}.\n2) Respondé UNA sola frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/\"colchones\"/genérico o nada):\n1) subcategory_name = null (obligatorio: no inventes).\n2) Respondé exactamente un string vacío: \"\"\n   (no digas OK, no preguntes; el siguiente paso pedirá la medida).\n\nProhibido listar productos o precios.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nContexto de categorías (fuente de verdad):\n{{categorias}}\n\nTenés el historial completo de la conversación. Tu ÚNICO trabajo: ver si el cliente YA eligió una medida/tipo.\n\nIMPORTANTE — categorías sin subdivisión: si lo que nombró el cliente aparece TAL CUAL (o con typo evidente) como nombre de categoría o subcategoría en {{categorias}}, y esa categoría/subcategoría no tiene subcategorías propias listadas debajo de ella en {{categorias}}, ya es una elección completa — aunque no sea un patrón de medida como \"1 plaza\". Ejemplo: si pide \"almohadas\" y en {{categorias}} \"Almohadas\" no tiene hijos, tratala como subcategoría ya elegida (no le preguntes por tipos que no existen en {{categorias}}, como \"ortopédica\" o \"estándar\" si no están listados ahí).\n\nCUENTA como elegida (sinónimos OK → normalizá al nombre de {{categorias}}):\n- una plaza / 1 plaza\n- plaza y media\n- dos plazas / 2 plazas\n- queen / queen size / king / extra queen / cuna\nu otra subcategoría real de la lista.\n\nSI YA HAY medida/tipo en CUALQUIER mensaje del historial (aunque el último sea la dirección):\n1) Guardá subcategory_name (nombre canónico) y subcategory_id si aparece en {{categorias}}.\n2) Respondé UNA sola frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/\"colchones\"/genérico o nada):\n1) subcategory_name = null (obligatorio: no inventes).\n2) Respondé exactamente un string vacío: \"\"\n   (no digas OK, no preguntes; el siguiente paso pedirá la medida).\n\nProhibido listar productos o precios.",
         "executionMode": "execute_and_continue",
         "ragDataSources": {},
         "dataSourceConfigs": {},
@@ -2942,7 +2942,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown.\n\nEl cliente todavía no eligió medida/tipo. Pedí UNA sola vez usando opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza=1 plaza, dos plazas=2 plazas, etc.\n\nNo listes productos. No cotices.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown.\n\nEl cliente todavía no eligió medida/tipo. Pedí UNA sola vez usando opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza=1 plaza, dos plazas=2 plazas, etc.\n\nNo listes productos. No cotices.\n\nPROHIBIDO inventar tipos/variantes que no figuren en {{categorias}}. Si llegaste a este paso es porque la categoría/subcategoría que nombró el cliente SÍ tiene más subcategorías reales para elegir en {{categorias}} — usá EXACTAMENTE esos nombres, ninguno inventado.",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -3111,6 +3111,338 @@
         "x": 2744.4056275513585,
         "y": 42.39846460416301
       }
+    },
+    {
+      "id": "node-zona-ask-01",
+      "name": "Pedir dirección corregida",
+      "type": "agent",
+      "position": {
+        "x": 772.6206198220257,
+        "y": 148.82042470407953
+      },
+      "config": {
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle).\n\nCuando el cliente conteste con la dirección corregida, guardala completa en el hecho direccion_completa (y address con el mismo valor). NO llames tools acá.",
+        "dataSources": [],
+        "tools": [],
+        "executionMode": "wait_for_user",
+        "waitForUserResponse": true,
+        "ragEnabled": false,
+        "requiredSlots": [
+          {
+            "id": "direccion_completa",
+            "label": "Dirección corregida",
+            "description": "Calle, altura, ciudad y código postal corregidos"
+          }
+        ],
+        "continueCondition": "El cliente ya mandó una dirección corregida (calle, altura, ciudad).",
+        "captureFactsEnabled": true,
+        "factKeys": [
+          "direccion_completa",
+          "address"
+        ],
+        "factLabels": {
+          "direccion_completa": "Dirección completa",
+          "address": "Dirección"
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "output"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "node-zona-retry-01",
+      "name": "Obtener ID Localidad (reintento)",
+      "type": "http_request",
+      "position": {
+        "x": 772.6206198220257,
+        "y": 338.8204247040795
+      },
+      "config": {
+        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+        "body": "",
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "method": "POST",
+        "headers": [],
+        "retries": 0,
+        "timeout": 10000,
+        "useMock": false,
+        "bodyMode": "json",
+        "bodyFiles": [],
+        "timeoutMs": 10000,
+        "bodyParams": [],
+        "mockNodeId": "",
+        "dataSources": [],
+        "errorHandling": "branch",
+        "ragDataSources": {},
+        "savedVariables": [
+          {
+            "key": "catalog_id",
+            "path": "body.data.catalog_id",
+            "label": "Catalog Id"
+          },
+          {
+            "key": "crm_zone_id",
+            "path": "body.data.crm_zone_id",
+            "label": "Crm Zone Id"
+          },
+          {
+            "key": "localityid",
+            "path": "body.data.locality.id",
+            "label": "LocalityId"
+          },
+          {
+            "key": "label",
+            "path": "body.data.estimated_delivery.label",
+            "label": "Label"
+          },
+          {
+            "key": "is_third_party_transport",
+            "path": "body.data.is_third_party_transport",
+            "label": "Is Third Party Transport"
+          },
+          {
+            "key": "cost_label",
+            "path": "body.data.shipping_summary.cost_label",
+            "label": "Cost Label"
+          },
+          {
+            "key": "is_free",
+            "path": "body.data.shipping_summary.is_free",
+            "label": "Is Free"
+          }
+        ],
+        "sections_config": {
+          "body": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "address",
+                "value": "{{direccion_completa}}",
+                "isArray": false,
+                "required": true,
+                "valueMode": "variable",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "headers": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "X-API-Key",
+                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "pathParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          },
+          "queryParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          }
+        },
+        "include_metadata": false,
+        "dataSourceConfigs": {}
+      }
+    },
+    {
+      "id": "node-zona-ask-02",
+      "name": "Pedir dirección corregida",
+      "type": "agent",
+      "position": {
+        "x": 784.4499784698744,
+        "y": 1029.095981681955
+      },
+      "config": {
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle).\n\nCuando el cliente conteste con la dirección corregida, guardala completa en el hecho direccion_completa (y address con el mismo valor). NO llames tools acá.",
+        "dataSources": [],
+        "tools": [],
+        "executionMode": "wait_for_user",
+        "waitForUserResponse": true,
+        "ragEnabled": false,
+        "requiredSlots": [
+          {
+            "id": "direccion_completa",
+            "label": "Dirección corregida",
+            "description": "Calle, altura, ciudad y código postal corregidos"
+          }
+        ],
+        "continueCondition": "El cliente ya mandó una dirección corregida (calle, altura, ciudad).",
+        "captureFactsEnabled": true,
+        "factKeys": [
+          "direccion_completa",
+          "address"
+        ],
+        "factLabels": {
+          "direccion_completa": "Dirección completa",
+          "address": "Dirección"
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "output"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "id": "node-zona-retry-02",
+      "name": "Obtener ID Localidad (reintento)",
+      "type": "http_request",
+      "position": {
+        "x": 784.4499784698744,
+        "y": 1219.095981681955
+      },
+      "config": {
+        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+        "body": "",
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "method": "POST",
+        "headers": [],
+        "retries": 0,
+        "timeout": 10000,
+        "useMock": false,
+        "bodyMode": "json",
+        "bodyFiles": [],
+        "timeoutMs": 10000,
+        "bodyParams": [],
+        "mockNodeId": "",
+        "dataSources": [],
+        "errorHandling": "branch",
+        "ragDataSources": {},
+        "savedVariables": [
+          {
+            "key": "catalog_id",
+            "path": "body.data.catalog_id",
+            "label": "Catalog Id"
+          },
+          {
+            "key": "crm_zone_id",
+            "path": "body.data.crm_zone_id",
+            "label": "Crm Zone Id"
+          },
+          {
+            "key": "localityid",
+            "path": "body.data.locality.id",
+            "label": "LocalityId"
+          },
+          {
+            "key": "label",
+            "path": "body.data.estimated_delivery.label",
+            "label": "Label"
+          },
+          {
+            "key": "is_third_party_transport",
+            "path": "body.data.is_third_party_transport",
+            "label": "Is Third Party Transport"
+          },
+          {
+            "key": "cost_label",
+            "path": "body.data.shipping_summary.cost_label",
+            "label": "Cost Label"
+          },
+          {
+            "key": "is_free",
+            "path": "body.data.shipping_summary.is_free",
+            "label": "Is Free"
+          }
+        ],
+        "sections_config": {
+          "body": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "address",
+                "value": "{{direccion_completa}}",
+                "isArray": false,
+                "required": true,
+                "valueMode": "variable",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "headers": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "X-API-Key",
+                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "pathParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          },
+          "queryParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          }
+        },
+        "include_metadata": false,
+        "dataSourceConfigs": {}
+      }
     }
   ],
   "edges": [
@@ -3158,7 +3490,8 @@
     },
     {
       "to": "node-1786732774278-14",
-      "from": "node-1786732711679-13"
+      "from": "node-1786732711679-13",
+      "sourceHandle": "success"
     },
     {
       "to": "node-subcat-clarify-01",
@@ -3166,7 +3499,8 @@
     },
     {
       "to": "node-1786739435672-15",
-      "from": "node-1786633793742-14"
+      "from": "node-1786633793742-14",
+      "sourceHandle": "success"
     },
     {
       "to": "node-1786752306412-15",
@@ -3225,6 +3559,44 @@
     {
       "to": "8",
       "from": "node-resumen-orden-01"
+    },
+    {
+      "from": "node-1786633793742-14",
+      "to": "node-zona-ask-01",
+      "sourceHandle": "error"
+    },
+    {
+      "from": "node-zona-ask-01",
+      "to": "node-zona-retry-01"
+    },
+    {
+      "from": "node-zona-retry-01",
+      "to": "node-1786739435672-15",
+      "sourceHandle": "success"
+    },
+    {
+      "from": "node-zona-retry-01",
+      "to": "10",
+      "sourceHandle": "error"
+    },
+    {
+      "from": "node-1786732711679-13",
+      "to": "node-zona-ask-02",
+      "sourceHandle": "error"
+    },
+    {
+      "from": "node-zona-ask-02",
+      "to": "node-zona-retry-02"
+    },
+    {
+      "from": "node-zona-retry-02",
+      "to": "node-1786732774278-14",
+      "sourceHandle": "success"
+    },
+    {
+      "from": "node-zona-retry-02",
+      "to": "10",
+      "sourceHandle": "error"
     }
   ],
   "finalOutputSchema": {

@@ -156,6 +156,47 @@ def _shipping_summary_payload(
     }
 
 
+def _shipping_summary_for_kind(kind: str, cost: float) -> Dict[str, Any]:
+    """Arma el shipping_summary que el bot le muestra al cliente a partir del
+    resultado REAL de resolve_shipping (que ya conoce los items). El
+    shipping_summary que trae zone (de build_zone_from_coords/_shipping_summary_payload)
+    se calcula antes de saber los items, así que no puede saber si el carrito es
+    "accesorios solos" con cargo fijo — si no se recalcula acá con el kind/cost
+    final, el bot puede decir "envío gratuito" mientras el total ya le sumó un
+    envío pago (kind="accessories")."""
+    if kind == "third_party":
+        return {
+            "kind": "third_party",
+            "is_free": False,
+            "cost": cost,
+            "cost_label": _format_ars(cost),
+            "message": f"Envío tercerizado: {_format_ars(cost)}",
+        }
+    if kind == "viacargo":
+        return {
+            "kind": "viacargo",
+            "is_free": False,
+            "cost": cost,
+            "cost_label": _format_ars(cost) if cost else None,
+            "message": f"Envío Vía Cargo: {_format_ars(cost)}" if cost else "Envío Vía Cargo",
+        }
+    if kind == "accessories":
+        return {
+            "kind": "accessories",
+            "is_free": False,
+            "cost": cost,
+            "cost_label": _format_ars(cost),
+            "message": f"Envío: {_format_ars(cost)}",
+        }
+    return {
+        "kind": "free",
+        "is_free": True,
+        "cost": 0.0,
+        "cost_label": "$0",
+        "message": "Envío gratuito",
+    }
+
+
 def _build_pais_catalog_zone(lon: float, lat: float) -> Dict[str, Any]:
     """
     Fallback cuando el punto no cae en ningún polígono de zona:
@@ -949,6 +990,10 @@ def build_full_quote(
         address.get("postal_code"),
         subtotal,
     )
+    # zone["shipping_summary"] se calculó en resolve_zone_from_address sin conocer
+    # los items (no sabía si el carrito era "accesorios solos"), así que puede haber
+    # quedado desactualizado respecto al shipping_kind/shipping_cost reales de acá.
+    zone["shipping_summary"] = _shipping_summary_for_kind(shipping_kind, shipping_cost)
     subtotal_after = max(0.0, round(subtotal - coupon_discount, 2))
     total = round(subtotal_after + shipping_cost, 2)
 
