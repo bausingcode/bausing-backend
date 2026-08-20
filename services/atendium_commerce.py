@@ -21,7 +21,7 @@ from models.product import Product, ProductSubcategory
 from models.settings import SystemSettings
 from models.user import User
 from models.wallet import Wallet
-from routes.auth import geocode_address_with_fallback
+from routes.auth import get_lat_lon_from_address
 from routes.homepage_distribution import _build_homepage_prices_map
 from routes.locality_detection import find_locality_by_coordinates
 from routes.orders import format_estimated_delivery, get_crm_zone_id_from_locality
@@ -464,11 +464,22 @@ def resolve_zone_from_address(address: Dict[str, Any]) -> Dict[str, Any]:
     if not street or not city:
         raise ValueError("Se requiere street y city (o lat/lon) para resolver la zona")
 
-    geocoded = geocode_address_with_fallback(
+    # A propósito NO usamos geocode_address_with_fallback acá: ese helper, si no
+    # encuentra la calle exacta, cae en devolver el centro de la ciudad/provincia
+    # como si fuera la dirección real — para el bot de Atendium eso es peor que
+    # fallar, porque la orden queda geolocalizada mal (a veces a varios km) sin
+    # ningún aviso. Acá solo intentamos el match exacto street+number+city y, si
+    # no hay resultado confiable, avisamos con error para que el bot le pida al
+    # cliente que confirme/corrija la dirección en vez de asumir el centro.
+    geocoded = get_lat_lon_from_address(
         street, number, city, postal_code, province_name=province_name
     )
     if not geocoded:
-        raise ValueError("No se pudo geocodificar la dirección")
+        raise ValueError(
+            f"No pudimos ubicar la dirección exacta '{street} {number}' en {city}. "
+            "Pedile al cliente que confirme calle, altura, ciudad y código postal "
+            "(puede haber un error de tipeo en la calle)."
+        )
 
     lat_str, lon_str = geocoded.split(",")
     return build_zone_from_coords(float(lon_str.strip()), float(lat_str.strip()))

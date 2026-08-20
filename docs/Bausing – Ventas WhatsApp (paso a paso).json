@@ -1,0 +1,3262 @@
+{
+  "name": "Bausing – Ventas WhatsApp (paso a paso)",
+  "description": "Flujo secuencial Bausing: zona → catálogo → cupón/referido → cotizar → handoff o crear orden. Seguimiento en rama aparte. URLs de producción y X-API-Key ya cargadas. Default (Paso del bot): respond_and_end + finalizeConversationSession para que el próximo mensaje vuelva al router. Incluye paso 1b para elegir subcategoría antes de buscar catálogo. Incluye paso 2a medio de pago (sin asumir efectivo) antes de cotizar. 2a elige medio; si tarjeta → 2b banco/cuotas antes de cotizar.",
+  "status": "draft",
+  "nodes": [
+    {
+      "id": "2",
+      "name": "Router de intención",
+      "type": "conversation_router",
+      "config": {
+        "cases": [
+          {
+            "id": "201",
+            "label": "Quiere comprar",
+            "examples": [
+              "quiero comprar",
+              "quiero llevar el colchón Alpes",
+              "dale, lo compro",
+              "quiero cerrar el pedido",
+              "quiero pagar",
+              "lo quiero, cómo hago para comprarlo"
+            ],
+            "expression": "",
+            "description": "El cliente quiere realizar una compra"
+          },
+          {
+            "id": "204",
+            "label": "Ver productos / consultar precios, envío o días",
+            "examples": [
+              "tienen colchones?",
+              "mostrame opciones de productos",
+              "cuánto sale el envío",
+              "qué colchones tienen",
+              "en cuántos días llega",
+              "quiero ver el catálogo",
+              "cuánto sale el colchón X",
+              "quiero ver precios"
+            ],
+            "expression": "",
+            "description": "Quiere ver productos, consultar precios, costo de envío o días de entrega, quiere ver opciones de colchones"
+          },
+          {
+            "id": "202",
+            "label": "Seguimiento de pedidos",
+            "examples": [
+              "dónde está mi pedido",
+              "estado del pedido 123",
+              "ver mis pedidos"
+            ],
+            "expression": "",
+            "description": "Pregunta por estado de un pedido o listar pedidos existentes."
+          },
+          {
+            "id": "203",
+            "label": "Hablar con un asesor",
+            "examples": [
+              "quiero hablar con alguien",
+              "pasame con un asesor"
+            ],
+            "expression": "",
+            "description": "Pide explícitamente hablar con una persona o asesor."
+          },
+          {
+            "id": "case_0",
+            "label": "Ver detalles de un producto en especifico",
+            "examples": [
+              "Quiero saber mas acerca de este colchon en especifico",
+              "quiero que des informacion sobre ese producto",
+              "me interesa saber sobre el colchon llamado Alpes"
+            ],
+            "expression": "",
+            "description": "Cuando el usuario quiere ver informacion, precios o imagenes de un producto puntual "
+          }
+        ],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "entities": [],
+        "fallback": "default",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "dataSources": [],
+        "routingMode": "llm",
+        "conditionType": "conversational",
+        "minConfidence": 0.65,
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 150,
+        "y": 484.49577683700284
+      }
+    },
+    {
+      "id": "4",
+      "name": "1. Catálogo y zona",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "cart_items",
+          "product_id",
+          "quote_total"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "cart_items": "Items del carrito"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "102",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "locality_id": "@AI(\"usar el dato ya guardado: facts.localityid\", optional:false, isArray:false)",
+                  "subcategory_id": "@AI(\"usar facts.subcategory_id si existe; si no, el id real de la subcategoría en {{categorias}} que corresponde a facts.subcategory_name o a lo que eligió el cliente (una plaza=1 plaza, dos plazas=2 plazas, queen, etc.). NUNCA inventes id.\", optional:false, isArray:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Catalogo",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "subcategory_id",
+                      "value": "usar facts.subcategory_id si existe; si no, el id real de la subcategoría en {{categorias}} que corresponde a facts.subcategory_name o a lo que eligió el cliente (una plaza=1 plaza, dos plazas=2 plazas, queen, etc.). NUNCA inventes id.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "locality_id",
+                      "value": "usar el dato ya guardado: facts.localityid",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió una subcategoría/medida concreta de las que le mostraste (de \"Bausing - Categorías y Subcategorías\"), ej. \"2 plazas\". Filtra de forma EXACTA y estructurada por esa subcategoría (no es texto libre, es el id real)",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: mostrar opciones del catálogo para la subcategoría YA elegida y ayudar a elegir un producto concreto.\n\nLa subcategoría elegida está en los hechos (subcategory_id / subcategory_name) o en el historial reciente. Categorías de referencia: {{categorias}}\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" UNA sola vez con el subcategory_id real de la subcategoría elegida.\n- Si falta el id, buscalo en {{categorias}} por el nombre elegido. Nunca inventes IDs.\n- NUNCA busques varias subcategorías en el mismo turno.\n- NUNCA amplíes a toda la categoría padre (ej. todos los colchones). Solo la subcategoría confirmada.\n- Si el cliente cambia de subcategoría, pedí confirmación y recién ahí buscá de nuevo con el nuevo id.\n\nPRODUCTOS\nMostrá solo 3 o 4 opciones con nombre y price_transfer (o price_card si no hay transfer).\nSi menciona un producto puntual por nombre, buscá ese producto (sin inventar product_id).\n\nCOTIZACIÓN / CARRITO\nConsultar precios no es comprar. Solo agregá al carrito si dice \"quiero ese\", \"lo llevo\" o similar.\nImágenes solo si las pide para un producto puntual.\n\nCuando el cliente elige un producto puntual, confirmalo breve. NO cotices totales con medio de pago. NO asumas efectivo. El medio de pago se pide en el paso siguiente.\n\nAL ENTRAR A ESTE NODO\nSi facts.subcategory_name o el historial ya tiene una medida (ej. \"una plaza\", \"1 plaza\", \"2 plazas\", \"queen\"):\n- Resolvé el subcategory_id real desde {{categorias}} (sinónimos OK).\n- Llamá YA \"Bausing - Buscar Catalogo\" con ese subcategory_id y facts.locality_id / localityid.\n- Mostrá 3–4 productos con precio. No digas \"te mostraré\" sin listar.\n- No vuelvas a preguntar la subcategoría si ya está.\n\nSi facts.subcategory_name ya está, NO preguntes la medida otra vez: buscá y listá productos ya.\n\nSi más adelante ya hay facts.card_surcharge_percent y mostrás un precio de compra/total (no el listado inicial del catálogo), aplicá el recargo al total mostrado. En el listado inicial del catálogo mostrá price_transfer/price_card de la API sin inventar recargos.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "continueCondition": "El cliente eligió un producto concreto (con product_id) y quiere cotizar o terminar de comprar. ",
+        "dataSourceConfigs": {
+          "102": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "locality_id": "@AI(\"usar el dato ya guardado: facts.localityid\", optional:false, isArray:false)",
+                  "subcategory_id": "@AI(\"id de la subcategoría/medida elegida\", optional:false, isArray:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Catalogo",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "subcategory_id",
+                      "value": "id de la subcategoría/medida elegida",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "locality_id",
+                      "value": "usar el dato ya guardado: facts.localityid",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió una subcategoría/medida concreta de las que le mostraste (de \"Bausing - Categorías y Subcategorías\"), ej. \"2 plazas\". Filtra de forma EXACTA y estructurada por esa subcategoría (no es texto libre, es el id real)",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "tool_template_id": "b93b7541-36fd-4a55-8a6f-4e94d08f0707",
+            "pre_action_responses": "",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 1379.8528378873395,
+        "y": -16.70631022800178
+      }
+    },
+    {
+      "id": "6",
+      "name": "2. Cotizar pedido",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "requires_human_handoff",
+          "can_create_order",
+          "quote_total",
+          "quote_confirmed",
+          "payment_method",
+          "payment_method_quote",
+          "product_id",
+          "quantity",
+          "card_surcharge_percent",
+          "price_final",
+          "display_total",
+          "installments",
+          "bank",
+          "card_type"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "bank": "Banco (tarjeta)",
+          "quantity": "Cantidad",
+          "card_type": "Tipo de tarjeta",
+          "product_id": "ID de producto cotizado",
+          "price_final": "Precio final con recargo",
+          "quote_total": "Total cotizado",
+          "installments": "Cuotas",
+          "display_total": "Total a mostrar",
+          "payment_method": "Medio de pago (cash|transfer|card)",
+          "quote_confirmed": "Confirmó cotización",
+          "can_create_order": "Puede crear orden",
+          "payment_method_quote": "Cómo paga (frase del cliente)",
+          "card_surcharge_percent": "Recargo %",
+          "requires_human_handoff": "Requiere handoff"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "106",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
+                "body": {
+                  "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
+                  "quantity": "@AI(\"usar facts.quantity si existe; si no 1\", optional:true, isArray:false)",
+                  "product_id": "@AI(\"usar facts.product_id si existe; si no, el product_id real del producto confirmado (nunca inventado)\", optional:false, isArray:false)",
+                  "payment_method": "@AI(\"OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. Si NO hay facts.payment_method, NO llames esta tool. NUNCA inventes cash ni otro valor.\", optional:false, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Cotizar Pedido",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{\n  \"address\": {\n    \"address\": \"@AI(\\\"dirección completa: calle y número, ciudad, provincia y código postal\\\", optional:false)\"\n  },\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "quantity",
+                      "value": "usar facts.quantity si existe; si no 1",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "product_id",
+                      "value": "usar facts.product_id si existe; si no, el product_id real del producto confirmado (nunca inventado)",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method",
+                      "value": "OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. Si NO hay facts.payment_method, NO llames esta tool. NUNCA inventes cash ni otro valor.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió uno o más productos concretos (con product_id real) y necesitás el total final con envío y plazo antes de crear la orden. Consultar metodo de pago (efectivo, tarjeta o transferencia). POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          },
+          {
+            "id": "111",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
+                  "locality_id": "@AI(\"usar el dato ya guardado: facts.locality_id\", optional:false, isArray:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Producto",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "q",
+                      "value": "nombre del producto puntual que busca el cliente",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "locality_id",
+                      "value": "usar el dato ya guardado: facts.locality_id",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output",
+            "quote_ok"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "quote_ok": {
+              "type": "boolean"
+            },
+            "can_create_order": {
+              "type": "boolean"
+            },
+            "requires_human_handoff": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Si puede, que agregue un punto de referencia (esquina, negocio cercano). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con facts.payment_method (cash|transfer|card). No inventes cash.\n2) Guardá quote_total (total base de la tool) y product_id.\n3) PRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá producto, envío, medio de pago (al recibir) y el PRECIO FINAL a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nSi is_pais_catalog: envío Vía Cargo. Si shipping free: \"envío gratuito\".",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "quote_total",
+            "label": "Total cotizado",
+            "description": "Total real de Bausing - Cotizar Pedido (ya mostrado al cliente)."
+          },
+          {
+            "id": "quote_confirmed",
+            "label": "Cliente confirmó cotización",
+            "description": "Confirmación explícita de querer proceder/crear la orden: sí, dale, procede, confirmo, ok, lo quiero, etc. NO alcanza con haber mostrado la cotización. NO es confirmación de orden creada."
+          }
+        ],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "continueCondition": "Ya se mostró una cotización real (quote_total) al cliente Y el ÚLTIMO mensaje del usuario confirma que quiere proceder (sí / dale / procede / confirmo / ok / lo llevo / adelante). Si el último mensaje NO es esa confirmación, advance=false. Este nodo NUNCA crea órdenes: confirmar cotización ≠ orden creada.",
+        "dataSourceConfigs": {
+          "106": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
+                "body": {
+                  "address": "@AI(\"usar dato ya guardado: facts.address\", optional:false, isArray:false)",
+                  "quantity": "@AI(\"cantidad de este producto\", optional:true, isArray:false)",
+                  "product_id": "@AI(\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\", optional:false, isArray:false)",
+                  "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Cotizar Pedido",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{\n  \"address\": {\n    \"address\": \"@AI(\\\"dirección completa: calle y número, ciudad, provincia y código postal\\\", optional:false)\"\n  },\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "usar dato ya guardado: facts.address",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "quantity",
+                      "value": "cantidad de este producto",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "product_id",
+                      "value": "el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method",
+                      "value": "cómo vas a pagar: efectivo, transferencia o tarjeta",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente ya eligió uno o más productos concretos (con product_id real) y necesitás el total final con envío y plazo antes de crear la orden. Consultar metodo de pago (efectivo, tarjeta o transferencia). POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "tool_template_id": "b93b7541-36fd-4a55-8a6f-4e94d08f0707",
+            "pre_action_responses": "",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          },
+          "111": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
+                  "locality_id": "@AI(\"usar el dato ya guardado: facts.locality_id\", optional:false, isArray:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Producto",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "q",
+                      "value": "nombre del producto puntual que busca el cliente",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "locality_id",
+                      "value": "usar el dato ya guardado: facts.locality_id",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id). SIEMPRE mandá locality_id (de \"Bausing - Resolver Zona\", ya resuelto en esta conversación) para que la respuesta traiga price_transfer/price_card reales — si todavía no resolviste la zona del cliente, resolvela primero, no llames esta tool sin locality_id. La foto sale de \"Bausing - Detalle de Producto\" si el cliente la pide. GET /catalog.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "tool_template_id": "b93b7541-36fd-4a55-8a6f-4e94d08f0707",
+            "pre_action_responses": "",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 1910.1836656854016,
+        "y": 104.61209717627234
+      }
+    },
+    {
+      "id": "7",
+      "name": "¿Derivar a humano?",
+      "type": "conditional",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "bodyFiles": [],
+        "bodyParams": [],
+        "expression": "{{requires_human_handoff}}",
+        "dataSources": [],
+        "conditionType": "simple",
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 2186.275317877445,
+        "y": -48.743989833234025
+      }
+    },
+    {
+      "id": "8",
+      "name": "3. Crear orden",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "order_id",
+          "customer_first_name",
+          "customer_last_name",
+          "customer_dni",
+          "customer_email",
+          "customer_phone",
+          "payment_method",
+          "payment_method_quote",
+          "product_id",
+          "quote_total",
+          "installments",
+          "bank",
+          "card_type",
+          "card_surcharge_percent",
+          "price_final"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "bank": "Banco",
+          "order_id": "ID orden",
+          "card_type": "Tipo tarjeta",
+          "product_id": "Producto",
+          "quote_total": "Total",
+          "customer_dni": "DNI",
+          "installments": "Cuotas",
+          "customer_email": "Email",
+          "customer_phone": "Teléfono",
+          "payment_method": "Medio de pago",
+          "customer_last_name": "Apellido",
+          "customer_first_name": "Nombre",
+          "payment_method_quote": "Frase de pago"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "107",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
+                "body": {
+                  "dni": "@AI(\"DNI del usuario\", optional:false, isArray:false)",
+                  "email": "@AI(\"email del usuario\", optional:false, isArray:false)",
+                  "phone": "@AI(\"teléfono del usuario\", optional:false, isArray:false)",
+                  "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
+                  "quantity": "@AI(\"usar facts.quantity si existe; si no, 1\", optional:true, isArray:false)",
+                  "last_name": "@AI(\"apellido del usuario\", optional:false, isArray:false)",
+                  "first_name": "@AI(\"nombre del usuario\", optional:false, isArray:false)",
+                  "product_id": "@AI(\"usar SIEMPRE facts.product_id (el mismo que se cotizó). Nunca inventar.\", optional:false, isArray:false)",
+                  "document_type": "DNI",
+                  "payment_method": "@AI(\"usar SIEMPRE facts.payment_method (cash|transfer|card). NUNCA reinventar ni preguntar de nuevo si el fact existe. Nunca enviar en español.\", optional:false, isArray:false)",
+                  "payment_method_quote": "@AI(\"usar SIEMPRE facts.payment_method_quote (frase del cliente sobre cómo paga, con cuotas/banco si aplica). Si falta, reconstruila desde facts.bank/card_type/installments + payment_method.\", optional:true, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Crear Orden",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "dni",
+                      "value": "DNI del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "email",
+                      "value": "email del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "phone",
+                      "value": "teléfono del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "last_name",
+                      "value": "apellido del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "first_name",
+                      "value": "nombre del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "document_type",
+                      "value": "DNI",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "quantity",
+                      "value": "usar facts.quantity si existe; si no, 1",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "product_id",
+                      "value": "usar SIEMPRE facts.product_id (el mismo que se cotizó). Nunca inventar.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method",
+                      "value": "usar SIEMPRE facts.payment_method (cash|transfer|card). NUNCA reinventar ni preguntar de nuevo si el fact existe. Nunca enviar en español.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method_quote",
+                      "value": "usar SIEMPRE facts.payment_method_quote (frase del cliente sobre cómo paga, con cuotas/banco si aplica). Si falta, reconstruila desde facts.bank/card_type/installments + payment_method.",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido (quote_ok / can_create_order=true) y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items ya cotizados. NO la llames si requires_human_handoff=true o si el cliente todavía no confirmó la compra. POST /orders.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Si puede, que agregue un punto de referencia (esquina, negocio cercano). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nEl cliente YA confirmó el resumen. ESTE nodo SOLO crea la orden con la tool.\n\n1) Llamá SÍ O SÍ \"Bausing - Crear Orden\" con:\n   - product_id = facts.product_id\n   - address / dirección de facts\n   - payment_method = facts.payment_method (cash|transfer|card)\n   - payment_method_quote = facts.payment_method_quote\n   - customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - installments/bank/card_type si es card\n2) SOLO si la tool responde OK: confirmá la orden con datos reales (order_id si viene).\n3) Si falla: explicá el error. NUNCA inventes \"orden creada\".\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo acá.\n\nSi es tarjeta, al confirmar la orden mencioná cuotas y que el total incluye el recargo (facts.price_final / card_surcharge_percent) si están.\n",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "order_id",
+            "label": "ID de orden real",
+            "description": "ID/número devuelto por \"Bausing - Crear Orden\" tras éxito real. Sin tool OK no hay order_id."
+          }
+        ],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "continueCondition": "Llamaste \"Bausing - Crear Orden\" con éxito y tenés order_id o confirmación real de la API. Si no llamaste la tool, advance=false.",
+        "dataSourceConfigs": {
+          "107": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
+                "body": {
+                  "dni": "@AI(\"DNI del usuario\", optional:false, isArray:false)",
+                  "email": "@AI(\"email del usuario\", optional:false, isArray:false)",
+                  "phone": "@AI(\"teléfono del usuario\", optional:false, isArray:false)",
+                  "address": "@AI(\"dirección completa: calle y número, ciudad, provincia y código postal. Si esta disponible usar facts.address sin pedirle al usuario el dato\", optional:false, isArray:false)",
+                  "quantity": "@AI(\"cantidad seleccionada por el usuario, si no la indica enviar 1\", optional:true, isArray:false)",
+                  "last_name": "@AI(\"apellido del usuario\", optional:false, isArray:false)",
+                  "first_name": "@AI(\"nombre del usuario\", optional:false, isArray:false)",
+                  "product_id": "@AI(\"el product_id real, EXACTAMENTE el mismo que se cotizó y confirmó con Bausing - Cotizar Pedido\", optional:false, isArray:false)",
+                  "document_type": "DNI",
+                  "payment_method": "@AI(\"Metodo de pago seleccionado por el usuario: efectivo, transferencia o tarjeta. Si es efectivo enviar cash, transferencia enviar transfer y si es tarjeta enviar card.\", optional:false, isArray:false)",
+                  "payment_method_quote": "@AI(\"la frase exacta que escribió el cliente sobre cómo va a pagar tomado de la conversacoin previa\", optional:true, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Crear Orden",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "dirección completa: calle y número, ciudad, provincia y código postal. Si esta disponible usar facts.address sin pedirle al usuario el dato",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "dni",
+                      "value": "DNI del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "email",
+                      "value": "email del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "phone",
+                      "value": "teléfono del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "last_name",
+                      "value": "apellido del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "first_name",
+                      "value": "nombre del usuario",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "document_type",
+                      "value": "DNI",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "quantity",
+                      "value": "cantidad seleccionada por el usuario, si no la indica enviar 1",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "product_id",
+                      "value": "el product_id real, EXACTAMENTE el mismo que se cotizó y confirmó con Bausing - Cotizar Pedido",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method",
+                      "value": "Metodo de pago seleccionado por el usuario: efectivo, transferencia o tarjeta. Si es efectivo enviar cash, transferencia enviar transfer y si es tarjeta enviar card.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method_quote",
+                      "value": "la frase exacta que escribió el cliente sobre cómo va a pagar tomado de la conversacoin previa",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido (quote_ok / can_create_order=true) y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items ya cotizados. NO la llames si requires_human_handoff=true o si el cliente todavía no confirmó la compra. POST /orders.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "tool_template_id": "2134180e-b376-4888-a7a8-ef3c866870c6",
+            "pre_action_responses": "",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 3007.8406733606203,
+        "y": -47.06163388377607
+      }
+    },
+    {
+      "id": "9",
+      "name": "Seguimiento de pedidos",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {},
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "108",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
+                "query": {
+                  "dni": "@AI(\"DNI\", optional:true)",
+                  "limit": "@AI(\"límite, default 10\", optional:true)",
+                  "phone": "@AI(\"teléfono\", optional:true)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Listar Pedidos",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente quiere ver sus pedidos en general (no uno puntual) y tenés su teléfono y/o DNI. NO la uses si ya te dio el número de un pedido específico (ahí va Estado de Pedido). GET /orders.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          {
+            "id": "109",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders/@AI(\"id UUID o crm_order_id\", optional:false)",
+                "query": {
+                  "phone": "@AI(\"teléfono\", optional:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Estado de Pedido",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pregunta por UN pedido puntual (te dio número/ID) y tenés su teléfono para validar que es el dueño. NO la uses para listar todos sus pedidos. GET /orders/:order_id?phone=...",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "SALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nTONO Y REGLAS DE ESTILO (siempre): Si no saludo anteriormente, asegurarse de saludar ahora. Atención al cliente, empática y clara. hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Si no tenés el dato real, preguntalo, no lo completes/inventes vos.\nNunca uses markdown (negrita, links, corchetes de imagen).\n\n\"Bausing - Listar Pedidos\": el cliente quiere ver sus pedidos en general — necesita teléfono y/o DNI.\n\"Bausing - Estado de Pedido\": pregunta por UN pedido puntual (con número/ID) — necesita el número + teléfono.\n\nOBLIGATORIO: SI es el primer mensaje que se responde al usuario siempre comenzar con un mensaje amigable de saludo por haberse comunicado con Bausing.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "continueCondition": "",
+        "dataSourceConfigs": {
+          "108": {
+            "id": "108",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders",
+                "query": {
+                  "dni": "@AI(\"DNI\", optional:true)",
+                  "limit": "@AI(\"límite, default 10\", optional:true)",
+                  "phone": "@AI(\"teléfono\", optional:true)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Listar Pedidos",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente quiere ver sus pedidos en general (no uno puntual) y tenés su teléfono y/o DNI. NO la uses si ya te dio el número de un pedido específico (ahí va Estado de Pedido). GET /orders.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "109": {
+            "id": "109",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/orders/@AI(\"id UUID o crm_order_id\", optional:false)",
+                "query": {
+                  "phone": "@AI(\"teléfono\", optional:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Estado de Pedido",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pregunta por UN pedido puntual (te dio número/ID) y tenés su teléfono para validar que es el dueño. NO la uses para listar todos sus pedidos. GET /orders/:order_id?phone=...",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        },
+        "captureFactsEnabled": false,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 533.5322104365225,
+        "y": 220.22841386265816
+      }
+    },
+    {
+      "id": "10",
+      "name": "Derivar a humano",
+      "type": "handoff",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "emailTo": "facugirardi22@gmail.com",
+        "headers": [],
+        "message": "Handoff Bausing WhatsApp. El cliente necesita atención humana. Revisar la conversación.",
+        "bodyFiles": [],
+        "assigneeId": "",
+        "bodyParams": [],
+        "dataSources": [],
+        "notifyEmail": true,
+        "notifyInApp": false,
+        "userMessage": "Perfecto, te derivo con un asesor de Bausing para que te ayude personalmente. En breve te van a contactar 😊",
+        "ragDataSources": {},
+        "dataSourceConfigs": {},
+        "assignConversationEnabled": false
+      },
+      "position": {
+        "x": 528.8078803895968,
+        "y": 426.0558463603473
+      }
+    },
+    {
+      "id": "12",
+      "name": "1a. Resolver Zona",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "direccion_completa",
+          "address"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "address": "Dirección (alias)",
+          "direccion_completa": "Dirección completa"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output",
+            "zone_resolved"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "zone_resolved": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- OBLIGATORIO: Si ves palabras mal escritas, pregunta para confirmar la direccion interpretada.\n- Guardá el texto completo en el hecho direccion_completa (y address con el mismo valor).\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.",
+        "clearFactKeys": [],
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "direccion_completa",
+            "label": "Dirección completa",
+            "description": "Texto de dirección del cliente (calle y número, ciudad, provincia y/o CP). Aceptá el mensaje completo aunque tenga typos. No hace falta formato perfecto."
+          }
+        ],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "nextStartNodeId": "",
+        "continueCondition": "facts.direccion_completa ya tiene valor.",
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 508.69977533314113,
+        "y": -44.0952404011972
+      }
+    },
+    {
+      "id": "node-1786633793742-14",
+      "name": "Obtener ID Localidad copia",
+      "type": "http_request",
+      "config": {
+        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+        "body": "",
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "method": "POST",
+        "headers": [],
+        "retries": 0,
+        "timeout": 10000,
+        "useMock": false,
+        "bodyMode": "json",
+        "bodyFiles": [],
+        "timeoutMs": 10000,
+        "bodyParams": [],
+        "mockNodeId": "",
+        "dataSources": [],
+        "errorHandling": "continue",
+        "ragDataSources": {},
+        "savedVariables": [
+          {
+            "key": "catalog_id",
+            "path": "body.data.catalog_id",
+            "label": "Catalog Id"
+          },
+          {
+            "key": "crm_zone_id",
+            "path": "body.data.crm_zone_id",
+            "label": "Crm Zone Id"
+          },
+          {
+            "key": "localityid",
+            "path": "body.data.locality.id",
+            "label": "LocalityId"
+          },
+          {
+            "key": "label",
+            "path": "body.data.estimated_delivery.label",
+            "label": "Label"
+          },
+          {
+            "key": "is_third_party_transport",
+            "path": "body.data.is_third_party_transport",
+            "label": "Is Third Party Transport"
+          },
+          {
+            "key": "cost_label",
+            "path": "body.data.shipping_summary.cost_label",
+            "label": "Cost Label"
+          },
+          {
+            "key": "is_free",
+            "path": "body.data.shipping_summary.is_free",
+            "label": "Is Free"
+          }
+        ],
+        "sections_config": {
+          "body": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "address",
+                "value": "{{direccion_completa}}",
+                "isArray": false,
+                "required": true,
+                "valueMode": "variable",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "headers": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "X-API-Key",
+                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "pathParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          },
+          "queryParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          }
+        },
+        "include_metadata": false,
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 772.6206198220257,
+        "y": -41.179575295920486
+      }
+    },
+    {
+      "id": "node-1786732711679-12",
+      "name": "2. Resolver Zona",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "direccion_completa",
+          "address"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "address": "Dirección (alias)",
+          "direccion_completa": "Dirección completa"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output",
+            "zone_resolved"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "zone_resolved": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- Guardá el texto completo en el hecho direccion_completa (y address con el mismo valor).\n- OBLIGATORIO: Si ves palabras mal escritas, pregunta para confirmar la direccion interpretada.\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.",
+        "clearFactKeys": [],
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "direccion_completa",
+            "label": "Dirección completa",
+            "description": "Texto de dirección del cliente (calle y número, ciudad, provincia y/o CP). Aceptá el mensaje completo aunque tenga typos. No hace falta formato perfecto."
+          }
+        ],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "nextStartNodeId": "",
+        "continueCondition": "facts.direccion_completa ya tiene valor.",
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 523.4235000783437,
+        "y": 833.234654806886
+      }
+    },
+    {
+      "id": "node-1786732711679-13",
+      "name": "Obtener ID Localidad copia copia",
+      "type": "http_request",
+      "config": {
+        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+        "body": "",
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "method": "POST",
+        "headers": [],
+        "retries": 0,
+        "timeout": 10000,
+        "useMock": false,
+        "bodyMode": "json",
+        "bodyFiles": [],
+        "timeoutMs": 10000,
+        "bodyParams": [],
+        "mockNodeId": "",
+        "dataSources": [],
+        "errorHandling": "continue",
+        "ragDataSources": {},
+        "savedVariables": [
+          {
+            "key": "catalog_id",
+            "path": "body.data.catalog_id",
+            "label": "Catalog Id"
+          },
+          {
+            "key": "crm_zone_id",
+            "path": "body.data.crm_zone_id",
+            "label": "Crm Zone Id"
+          },
+          {
+            "key": "localityid",
+            "path": "body.data.locality.id",
+            "label": "LocalityId"
+          },
+          {
+            "key": "label",
+            "path": "body.data.estimated_delivery.label",
+            "label": "Label"
+          },
+          {
+            "key": "is_third_party_transport",
+            "path": "body.data.is_third_party_transport",
+            "label": "Is Third Party Transport"
+          },
+          {
+            "key": "cost_label",
+            "path": "body.data.shipping_summary.cost_label",
+            "label": "Cost Label"
+          },
+          {
+            "key": "is_free",
+            "path": "body.data.shipping_summary.is_free",
+            "label": "Is Free"
+          }
+        ],
+        "sections_config": {
+          "body": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "address",
+                "value": "{{direccion_completa}}",
+                "isArray": false,
+                "required": true,
+                "valueMode": "variable",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "headers": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "X-API-Key",
+                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "pathParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          },
+          "queryParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          }
+        },
+        "include_metadata": false,
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 784.4499784698744,
+        "y": 839.0959816819549
+      }
+    },
+    {
+      "id": "node-1786732774278-14",
+      "name": "1. Catálogo y zona copia",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "cart_items",
+          "product_id",
+          "quote_total"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "cart_items": "Items del carrito"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "111",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
+                  "locality_id": "@AI(\"usar el dato ya guardado: facts.localityid\", optional:false, isArray:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Producto",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "q",
+                      "value": "nombre del producto puntual que busca el cliente",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "locality_id",
+                      "value": "usar el dato ya guardado: facts.localityid",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id).",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          },
+          {
+            "id": "103",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/@AI(\"product_id\", optional:false)",
+                "query": {},
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Detalle de Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: ayudar al cliente a identificar productos y sus precios.\n\nCATEGORÍAS\nSi el cliente pide una categoría general, con o sin medida, llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\".\n\nNunca uses el texto del cliente como subcategory_id. \"2 plazas\", \"queen\", \"1 plaza\", etc. NO son IDs.\n\nBuscá en la respuesta de esa tool la categoría padre correcta y luego la subcategoría correspondiente. Recién entonces usá SU id real en \"Bausing - Buscar Catalogo\".\n\nEjemplo: si pide \"colchones de 2 plazas\":\n\n1. Categorías y Subcategorías.\n2. Buscar \"2 plazas\" dentro de la categoría padre \"Colchones\".\n3. Tomar su id real.\n4. Buscar Catalogo con ese id.\n\nNunca uses una subcategoría perteneciente a otra categoría padre.\n\nPRODUCTOS\nCon subcategory_id real, usá \"Bausing - Buscar Catalogo\".\nSi menciona un producto puntual por nombre, usá \"Bausing - Buscar Producto\".\nNunca inventes product_id.\nMostrá solo 3 o 4 opciones con nombre y price_transfer, o price_card si no existe.\n\nCOTIZACIÓN\nSolo llamá \"Bausing - Cotizar Pedido\" después de que el cliente elija un producto puntual.\nConsultar precios NO significa querer comprar.\n\nPAGO\nNunca preguntes el método de pago por iniciativa propia.\n\nSolo hablá de tarjeta, cuotas, banco, transferencia o efectivo si el cliente pregunta o menciona explícitamente una forma de pago.\n\n\"Bausing - Validar Cuotas Tarjeta\" SOLO se usa si el cliente menciona explícitamente tarjeta, crédito o cuotas.\n\nSi el cliente no habló de cómo va a pagar, no preguntes nada sobre el método de pago.\n\nCARRITO\nSolo agregá un producto si el cliente expresa intención de compra, por ejemplo \"quiero ese\", \"lo llevo\" o \"dale, ese\".\n\nIMÁGENES\nSolo mostrales una imagen si la piden explícitamente para un producto puntual.\n\nDIRECCIÓN\nSi cambia la dirección, llamá nuevamente \"Bausing - Resolver Zona\" con la nueva dirección completa.\n\nSUBCATEGORÍA OBLIGATORIA\nSi el pedido es genérico (solo \"colchones\" u otra categoría padre con varias subcategorías), NO busques todavía.\nPreguntá amablemente qué subcategoría quiere, listando opciones reales. Solo buscá cuando tengas subcategory_id concreto.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "continueCondition": "El cliente eligió un producto concreto (con product_id) y quiere cotizar o terminar de comprar",
+        "dataSourceConfigs": {
+          "103": {
+            "id": "103",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/@AI(\"product_id\", optional:false)",
+                "query": {},
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Detalle de Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
+          },
+          "111": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
+                "query": {
+                  "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
+                  "locality_id": "@AI(\"usar el dato ya guardado: facts.localityid\", optional:false, isArray:false)"
+                },
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Buscar Producto",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "q",
+                      "value": "nombre del producto puntual que busca el cliente",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "locality_id",
+                      "value": "usar el dato ya guardado: facts.localityid",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO (y SOLO cuando): el cliente pregunta puntualmente por UN producto nombrándolo (ej. \"tienen el sommier Rosen?\", \"quiero el colchón Simmons Aire\"), y queda claro en su mensaje que está preguntando por ESE producto en particular — nunca la uses para navegar una categoría o elegir una medida (para eso usá \"Bausing - Buscar Catalogo\" con subcategory_id).",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "tool_template_id": "b93b7541-36fd-4a55-8a6f-4e94d08f0707",
+            "pre_action_responses": "",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 1100.3930407905984,
+        "y": 834.0188017501099
+      }
+    },
+    {
+      "id": "node-1786739435672-15",
+      "name": "Bausing - Categorías y Subcategorías",
+      "type": "http_request",
+      "config": {
+        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/categories",
+        "body": "",
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "method": "GET",
+        "headers": [],
+        "retries": 0,
+        "timeout": 10000,
+        "useMock": false,
+        "bodyMode": "none",
+        "bodyFiles": [],
+        "timeoutMs": 10000,
+        "bodyParams": [],
+        "mockNodeId": "",
+        "dataSources": [],
+        "errorHandling": "continue",
+        "ragDataSources": {},
+        "savedVariables": [
+          {
+            "key": "categorias",
+            "path": "body.data",
+            "label": "categorias"
+          }
+        ],
+        "sections_config": {
+          "body": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          },
+          "headers": {
+            "json": "{}",
+            "list": [
+              {
+                "name": "X-API-Key",
+                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json",
+                "isArray": false,
+                "required": true,
+                "valueMode": "text",
+                "aiGenerated": false
+              }
+            ],
+            "mode": "list",
+            "enabled": true
+          },
+          "pathParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          },
+          "queryParams": {
+            "json": "{}",
+            "list": [],
+            "mode": "list",
+            "enabled": false
+          }
+        },
+        "include_metadata": false,
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1076.7565146283705,
+        "y": 33.036753330772
+      }
+    },
+    {
+      "id": "node-1786752306412-15",
+      "name": "Paso del bot",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {},
+        "llmLiteKey": "",
+        "ragEnabled": true,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown.\n\nEste es el saludo / dudas generales.\nRespondé siempre empezando con: \"¡Hola! Gracias por comunicarte con Bausing, ¿cómo te puedo ayudar?\"\nSolo resolvé dudas generales del negocio. Si preguntan productos, precios u opciones concretas, no inventes datos: invitá a decir qué busca (ej. colchones) para ayudarlo.\n{{workflow.rag.context}}",
+        "executionMode": "respond_and_end",
+        "requiredSlots": [],
+        "ragDataSources": {
+          "trainingFileIds": [
+            "05e8b2d4-c4a8-44e0-968d-300bcb820487",
+            "ed274f2c-f3c8-4e1c-bd62-8226dd42d8b6",
+            "48002cdc-8155-4796-8a81-a2ff255a0412"
+          ],
+          "alwaysSendResourceFileIds": []
+        },
+        "savedVariables": [],
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": false,
+        "waitForUserResponse": false,
+        "finalizeConversationSession": true
+      },
+      "position": {
+        "x": 610.3498301370469,
+        "y": 632.0568701226462
+      }
+    },
+    {
+      "id": "node-subcat-clarify-01",
+      "name": "1b. Detectar subcategoría",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "subcategory_id",
+          "subcategory_name",
+          "category_name"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "category_name": "Categoría",
+          "subcategory_id": "ID subcategoría",
+          "subcategory_name": "Subcategoría"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "subcategory_ready": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nContexto de categorías (fuente de verdad):\n{{categorias}}\n\nTenés el historial completo de la conversación. Tu ÚNICO trabajo: ver si el cliente YA eligió una medida/tipo.\n\nCUENTA como elegida (sinónimos OK → normalizá al nombre de {{categorias}}):\n- una plaza / 1 plaza\n- plaza y media\n- dos plazas / 2 plazas\n- queen / queen size / king / extra queen / cuna\nu otra subcategoría real de la lista.\n\nSI YA HAY medida/tipo en CUALQUIER mensaje del historial (aunque el último sea la dirección):\n1) Guardá subcategory_name (nombre canónico) y subcategory_id si aparece en {{categorias}}.\n2) Respondé UNA sola frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/\"colchones\"/genérico o nada):\n1) subcategory_name = null (obligatorio: no inventes).\n2) Respondé exactamente un string vacío: \"\"\n   (no digas OK, no preguntes; el siguiente paso pedirá la medida).\n\nProhibido listar productos o precios.",
+        "executionMode": "execute_and_continue",
+        "ragDataSources": {},
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": false
+      },
+      "position": {
+        "x": 1165.8907424516462,
+        "y": -200.37612012153912
+      }
+    },
+    {
+      "id": "node-pago-clarify-01",
+      "name": "2a. Medio de pago",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "payment_method",
+          "payment_method_quote"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "payment_method": "Medio (cash|transfer|card)",
+          "payment_method_quote": "Frase de pago"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "payment_ready": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nTu ÚNICO trabajo: que el cliente elija medio de pago (efectivo, transferencia o tarjeta).\nEl pago se hace AL RECIBIR en el domicilio.\n\nPROHIBIDO\n- Asumir efectivo/transferencia/tarjeta.\n- Cotizar, mostrar totales o llamar tools de cotizar/orden.\n- Si eligió producto, eso NO es medio de pago.\n\nFLUJO\n1) Si aún no eligió medio, preguntá UNA vez:\n   \"El pago se hace al recibir el pedido en tu domicilio. ¿Preferís efectivo, transferencia o tarjeta?\"\n2) Cuando responda:\n   - efectivo → guardá payment_method=cash\n   - transferencia → payment_method=transfer\n   - tarjeta/crédito/cuotas → payment_method=card\n3) Guardá payment_method_quote con la frase del cliente.\n4) Confirmá breve el medio. Si es tarjeta, NO pidas banco/cuotas acá (eso es el siguiente paso). Si es cash/transfer, listo.\n\nIMPORTANTE: payment_method en hechos debe ser exactamente: cash, transfer o card (nunca en español).",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "payment_method",
+            "label": "Medio de pago",
+            "description": "Valor normalizado: cash, transfer o card (según efectivo/transferencia/tarjeta). Obligatorio."
+          }
+        ],
+        "ragDataSources": {},
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 1685.0573791337497,
+        "y": -78.4786838578248
+      }
+    },
+    {
+      "id": "node-pago-es-tarjeta",
+      "name": "¿Paga con tarjeta?",
+      "type": "conditional",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "bodyFiles": [],
+        "bodyParams": [],
+        "expression": "[\"card\",\"tarjeta\",\"credito\",\"crédito\",\"credit\",\"tajeta\"].includes(String({{payment_method}} || \"\").toLowerCase())",
+        "dataSources": [],
+        "conditionType": "simple",
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1914.5174776216886,
+        "y": -217.4380081810822
+      }
+    },
+    {
+      "id": "node-pago-tarjeta-01",
+      "name": "2b. Datos tarjeta / cuotas",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "bank",
+          "card_type",
+          "installments",
+          "card_surcharge_percent",
+          "card_validation_ok",
+          "payment_method_quote",
+          "payment_method"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "bank": "Banco",
+          "card_type": "Tipo de tarjeta",
+          "installments": "Cuotas",
+          "payment_method": "Medio de pago",
+          "card_validation_ok": "Cuotas validadas",
+          "payment_method_quote": "Frase de pago",
+          "card_surcharge_percent": "Recargo % tarjeta"
+        },
+        "ragEnabled": false,
+        "dataSources": [
+          {
+            "id": "112",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
+                "body": {
+                  "bank": "@AI(\"banco que indicó el cliente (facts.bank). Obligatorio para consultar.\", optional:false, isArray:false)",
+                  "card_type": "@AI(\"tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.\", optional:true, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Validar Cuotas Tarjeta",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "bank",
+                      "value": "banco que indicó el cliente (facts.bank). Obligatorio para consultar.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "card_type",
+                      "value": "tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "installments",
+                      "value": "cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "description": "Consulta/valida cuotas de tarjeta Bausing. Con solo bank: responde tipos de tarjeta. Con bank+card_type: lista cuotas disponibles y recargoPorcentaje de cada una. Con bank+card_type+installments: valida y devuelve recargo_porcentaje. Las respuestas status:false con data.installments o data.card_types SON útiles: usalas, no inventes.",
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes números de cuotas ni recargos.\n\nEl cliente paga con tarjeta al recibir en domicilio.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (OBLIGATORIA para cualquier dato de cuotas/recargo):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo O el cliente pregunta \"¿hasta cuántas cuotas?\": llamá la tool YA (sin inventar).\n   - Si la tool pidió tarjeta: mostrá las card_types reales y pedí Visa/Mastercard/Naranja/etc.\n   - Si devolvió installments: listá las opciones reales (ej. 1/3/6/9/12 con su % de recargo) y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con bank+card_type+installments. Guardá:\n   - bank, card_type, installments\n   - card_surcharge_percent = recargo_porcentaje de la tool\n   - payment_method_quote (ej. \"Visa Santander 12 cuotas\")\n   - card_validation_ok=true\n4) Confirmá breve: cuotas OK + recargo % real. NO cotices el producto acá (eso es Cotizar), pero sí mencioná el % de recargo.\n\nPROHIBIDO\n- Respuestas genéricas tipo \"hasta 12 cuotas sin interés\" sin tool.\n- Avanzar sin card_validation_ok=true y card_surcharge_percent numérico de la tool.",
+        "clearFactKeys": [],
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "bank",
+            "label": "Banco",
+            "description": "Banco emisor explícito."
+          },
+          {
+            "id": "card_type",
+            "label": "Tipo de tarjeta",
+            "description": "Visa/Mastercard/Naranja/Amex/Cabal según API."
+          }
+        ],
+        "ragDataSources": {},
+        "savedVariables": [],
+        "nextStartNodeId": "",
+        "continueCondition": "Hay bank, card_type, installments elegidos, card_surcharge_percent numérico de la tool y card_validation_ok=true tras llamar \"Bausing - Validar Cuotas Tarjeta\" con los tres datos, y además el usuario expresó claramente que quiere proceder o continuar con la compra. Si el usuario solo preguntó cuántas cuotas hay, pidió opciones de pago, o solo dio banco/tarjeta sin manifestar intención de avanzar con la compra, advance=false, aunque hayas listado o validado opciones con la tool.",
+        "dataSourceConfigs": {
+          "112": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
+                "body": {
+                  "bank": "@AI(\"banco que indicó el cliente (facts.bank). Obligatorio para consultar.\", optional:false, isArray:false)",
+                  "card_type": "@AI(\"tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.\", optional:true, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Validar Cuotas Tarjeta",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "bank",
+                      "value": "banco que indicó el cliente (facts.bank). Obligatorio para consultar.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "card_type",
+                      "value": "tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "installments",
+                      "value": "cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "tool_template_id": "b93b7541-36fd-4a55-8a6f-4e94d08f0707",
+            "pre_action_responses": "",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        },
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 2141.622333324488,
+        "y": -311.569464891922
+      }
+    },
+    {
+      "id": "node-subcat-ready",
+      "name": "¿Ya eligió subcategoría?",
+      "type": "conditional",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "bodyFiles": [],
+        "bodyParams": [],
+        "expression": "Boolean(String({{facts.subcategory_name}} || {{subcategory_name}} || \"\").trim())",
+        "dataSources": [],
+        "conditionType": "simple",
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1509.5996796925629,
+        "y": -252.19146139461816
+      }
+    },
+    {
+      "id": "node-subcat-ask-wait",
+      "name": "1c. Pedir subcategoría",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "subcategory_id",
+          "subcategory_name",
+          "category_name"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "category_name": "Categoría",
+          "subcategory_id": "ID subcategoría",
+          "subcategory_name": "Subcategoría"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown.\n\nEl cliente todavía no eligió medida/tipo. Pedí UNA sola vez usando opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza=1 plaza, dos plazas=2 plazas, etc.\n\nNo listes productos. No cotices.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "subcategory_name",
+            "label": "Subcategoría / medida",
+            "description": "Medida elegida: una plaza, 1 plaza, dos plazas, 2 plazas, queen, king, plaza y media, etc. Normalizá al nombre de {{categorias}}."
+          }
+        ],
+        "ragDataSources": {},
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 1599.0989055278812,
+        "y": 258.77884093861456
+      }
+    },
+    {
+      "id": "node-datos-cliente-01",
+      "name": "3a. Datos del cliente",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "customer_first_name",
+          "customer_last_name",
+          "customer_dni",
+          "customer_email",
+          "customer_phone"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "customer_dni": "DNI",
+          "customer_email": "Email",
+          "customer_phone": "Teléfono",
+          "customer_last_name": "Apellido",
+          "customer_first_name": "Nombre"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nTu ÚNICO trabajo: completar datos del comprador para la orden:\n- nombre (customer_first_name)\n- apellido (customer_last_name)\n- DNI (customer_dni)\n- email (customer_email)\n- teléfono (customer_phone)\n\nSi YA están todos en facts/historial: confirmá en una frase corta y no vuelvas a pedirlos.\nSi faltan: pedí lo que falte (juntos o lo pendiente). No cotices. No crees la orden. No digas que la orden se creó.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "customer_first_name",
+            "label": "Nombre",
+            "description": "Nombre del comprador"
+          },
+          {
+            "id": "customer_last_name",
+            "label": "Apellido",
+            "description": "Apellido del comprador"
+          },
+          {
+            "id": "customer_dni",
+            "label": "DNI",
+            "description": "DNI numérico del comprador"
+          },
+          {
+            "id": "customer_email",
+            "label": "Email",
+            "description": "Email de contacto"
+          },
+          {
+            "id": "customer_phone",
+            "label": "Teléfono",
+            "description": "Teléfono de contacto"
+          }
+        ],
+        "ragDataSources": {},
+        "continueCondition": "Están completos customer_first_name, customer_last_name, customer_dni, customer_email y customer_phone (en el mensaje actual o ya en facts/historial). Si falta alguno, advance=false.",
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 2492.5902862782796,
+        "y": -108.33707364479419
+      }
+    },
+    {
+      "id": "node-resumen-orden-01",
+      "name": "3b. Resumen y confirmación",
+      "type": "agent",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "factKeys": [
+          "order_summary_shown",
+          "order_confirmed_final",
+          "product_id",
+          "quote_total",
+          "payment_method",
+          "payment_method_quote",
+          "bank",
+          "card_type",
+          "installments",
+          "customer_first_name",
+          "customer_last_name",
+          "customer_dni",
+          "customer_email",
+          "customer_phone",
+          "direccion_completa",
+          "address",
+          "card_surcharge_percent",
+          "price_final",
+          "display_total"
+        ],
+        "aiModelId": "",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "factLabels": {
+          "order_summary_shown": "Resumen mostrado",
+          "pending_order_review": "En revisión de orden"
+        },
+        "ragEnabled": false,
+        "dataSources": [],
+        "outputSchema": {
+          "type": "object",
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nANTES de crear la orden, mostrá el resumen completo:\n\n1) Producto y cantidad\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir el recargo (no el precio base solo).\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nPRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n\nPreguntá: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO (en este mismo nodo): pedí el dato nuevo, actualizá facts, recalculá precio_final si cambian cuotas/recargo, volvé a mostrar el resumen.\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" NO digas que ya se creó. NO llames Crear Orden.",
+        "executionMode": "wait_for_user",
+        "requiredSlots": [
+          {
+            "id": "order_confirmed_final",
+            "label": "Confirmación final del resumen",
+            "description": "El cliente confirmó EXPLÍCITAMENTE que el resumen está bien y quiere crear la orden (sí / confirmo / dale / está bien / crear). Si pide cambiar producto, dirección, pago, tarjeta o datos: NO es confirmación (advance=false); el nodo corrige en el mismo paso y vuelve a mostrar el resumen."
+          }
+        ],
+        "ragDataSources": {},
+        "continueCondition": "El ÚLTIMO mensaje del usuario confirma el resumen completo para crear la orden (sí / ok / confirmo / dale / está bien / creala). Si pide cambiar algo, corrige datos, o todavía no confirmó, advance=false.",
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": true,
+        "waitForUserResponse": true
+      },
+      "position": {
+        "x": 2744.4056275513585,
+        "y": 42.39846460416301
+      }
+    }
+  ],
+  "edges": [
+    {
+      "to": "9",
+      "from": "2",
+      "sourceHandle": "202"
+    },
+    {
+      "to": "10",
+      "from": "2",
+      "sourceHandle": "203"
+    },
+    {
+      "to": "7",
+      "from": "6"
+    },
+    {
+      "to": "12",
+      "from": "2",
+      "sourceHandle": "204"
+    },
+    {
+      "to": "10",
+      "from": "7",
+      "sourceHandle": "true"
+    },
+    {
+      "to": "node-1786633793742-14",
+      "from": "12"
+    },
+    {
+      "to": "12",
+      "from": "2",
+      "sourceHandle": "201"
+    },
+    {
+      "to": "node-1786732711679-12",
+      "from": "2",
+      "sourceHandle": "case_0"
+    },
+    {
+      "to": "node-1786732711679-13",
+      "from": "node-1786732711679-12"
+    },
+    {
+      "to": "node-1786732774278-14",
+      "from": "node-1786732711679-13"
+    },
+    {
+      "to": "node-subcat-clarify-01",
+      "from": "node-1786739435672-15"
+    },
+    {
+      "to": "node-1786739435672-15",
+      "from": "node-1786633793742-14"
+    },
+    {
+      "to": "node-1786752306412-15",
+      "from": "2",
+      "sourceHandle": "default"
+    },
+    {
+      "to": "node-pago-es-tarjeta",
+      "from": "node-pago-clarify-01"
+    },
+    {
+      "to": "node-pago-tarjeta-01",
+      "from": "node-pago-es-tarjeta",
+      "sourceHandle": "true"
+    },
+    {
+      "to": "6",
+      "from": "node-pago-es-tarjeta",
+      "sourceHandle": "false"
+    },
+    {
+      "to": "6",
+      "from": "node-pago-tarjeta-01"
+    },
+    {
+      "to": "node-subcat-ready",
+      "from": "node-subcat-clarify-01"
+    },
+    {
+      "to": "4",
+      "from": "node-subcat-ready",
+      "sourceHandle": "true"
+    },
+    {
+      "to": "node-subcat-ask-wait",
+      "from": "node-subcat-ready",
+      "sourceHandle": "false"
+    },
+    {
+      "to": "4",
+      "from": "node-subcat-ask-wait"
+    },
+    {
+      "to": "node-datos-cliente-01",
+      "from": "7",
+      "sourceHandle": "false"
+    },
+    {
+      "to": "node-resumen-orden-01",
+      "from": "node-datos-cliente-01"
+    },
+    {
+      "to": "node-pago-clarify-01",
+      "from": "4"
+    },
+    {
+      "to": "8",
+      "from": "node-resumen-orden-01"
+    }
+  ],
+  "finalOutputSchema": {
+    "type": "object",
+    "required": [
+      "content",
+      "resources"
+    ],
+    "properties": {
+      "content": {
+        "type": "string"
+      },
+      "resources": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "url",
+            "title"
+          ],
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "additionalProperties": false
+  }
+}
