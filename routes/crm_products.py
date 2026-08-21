@@ -91,6 +91,7 @@ def list_crm_products():
                 cp.crm_updated_at,
                 cp.raw,
                 cp.hidden_from_not_completed_list,
+                cp.stock,
                 p.id as product_id,
                 p.name as product_name
             FROM crm_products cp
@@ -179,6 +180,7 @@ def list_crm_products():
                 'product_name': row.product_name,
                 'is_completed': row.product_id is not None,
                 'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
+                'stock': bool(row.stock) if row.stock is not None else True,
                 'raw': row.raw
             })
         
@@ -265,6 +267,7 @@ def get_crm_product(product_id):
                 cp.crm_updated_at,
                 cp.raw,
                 cp.hidden_from_not_completed_list,
+                cp.stock,
                 p.id as product_id
             FROM crm_products cp
             LEFT JOIN products p ON p.crm_product_id = cp.crm_product_id
@@ -296,9 +299,10 @@ def get_crm_product(product_id):
             'product_id': str(row.product_id) if row.product_id else None,
             'is_completed': row.product_id is not None,
             'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
+            'stock': bool(row.stock) if row.stock is not None else True,
             'raw': row.raw
         }
-        
+
         # Si está completado, obtener datos del producto
         if row.product_id:
             product = Product.query.get(row.product_id)
@@ -494,6 +498,14 @@ def complete_crm_product(product_id):
             db.session.add(product)
         
         db.session.flush()  # Para obtener el ID del producto
+
+        # Permitir que el admin marque manualmente si el producto tiene stock,
+        # reusando el mismo flag que el webhook del CRM (crm_products.stock).
+        if 'has_stock' in data and data['has_stock'] is not None:
+            db.session.execute(
+                text("UPDATE crm_products SET stock = :stock WHERE crm_product_id = :crm_product_id"),
+                {'stock': bool(data['has_stock']), 'crm_product_id': crm_product_id_int}
+            )
 
         # Sincronizar product_subcategories en creación y actualización (antes solo corría en is_update).
         if 'subcategory_ids' in data and isinstance(data['subcategory_ids'], list):
@@ -1127,6 +1139,7 @@ def get_crm_combo(combo_id):
                 cp.crm_updated_at,
                 cp.raw,
                 cp.hidden_from_not_completed_list,
+                cp.stock,
                 p.id as product_id
             FROM crm_products cp
             LEFT JOIN products p ON p.crm_product_id = cp.crm_product_id
@@ -1176,6 +1189,7 @@ def get_crm_combo(combo_id):
             'product_id': str(row.product_id) if row.product_id else None,
             'is_completed': row.product_id is not None,
             'hidden_from_not_completed_list': bool(row.hidden_from_not_completed_list),
+            'stock': bool(row.stock) if row.stock is not None else True,
             'items': items,
             'raw': row.raw
         }
