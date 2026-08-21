@@ -411,6 +411,9 @@ def complete_crm_product(product_id):
                 'created_at', 'id', 'subcategories',  # Campos que no deben actualizarse desde el request
                 'basic_color',
                 'manual_color_labels',
+                # has_stock/get_total_stock colisionan con métodos de Product (setattr los pisaría con
+                # un valor no-callable); has_crm_stock se maneja aparte contra crm_products.stock.
+                'has_stock', 'get_total_stock', 'has_crm_stock',
             }
             
             for key, value in data.items():
@@ -501,10 +504,12 @@ def complete_crm_product(product_id):
 
         # Permitir que el admin marque manualmente si el producto tiene stock,
         # reusando el mismo flag que el webhook del CRM (crm_products.stock).
-        if 'has_stock' in data and data['has_stock'] is not None:
+        # Ojo: NO usar la key "has_stock" en el payload, colisiona con Product.has_stock()
+        # (método de stock por variantes) y el loop genérico de arriba lo pisaría con un bool.
+        if 'has_crm_stock' in data and data['has_crm_stock'] is not None:
             db.session.execute(
                 text("UPDATE crm_products SET stock = :stock WHERE crm_product_id = :crm_product_id"),
-                {'stock': bool(data['has_stock']), 'crm_product_id': crm_product_id_int}
+                {'stock': bool(data['has_crm_stock']), 'crm_product_id': crm_product_id_int}
             )
 
         # Sincronizar product_subcategories en creación y actualización (antes solo corría en is_update).
