@@ -85,19 +85,49 @@ def _customer_from_body(body):
     return flat
 
 
+def _parse_item_token(token):
+    """Un ítem del carrito viene como string suelto "product_id:quantity" (o solo
+    "product_id", quantity=1) — ver _items_from_body para el motivo."""
+    if isinstance(token, dict):
+        return token
+    text = str(token if token is not None else "").strip()
+    if not text:
+        return None
+    if ":" in text:
+        pid, _, qty = text.rpartition(":")
+        try:
+            quantity = int(str(qty).strip())
+        except (TypeError, ValueError):
+            quantity = 1
+        return {"product_id": pid.strip(), "quantity": quantity}
+    return {"product_id": text, "quantity": 1}
+
+
 def _items_from_body(body):
-    """El motor de Atendium a veces serializa mal el array anidado items:[{product_id,
-    quantity}] y termina mandando product_id vacío pese a que su propio log de chat
-    muestra un id real. Como estas tools ya están limitadas a UN producto por llamada,
-    aceptamos también product_id/quantity como campos planos (mucho más confiables
-    para el motor que un array anidado) y construimos el items[] acá si hace falta."""
-    items = _coerce_list(body.get("items"))
-    if isinstance(items, list) and items and any((it or {}).get("product_id") for it in items if isinstance(it, dict)):
-        return items
+    """El motor de Atendium no serializa bien un array de OBJETOS anidados
+    (items:[{product_id, quantity}] llega como el string plano "[{...}]", no como
+    array real, y la tool lo rechaza). Un array de STRINGS sueltos sí sobrevive,
+    así que cada ítem del carrito viaja como "product_id:quantity" en una lista
+    de texto y lo parseamos acá. Toleramos además el formato viejo (array de
+    dicts, o un solo string con los ítems separados por coma) y el fallback
+    plano product_id/quantity de una tool que todavía no se haya migrado."""
+    raw_items = _coerce_list(body.get("items"))
+
+    if isinstance(raw_items, str):
+        raw_items = [tok for tok in raw_items.split(",") if tok.strip()]
+
+    if isinstance(raw_items, list) and raw_items:
+        if any(isinstance(it, dict) and it.get("product_id") for it in raw_items):
+            return raw_items
+        parsed = [_parse_item_token(it) for it in raw_items]
+        parsed = [it for it in parsed if it]
+        if parsed:
+            return parsed
+
     flat_product_id = body.get("product_id")
     if flat_product_id:
         return [{"product_id": flat_product_id, "quantity": body.get("quantity") or 1}]
-    return items
+    return raw_items if isinstance(raw_items, list) else []
 
 
 PAYMENT_METHOD_ALIASES = {
