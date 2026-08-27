@@ -694,6 +694,18 @@ def create_order():
 
     medios_pago_id = crm_medios_pago_id_for_checkout_method(payment_method)
     observations = (body.get("observations") or "").strip()
+
+    if payment_method == "card":
+        card_type = (body.get("card_type") or "").strip()
+        bank = (body.get("bank") or "").strip()
+        installments = body.get("installments")
+        card_bits = [b for b in (card_type, bank) if b]
+        card_note = " ".join(card_bits)
+        if installments not in (None, ""):
+            card_note = f"{card_note} {installments} cuotas".strip()
+        if card_note:
+            observations = f"{observations}\nTarjeta: {card_note}".strip()
+
     origin_note = "Origen: Atendium bot"
     observations = f"{observations}\n{origin_note}".strip() if observations else origin_note
 

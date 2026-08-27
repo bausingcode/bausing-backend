@@ -237,12 +237,12 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: mostrar opciones del catálogo para la subcategoría YA elegida y ayudar a elegir un producto concreto.\n\nLa subcategoría elegida está en los hechos (subcategory_id / subcategory_name) o en el historial reciente. Categorías de referencia: {{categorias}}\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" UNA sola vez con el subcategory_id real de la subcategoría elegida.\n- Si falta el id, buscalo en {{categorias}} por el nombre elegido. Nunca inventes IDs.\n- NUNCA busques varias subcategorías en el mismo turno.\n- NUNCA amplíes a toda la categoría padre (ej. todos los colchones). Solo la subcategoría confirmada.\n- Si el cliente cambia de subcategoría, pedí confirmación y recién ahí buscá de nuevo con el nuevo id.\n\nPRODUCTOS\nMostrá solo 3 o 4 opciones con nombre y price_transfer (o price_card si no hay transfer).\nSi menciona un producto puntual por nombre, buscá ese producto (sin inventar product_id).\n\nCOTIZACIÓN / CARRITO (puede haber varios productos)\nConsultar precios no es comprar. Solo agregá al carrito si dice \"quiero ese\", \"lo llevo\" o similar.\n- Cuando el cliente confirma un producto, agregalo a facts.cart_items como {\"product_id\": \"...\", \"quantity\": N, \"name\": \"...\"} (product_id real, nunca inventado; quantity default 1 salvo que pida más). Si cart_items ya tenía productos, SUMÁ este sin borrar los anteriores.\n- Después de agregarlo, preguntá \"¿Algo más o cotizamos así?\". No asumas que terminó.\n- Si pide otro producto, seguí mostrando catálogo y repetí el agregado a cart_items.\n- Si pide sacar o cambiar la cantidad de algo, actualizá cart_items en consecuencia.\n- Recién avanzá al paso siguiente cuando el cliente diga que ya eligió todo (\"eso es todo\", \"nada más\", \"cotizame\", \"listo\", \"dale, cotizá\").\n- Compatibilidad: si cart_items termina con un solo producto, guardá también facts.product_id con ese mismo id.\nImágenes solo si las pide para un producto puntual.\n\nCuando el cliente elige un producto puntual, confirmalo breve. NO cotices totales con medio de pago. NO asumas efectivo. El medio de pago se pide en el paso siguiente.\n\nAL ENTRAR A ESTE NODO\nSi facts.subcategory_name o el historial ya tiene una medida (ej. \"una plaza\", \"1 plaza\", \"2 plazas\", \"queen\"):\n- Resolvé el subcategory_id real desde {{categorias}} (sinónimos OK).\n- Llamá YA \"Bausing - Buscar Catalogo\" con ese subcategory_id y facts.locality_id / localityid.\n- Mostrá 3–4 productos con precio. No digas \"te mostraré\" sin listar.\n- No vuelvas a preguntar la subcategoría si ya está.\n\nSi facts.subcategory_name ya está, NO preguntes la medida otra vez: buscá y listá productos ya.\n\nSi más adelante ya hay facts.card_surcharge_percent y mostrás un precio de compra/total (no el listado inicial del catálogo), aplicá el recargo al total mostrado. En el listado inicial del catálogo mostrá price_transfer/price_card de la API sin inventar recargos.",
+        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: mostrar opciones del catálogo para la subcategoría YA elegida y ayudar a elegir un producto concreto.\n\nLa subcategoría elegida está en los hechos (subcategory_id / subcategory_name) o en el historial reciente. Categorías de referencia: {{categorias}}\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" UNA sola vez con el subcategory_id real de la subcategoría elegida.\n- Si falta el id, buscalo en {{categorias}} por el nombre elegido. Nunca inventes IDs.\n- NUNCA busques varias subcategorías en el mismo turno.\n- NUNCA amplíes a toda la categoría padre (ej. todos los colchones). Solo la subcategoría confirmada.\n- Si el cliente cambia de subcategoría, pedí confirmación y recién ahí buscá de nuevo con el nuevo id.\n\nPRODUCTOS\nMostrá solo 3 o 4 opciones con nombre y price_transfer (o price_card si no hay transfer).\nSi menciona un producto puntual por nombre, buscá ese producto (sin inventar product_id).\n\nCOTIZACIÓN / CARRITO (puede haber varios productos)\nConsultar precios no es comprar. Solo agregá al carrito si dice \"quiero ese\", \"lo llevo\" o similar.\n- Cuando el cliente confirma uno o más productos, agregalos a facts.cart_items como {\"product_id\": \"...\", \"quantity\": N, \"name\": \"...\"} (product_id real, nunca inventado; quantity default 1 salvo que pida más). Si cart_items ya tenía productos, SUMÁ estos sin borrar los anteriores.\n- Después de agregar, terminá SIEMPRE tu mensaje con la pregunta textual \"¿Algo más o cotizamos así?\" (no la omitas ni la cambies de forma).\n- Si contesta con otro producto/medida: agregalo y volvé a preguntar.\n- Si contesta afirmativo a esa pregunta (sí, dale, exacto, confirmo, así está bien, cotizá) o dice que ya eligió todo (\"eso es todo\", \"nada más\", \"cotizame\", \"listo\"): NO vuelvas a repetir la confirmación — avanzá al paso siguiente ya, en ese mismo turno.\n- Si pide sacar o cambiar la cantidad de algo, actualizá cart_items en consecuencia.\n- Compatibilidad: si cart_items termina con un solo producto, guardá también facts.product_id con ese mismo id.\nImágenes solo si las pide para un producto puntual.\n\nCuando el cliente elige un producto puntual, confirmalo breve. NO cotices totales con medio de pago. NO asumas efectivo. El medio de pago se pide en el paso siguiente.\n\nAL ENTRAR A ESTE NODO\nSi facts.subcategory_name o el historial ya tiene una medida (ej. \"una plaza\", \"1 plaza\", \"2 plazas\", \"queen\"):\n- Resolvé el subcategory_id real desde {{categorias}} (sinónimos OK).\n- Llamá YA \"Bausing - Buscar Catalogo\" con ese subcategory_id y facts.locality_id / localityid.\n- Mostrá 3–4 productos con precio. No digas \"te mostraré\" sin listar.\n- No vuelvas a preguntar la subcategoría si ya está.\n\nSi facts.subcategory_name ya está, NO preguntes la medida otra vez: buscá y listá productos ya.\n\nSi más adelante ya hay facts.card_surcharge_percent y mostrás un precio de compra/total (no el listado inicial del catálogo), aplicá el recargo al total mostrado. En el listado inicial del catálogo mostrá price_transfer/price_card de la API sin inventar recargos.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
-        "continueCondition": "El cliente ya terminó de elegir productos (facts.cart_items tiene al menos uno) y dijo que quiere cotizar o comprar (ej. \"eso es todo\", \"cotizame\", \"quiero comprar\").",
+        "continueCondition": "El cliente ya tiene al menos un producto en facts.cart_items y quiere avanzar a cotizar: dijo que ya eligió todo (ej. \"eso es todo\", \"cotizame\") O respondió afirmativo (sí, dale, exacto, confirmo, así está bien) a la pregunta \"¿Algo más o cotizamos así?\".",
         "dataSourceConfigs": {
           "102": {
             "active": true,
@@ -421,7 +421,7 @@
                 "body": {
                   "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
                   "payment_method": "@AI(\"OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. Si NO hay facts.payment_method, NO llames esta tool. NUNCA inventes cash ni otro valor.\", optional:false, isArray:false)",
-                  "items": "@AI(\"lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.\", optional:false, isArray:true)"
+                  "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -455,8 +455,8 @@
                     },
                     {
                       "name": "items",
-                      "value": "lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.",
-                      "isArray": true,
+                      "value": "product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)",
+                      "isArray": false,
                       "required": true,
                       "valueMode": "text",
                       "aiGenerated": true
@@ -665,7 +665,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con items = una lista de strings armada desde facts.cart_items, un string por producto con formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío. No inventes cash.\n2) Guardá quote_total (total base de la tool, ya suma todos los productos) y la lista de items que devolvió la tool (cada uno con product_name, quantity, unit_price y line_total).\n3) PRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá cada producto con su cantidad y precio (si hay más de uno, LISTALOS TODOS, no muestres solo uno), envío, medio de pago (al recibir) y el PRECIO FINAL total a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío. No inventes cash.\n2) Guardá quote_total (total base de la tool, ya suma todos los productos) y la lista de items que devolvió la tool (cada uno con product_name, quantity, unit_price y line_total).\n3) PRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá cada producto con su cantidad y precio (si hay más de uno, LISTALOS TODOS, no muestres solo uno), envío, medio de pago (al recibir) y el PRECIO FINAL total a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -692,7 +692,7 @@
                 "body": {
                   "address": "@AI(\"usar dato ya guardado: facts.address\", optional:false, isArray:false)",
                   "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false, isArray:false)",
-                  "items": "@AI(\"lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.\", optional:false, isArray:true)"
+                  "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -726,8 +726,8 @@
                     },
                     {
                       "name": "items",
-                      "value": "lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.",
-                      "isArray": true,
+                      "value": "product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)",
+                      "isArray": false,
                       "required": true,
                       "valueMode": "text",
                       "aiGenerated": true
@@ -1009,7 +1009,10 @@
                   "document_type": "DNI",
                   "payment_method": "@AI(\"usar SIEMPRE facts.payment_method (cash|transfer|card). NUNCA reinventar ni preguntar de nuevo si el fact existe. Nunca enviar en español.\", optional:false, isArray:false)",
                   "payment_method_quote": "@AI(\"usar SIEMPRE facts.payment_method_quote (frase del cliente sobre cómo paga, con cuotas/banco si aplica). Si falta, reconstruila desde facts.bank/card_type/installments + payment_method.\", optional:true, isArray:false)",
-                  "items": "@AI(\"lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.\", optional:false, isArray:true)"
+                  "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)",
+                  "bank": "@AI(\"banco de la tarjeta, solo si payment_method=card\", optional:true, isArray:false)",
+                  "card_type": "@AI(\"tipo de tarjeta (Visa, Mastercard, Naranja, etc.), solo si payment_method=card\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cantidad de cuotas, solo si payment_method=card\", optional:true, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1099,9 +1102,33 @@
                     },
                     {
                       "name": "items",
-                      "value": "lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.",
-                      "isArray": true,
+                      "value": "product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)",
+                      "isArray": false,
                       "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "bank",
+                      "value": "banco de la tarjeta, solo si payment_method=card",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "card_type",
+                      "value": "tipo de tarjeta (Visa, Mastercard, Naranja, etc.), solo si payment_method=card",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "installments",
+                      "value": "cantidad de cuotas, solo si payment_method=card",
+                      "isArray": false,
+                      "required": false,
                       "valueMode": "text",
                       "aiGenerated": true
                     }
@@ -1188,7 +1215,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nEl cliente YA confirmó el resumen. ESTE nodo SOLO crea la orden con la tool.\n\n1) Llamá SÍ O SÍ \"Bausing - Crear Orden\" con:\n   - items = una lista de strings armada desde facts.cart_items, un string por producto con formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío ni inventes un product_id\n   - address / dirección de facts\n   - payment_method = facts.payment_method (cash|transfer|card)\n   - payment_method_quote = facts.payment_method_quote\n   - customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - installments/bank/card_type si es card\n2) SOLO si la tool responde OK: confirmá la orden con datos reales (order_id si viene).\n3) Si falla: explicá el error. NUNCA inventes \"orden creada\".\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo acá.\n\nSi es tarjeta, al confirmar la orden mencioná cuotas y que el total incluye el recargo (facts.price_final / card_surcharge_percent) si están.\n",
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nEl cliente YA confirmó el resumen. ESTE nodo SOLO crea la orden con la tool.\n\n1) Llamá SÍ O SÍ \"Bausing - Crear Orden\" con:\n   - items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío ni inventes un product_id\n   - address / dirección de facts\n   - payment_method = facts.payment_method (cash|transfer|card)\n   - payment_method_quote = facts.payment_method_quote\n   - customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - installments/bank/card_type si es card\n2) SOLO si la tool responde OK: confirmá la orden con datos reales (order_id si viene).\n3) Si falla: explicá el error. NUNCA inventes \"orden creada\".\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo acá.\n\nSi es tarjeta, al confirmar la orden mencioná cuotas y que el total incluye el recargo (facts.price_final / card_surcharge_percent) si están.\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -1217,7 +1244,10 @@
                   "document_type": "DNI",
                   "payment_method": "@AI(\"Metodo de pago seleccionado por el usuario: efectivo, transferencia o tarjeta. Si es efectivo enviar cash, transferencia enviar transfer y si es tarjeta enviar card.\", optional:false, isArray:false)",
                   "payment_method_quote": "@AI(\"la frase exacta que escribió el cliente sobre cómo va a pagar tomado de la conversacoin previa\", optional:true, isArray:false)",
-                  "items": "@AI(\"lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.\", optional:false, isArray:true)"
+                  "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)",
+                  "bank": "@AI(\"banco de la tarjeta, solo si payment_method=card\", optional:true, isArray:false)",
+                  "card_type": "@AI(\"tipo de tarjeta (Visa, Mastercard, Naranja, etc.), solo si payment_method=card\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cantidad de cuotas, solo si payment_method=card\", optional:true, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1307,9 +1337,33 @@
                     },
                     {
                       "name": "items",
-                      "value": "lista de strings, uno por cada producto del carrito (facts.cart_items), formato 'product_id:quantity' (ej. 'a6eff0bd-...:2'). Si no dijo cantidad, quantity=1. Meté SIEMPRE todos los productos acá, incluso si es uno solo — no dejes esto vacío.",
-                      "isArray": true,
+                      "value": "product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)",
+                      "isArray": false,
                       "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "bank",
+                      "value": "banco de la tarjeta, solo si payment_method=card",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "card_type",
+                      "value": "tipo de tarjeta (Visa, Mastercard, Naranja, etc.), solo si payment_method=card",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "installments",
+                      "value": "cantidad de cuotas, solo si payment_method=card",
+                      "isArray": false,
+                      "required": false,
                       "valueMode": "text",
                       "aiGenerated": true
                     }
@@ -2120,12 +2174,12 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: ayudar al cliente a identificar productos y sus precios.\n\nCATEGORÍAS\nSi el cliente pide una categoría general, con o sin medida, llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\".\n\nNunca uses el texto del cliente como subcategory_id. \"2 plazas\", \"queen\", \"1 plaza\", etc. NO son IDs.\n\nBuscá en la respuesta de esa tool la categoría padre correcta y luego la subcategoría correspondiente. Recién entonces usá SU id real en \"Bausing - Buscar Catalogo\".\n\nEjemplo: si pide \"colchones de 2 plazas\":\n\n1. Categorías y Subcategorías.\n2. Buscar \"2 plazas\" dentro de la categoría padre \"Colchones\".\n3. Tomar su id real.\n4. Buscar Catalogo con ese id.\n\nNunca uses una subcategoría perteneciente a otra categoría padre.\n\nPRODUCTOS\nCon subcategory_id real, usá \"Bausing - Buscar Catalogo\".\nSi menciona un producto puntual por nombre, usá \"Bausing - Buscar Producto\".\nNunca inventes product_id.\nMostrá solo 3 o 4 opciones con nombre y price_transfer, o price_card si no existe.\n\nCOTIZACIÓN\nSolo llamá \"Bausing - Cotizar Pedido\" después de que el cliente elija un producto puntual.\nConsultar precios NO significa querer comprar.\n\nPAGO\nNunca preguntes el método de pago por iniciativa propia.\n\nSolo hablá de tarjeta, cuotas, banco, transferencia o efectivo si el cliente pregunta o menciona explícitamente una forma de pago.\n\n\"Bausing - Validar Cuotas Tarjeta\" SOLO se usa si el cliente menciona explícitamente tarjeta, crédito o cuotas.\n\nSi el cliente no habló de cómo va a pagar, no preguntes nada sobre el método de pago.\n\nCARRITO (puede haber varios productos)\nSolo agregá un producto si el cliente expresa intención de compra, por ejemplo \"quiero ese\", \"lo llevo\" o \"dale, ese\".\n- Al agregarlo, sumalo a facts.cart_items como {\"product_id\": \"...\", \"quantity\": N, \"name\": \"...\"} (product_id real, nunca inventado). Si ya había productos en cart_items, NO los borres, solo agregá el nuevo.\n- Después de cada producto agregado, preguntá \"¿Algo más o cotizamos así?\" antes de avanzar.\n- Si pide sacar o cambiar cantidad de algo ya agregado, actualizá cart_items.\n- Solo avanzá al siguiente paso (cotizar) cuando el cliente confirme que ya eligió todo.\n- Compatibilidad: si cart_items termina con un solo producto, guardá también facts.product_id con ese mismo id.\n\nIMÁGENES\nSolo mostrales una imagen si la piden explícitamente para un producto puntual.\n\nDIRECCIÓN\nSi cambia la dirección, llamá nuevamente \"Bausing - Resolver Zona\" con la nueva dirección completa.\n\nSUBCATEGORÍA OBLIGATORIA\nSi el pedido es genérico (solo \"colchones\" u otra categoría padre con varias subcategorías), NO busques todavía.\nPreguntá amablemente qué subcategoría quiere, listando opciones reales. Solo buscá cuando tengas subcategory_id concreto.",
+        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: ayudar al cliente a identificar productos y sus precios.\n\nCATEGORÍAS\nSi el cliente pide una categoría general, con o sin medida, llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\".\n\nNunca uses el texto del cliente como subcategory_id. \"2 plazas\", \"queen\", \"1 plaza\", etc. NO son IDs.\n\nBuscá en la respuesta de esa tool la categoría padre correcta y luego la subcategoría correspondiente. Recién entonces usá SU id real en \"Bausing - Buscar Catalogo\".\n\nEjemplo: si pide \"colchones de 2 plazas\":\n\n1. Categorías y Subcategorías.\n2. Buscar \"2 plazas\" dentro de la categoría padre \"Colchones\".\n3. Tomar su id real.\n4. Buscar Catalogo con ese id.\n\nNunca uses una subcategoría perteneciente a otra categoría padre.\n\nPRODUCTOS\nCon subcategory_id real, usá \"Bausing - Buscar Catalogo\".\nSi menciona un producto puntual por nombre, usá \"Bausing - Buscar Producto\".\nNunca inventes product_id.\nMostrá solo 3 o 4 opciones con nombre y price_transfer, o price_card si no existe.\n\nCOTIZACIÓN\nSolo llamá \"Bausing - Cotizar Pedido\" después de que el cliente elija un producto puntual.\nConsultar precios NO significa querer comprar.\n\nPAGO\nNunca preguntes el método de pago por iniciativa propia.\n\nSolo hablá de tarjeta, cuotas, banco, transferencia o efectivo si el cliente pregunta o menciona explícitamente una forma de pago.\n\n\"Bausing - Validar Cuotas Tarjeta\" SOLO se usa si el cliente menciona explícitamente tarjeta, crédito o cuotas.\n\nSi el cliente no habló de cómo va a pagar, no preguntes nada sobre el método de pago.\n\nCARRITO (puede haber varios productos)\nSolo agregá un producto si el cliente expresa intención de compra, por ejemplo \"quiero ese\", \"lo llevo\" o \"dale, ese\".\n- Al agregarlo, sumalo a facts.cart_items como {\"product_id\": \"...\", \"quantity\": N, \"name\": \"...\"} (product_id real, nunca inventado). Si ya había productos en cart_items, NO los borres, solo agregá el nuevo.\n- Después de agregar, terminá SIEMPRE tu mensaje con la pregunta textual \"¿Algo más o cotizamos así?\" (no la omitas ni la cambies de forma).\n- Si pide sacar o cambiar cantidad de algo ya agregado, actualizá cart_items.\n- Si contesta afirmativo a esa pregunta (sí, dale, exacto, confirmo, así está bien, cotizá) o dice que ya eligió todo: NO vuelvas a repetir la confirmación — avanzá al siguiente paso (cotizar) ya, en ese mismo turno.\n- Compatibilidad: si cart_items termina con un solo producto, guardá también facts.product_id con ese mismo id.\n\nIMÁGENES\nSolo mostrales una imagen si la piden explícitamente para un producto puntual.\n\nDIRECCIÓN\nSi cambia la dirección, llamá nuevamente \"Bausing - Resolver Zona\" con la nueva dirección completa.\n\nSUBCATEGORÍA OBLIGATORIA\nSi el pedido es genérico (solo \"colchones\" u otra categoría padre con varias subcategorías), NO busques todavía.\nPreguntá amablemente qué subcategoría quiere, listando opciones reales. Solo buscá cuando tengas subcategory_id concreto.",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
-        "continueCondition": "El cliente ya terminó de elegir productos (facts.cart_items tiene al menos uno) y dijo que quiere cotizar o comprar (ej. \"eso es todo\", \"cotizame\", \"quiero comprar\").",
+        "continueCondition": "El cliente ya tiene al menos un producto en facts.cart_items y quiere avanzar a cotizar: dijo que ya eligió todo (ej. \"eso es todo\", \"cotizame\") O respondió afirmativo (sí, dale, exacto, confirmo, así está bien) a la pregunta \"¿Algo más o cotizamos así?\".",
         "dataSourceConfigs": {
           "103": {
             "id": "103",
@@ -2576,8 +2630,8 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
                 "body": {
                   "bank": "@AI(\"banco que indicó el cliente (facts.bank). Obligatorio para consultar.\", optional:false, isArray:false)",
-                  "card_type": "@AI(\"tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.\", optional:true, isArray:false)",
-                  "installments": "@AI(\"cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.\", optional:true, isArray:false)"
+                  "card_type": "@AI(\"tipo de tarjeta (Visa, Mastercard, Naranja, etc.)\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cantidad de cuotas elegida\", optional:true, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -2603,7 +2657,7 @@
                     },
                     {
                       "name": "card_type",
-                      "value": "tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.",
+                      "value": "tipo de tarjeta (Visa, Mastercard, Naranja, etc.)",
                       "isArray": false,
                       "required": false,
                       "valueMode": "text",
@@ -2611,7 +2665,7 @@
                     },
                     {
                       "name": "installments",
-                      "value": "cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.",
+                      "value": "cantidad de cuotas elegida",
                       "isArray": false,
                       "required": false,
                       "valueMode": "text",
@@ -2675,7 +2729,7 @@
                 }
               },
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment.",
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment. Si falta card_type o installments, mandalos vacíos (\"\"), nunca null.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -2729,8 +2783,8 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
                 "body": {
                   "bank": "@AI(\"banco que indicó el cliente (facts.bank). Obligatorio para consultar.\", optional:false, isArray:false)",
-                  "card_type": "@AI(\"tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.\", optional:true, isArray:false)",
-                  "installments": "@AI(\"cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.\", optional:true, isArray:false)"
+                  "card_type": "@AI(\"tipo de tarjeta (Visa, Mastercard, Naranja, etc.)\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cantidad de cuotas elegida\", optional:true, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -2756,7 +2810,7 @@
                     },
                     {
                       "name": "card_type",
-                      "value": "tipo de tarjeta si ya lo dijo (Visa/Mastercard/Naranja/etc / facts.card_type). Si todavía no, omitir.",
+                      "value": "tipo de tarjeta (Visa, Mastercard, Naranja, etc.)",
                       "isArray": false,
                       "required": false,
                       "valueMode": "text",
@@ -2764,7 +2818,7 @@
                     },
                     {
                       "name": "installments",
-                      "value": "cuotas SOLO si ya eligió un número. Si pregunta cuántas hay o no eligió, OMITIR para listar opciones.",
+                      "value": "cantidad de cuotas elegida",
                       "isArray": false,
                       "required": false,
                       "valueMode": "text",
@@ -2828,7 +2882,7 @@
                 }
               },
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment.",
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment. Si falta card_type o installments, mandalos vacíos (\"\"), nunca null.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -3046,7 +3100,129 @@
           "pending_order_review": "En revisión de orden"
         },
         "ragEnabled": false,
-        "dataSources": [],
+        "dataSources": [
+          {
+            "id": "121",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
+                "body": {
+                  "bank": "@AI(\"banco que indicó el cliente (facts.bank). Obligatorio para consultar.\", optional:false, isArray:false)",
+                  "card_type": "@AI(\"tipo de tarjeta (Visa, Mastercard, Naranja, etc.)\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cantidad de cuotas elegida\", optional:true, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Validar Cuotas Tarjeta",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "bank",
+                      "value": "banco que indicó el cliente (facts.bank). Obligatorio para consultar.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "card_type",
+                      "value": "tipo de tarjeta (Visa, Mastercard, Naranja, etc.)",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "installments",
+                      "value": "cantidad de cuotas elegida",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment. Si falta card_type o installments, mandalos vacíos (\"\"), nunca null.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "description": "Consulta/valida cuotas de tarjeta Bausing. Con solo bank: responde tipos de tarjeta. Con bank+card_type: lista cuotas disponibles y recargoPorcentaje de cada una. Con bank+card_type+installments: valida y devuelve recargo_porcentaje. Las respuestas status:false con data.installments o data.card_types SON útiles: usalas, no inventes.",
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
         "outputSchema": {
           "type": "object",
           "required": [
@@ -3059,7 +3235,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nANTES de crear la orden, mostrá el resumen completo:\n\n1) Producto(s) y cantidad: si facts.cart_items tiene más de un producto, LISTALOS TODOS (nombre + cantidad + precio de cada uno) — no muestres solo uno cuando hay varios\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir el recargo (no el precio base solo).\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nPRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n\nPreguntá: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO (en este mismo nodo): pedí el dato nuevo, actualizá facts, recalculá precio_final si cambian cuotas/recargo, volvé a mostrar el resumen.\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" NO digas que ya se creó. NO llames Crear Orden.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nANTES de crear la orden, mostrá el resumen completo:\n\n1) Producto(s) y cantidad: si facts.cart_items tiene más de un producto, LISTALOS TODOS (nombre + cantidad + precio de cada uno) — no muestres solo uno cuando hay varios\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir el recargo (no el precio base solo).\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nPRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n\nPreguntá: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO (en este mismo nodo): pedí el dato nuevo, actualizá facts, recalculá precio_final si cambian cuotas/recargo, volvé a mostrar el resumen.\nSi lo que cambia es el medio de pago a tarjeta y no tenés banco/tipo de tarjeta/cuotas todavía, seguí el mismo FLUJO de abajo antes de recalcular precio_final y volver a mostrar el resumen. No asumas ni inventes el recargo.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para cualquier dato de cuotas/recargo, usala en este mismo nodo si el cliente cambia a tarjeta acá):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\nPasos: 1) Pedí banco si falta. 2) Con banco, si falta tipo O el cliente pregunta cuántas cuotas hay: llamá la tool YA (sin inventar) — mostrale las opciones/tarjetas reales que devuelva y pedile que elija. 3) Cuando ya tengas los tres datos: llamá la tool y guardá bank, card_type, installments, card_surcharge_percent=recargo_porcentaje, payment_method_quote. PROHIBIDO decir un % o cantidad de cuotas sin que salga de esta tool.\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" NO digas que ya se creó. NO llames Crear Orden.",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
@@ -3070,7 +3246,123 @@
         ],
         "ragDataSources": {},
         "continueCondition": "El ÚLTIMO mensaje del usuario confirma el resumen completo para crear la orden (sí / ok / confirmo / dale / está bien / creala). Si pide cambiar algo, corrige datos, o todavía no confirmó, advance=false.",
-        "dataSourceConfigs": {},
+        "dataSourceConfigs": {
+          "121": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/card-installment",
+                "body": {
+                  "bank": "@AI(\"banco que indicó el cliente (facts.bank). Obligatorio para consultar.\", optional:false, isArray:false)",
+                  "card_type": "@AI(\"tipo de tarjeta (Visa, Mastercard, Naranja, etc.)\", optional:true, isArray:false)",
+                  "installments": "@AI(\"cantidad de cuotas elegida\", optional:true, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Validar Cuotas Tarjeta",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "bank",
+                      "value": "banco que indicó el cliente (facts.bank). Obligatorio para consultar.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "card_type",
+                      "value": "tipo de tarjeta (Visa, Mastercard, Naranja, etc.)",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "installments",
+                      "value": "cantidad de cuotas elegida",
+                      "isArray": false,
+                      "required": false,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente dijo explícitamente que quiere pagar con tarjeta. Le pasás tarjeta+banco+cuotas (la tool te pide los que falten directo al cliente, todos juntos en un solo mensaje natural) y el backend valida contra el catálogo real y te devuelve el % de recargo exacto — vos no tenés que adivinar ni comparar nada a mano. Si alguno de los tres datos no existe o es ambiguo (ej. el mismo banco existe en más de una tarjeta), la tool devuelve un error con las opciones reales disponibles para esa combinación: contáselas al cliente tal cual y dejá que elija, nunca inventes ni asumas. POST /card-installment. Si falta card_type o installments, mandalos vacíos (\"\"), nunca null.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            }
+          }
+        },
         "captureFactsEnabled": true,
         "waitForUserResponse": true
       },
