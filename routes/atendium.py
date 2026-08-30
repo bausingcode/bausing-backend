@@ -374,6 +374,10 @@ def validate_referral():
 @atendium_bp.route("/quote", methods=["POST"])
 @atendium_api_key_required
 def quote():
+    """Responde siempre HTTP 200 (status:true/false en el body) — la tool de
+    Atendium descarta el body entero si el status HTTP no es 2xx, así que un
+    error real (ej. falta payment_method) le llegaría al bot como un 400
+    genérico sin mensaje útil. Ver el mismo criterio en card_installment."""
     body = request.get_json(silent=True) or {}
     address = _address_from_body(body, default=body)
     items = _items_from_body(body)
@@ -382,7 +386,7 @@ def quote():
     referral_code = body.get("referral_code")
 
     if not isinstance(items, list):
-        return _err("items es requerido")
+        return _err("items es requerido", 200)
 
     user_id = None
     email = ((body.get("customer") or {}).get("email") or "").strip().lower()
@@ -407,9 +411,9 @@ def quote():
         )
         return _ok(result, msg)
     except ValueError as e:
-        return _err(str(e), 400)
+        return _err(str(e), 200)
     except Exception as e:
-        return _err(f"Error al cotizar: {e}", 500)
+        return _err(f"Error al cotizar: {e}", 200)
 
 
 @atendium_bp.route("/card-installment", methods=["POST"])
@@ -576,6 +580,10 @@ def card_installment():
 @atendium_bp.route("/orders", methods=["POST"])
 @atendium_api_key_required
 def create_order():
+    """Responde siempre HTTP 200 (status:true/false en el body) — mismo criterio
+    que /quote y /card-installment: la tool de Atendium descarta el body si el
+    status HTTP no es 2xx, así que cualquier error real quedaría oculto detrás
+    de un 400/409/500 genérico sin mensaje útil para el bot."""
     body = request.get_json(silent=True) or {}
     customer = _customer_from_body(body)
     address = _address_from_body(body, default={})
@@ -586,28 +594,23 @@ def create_order():
     referral_code = body.get("referral_code")
 
     # El bot a veces "completa" el medio de pago con un valor por defecto en vez de
-    # preguntarlo cuando el cliente no lo dijo. Para frenar eso, exigimos también la
-    # cita textual de lo que dijo el cliente y validamos que mencione ese medio de
-    # pago — no evita un bot que decida inventar la cita también, pero le pone una
-    # traba extra a adivinar en silencio.
+    # preguntarlo cuando el cliente no lo dijo. payment_method_quote (la cita textual
+    # de cómo dijo que iba a pagar) es opcional, pero si la manda la validamos contra
+    # payment_method — no evita un bot que decida inventar la cita también, pero le
+    # pone una traba extra a adivinar en silencio.
     PAYMENT_KEYWORDS = {
         "cash": ("efectivo", "cash", "contado"),
         "transfer": ("transfer", "transferencia"),
         "card": ("tarjeta", "card", "credito", "crédito", "debito", "débito"),
     }
-    if payment_method:
-        if not payment_method_quote:
-            return _err(
-                "Falta payment_method_quote: la frase textual donde el cliente dijo cómo va a pagar",
-                400,
-            )
+    if payment_method and payment_method_quote:
         quote_norm = payment_method_quote.lower()
         keywords = PAYMENT_KEYWORDS.get(payment_method, ())
         if not any(kw in quote_norm for kw in keywords):
             return _err(
                 f"payment_method_quote ('{payment_method_quote}') no menciona '{payment_method}' — "
                 "el cliente todavía no dijo explícitamente cómo va a pagar, hay que preguntárselo",
-                400,
+                200,
             )
 
     # El bot a veces solo manda la frase completa (address.address) sin desglosar
@@ -623,7 +626,7 @@ def create_order():
                 address["province"] = parsed["province"]
 
     if not customer or not address or not items:
-        return _err("customer, address e items son requeridos")
+        return _err("customer, address e items son requeridos", 200)
 
     try:
         quote_data = commerce.build_full_quote(
@@ -634,15 +637,15 @@ def create_order():
             referral_code=referral_code,
         )
     except ValueError as e:
-        return _err(str(e), 400)
+        return _err(str(e), 200)
     except Exception as e:
-        return _err(f"Error al validar cotización: {e}", 500)
+        return _err(f"Error al validar cotización: {e}", 200)
 
     if quote_data.get("requires_human_handoff"):
         return _err(
             quote_data.get("handoff_message")
             or "Esta venta debe completarla un asesor",
-            409,
+            200,
             data={
                 "can_create_order": False,
                 "requires_human_handoff": True,
@@ -663,24 +666,24 @@ def create_order():
                 return _err(
                     f"total no coincide con la cotización del servidor "
                     f"(esperado {server_total}, recibido {client_total})",
-                    400,
+                    200,
                     data={"expected_total": server_total, "quote": quote_data},
                 )
         except (TypeError, ValueError):
-            return _err("total inválido")
+            return _err("total inválido", 200)
 
     try:
         user = commerce.find_or_create_user(customer)
     except ValueError as e:
-        return _err(str(e), 400)
+        return _err(str(e), 200)
     except Exception as e:
-        return _err(f"Error al crear/obtener usuario: {e}", 500)
+        return _err(f"Error al crear/obtener usuario: {e}", 200)
 
     # Revalidar referido contra el user real (anti auto-referido)
     try:
         referral = commerce.validate_referral(referral_code, user_id=user.id)
     except ValueError as e:
-        return _err(str(e), 400)
+        return _err(str(e), 200)
 
     zone = quote_data["zone"]
     priced_items = [
@@ -759,7 +762,7 @@ def create_order():
             order_payload["address"]["province_id"] = str(prov.id)
 
     if not order_payload["address"].get("province_id"):
-        return _err("address.province_id (o province) es requerido para crear la orden")
+        return _err("address.province_id (o province) es requerido para crear la orden", 200)
 
     try:
         resp = create_order_for_user(user, order_payload)
@@ -768,7 +771,7 @@ def create_order():
         if status >= 400 or not data or not data.get("success"):
             return _err(
                 (data or {}).get("error") or "Error al crear la orden",
-                status if status >= 400 else 400,
+                200,
                 data=data,
             )
 
@@ -778,7 +781,7 @@ def create_order():
         order_data["requires_human_handoff"] = False
         return _ok(order_data, "Orden creada", 201)
     except Exception as e:
-        return _err(f"Error al crear orden: {e}", 500)
+        return _err(f"Error al crear orden: {e}", 200)
 
 
 @atendium_bp.route("/orders", methods=["GET"])
