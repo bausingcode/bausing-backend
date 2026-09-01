@@ -702,7 +702,7 @@ def create_order():
         if card_note:
             observations = f"{observations}\nTarjeta: {card_note}".strip()
         if payment_method_quote:
-            observations = f"{observations}\nCliente dijo: {payment_method_quote}".strip()
+            observations = f"{observations}\n{payment_method_quote}".strip()
 
     origin_note = "Origen: Atendium bot"
     observations = f"{observations}\n{origin_note}".strip() if observations else origin_note
