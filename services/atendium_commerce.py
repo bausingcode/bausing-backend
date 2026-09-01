@@ -355,17 +355,28 @@ def _normalize_city_province(city: str, province_name: Optional[str]) -> Tuple[s
     return city_clean, prov_clean
 
 
+_ADDRESS_ABBREVIATIONS = ("av", "avda", "dr", "dra", "sr", "sra", "nro")
+
+
 def parse_freeform_address(text: str) -> Dict[str, str]:
     """
     Parsea frases típicas de WhatsApp:
     "rodolfo martinez 6034, cordoba capital, 5021"
     "Rodolfo Martínez 6034 Córdoba Capital CP 5021"
+    "rodolfo martinez 6034. cordoba. cordoba. 5021" (separado por puntos en vez de comas)
     """
     import re
 
     raw = re.sub(r"\s+", " ", (text or "").strip())
     if not raw:
         return {}
+
+    # Algunos clientes separan con puntos en vez de comas ("calle 123. ciudad. cp").
+    # Los tratamos como separadores, salvo que el punto sea de una abreviatura común
+    # (Av., Dr., Sr., etc.) — ahí lo sacamos sin partir la frase en ese punto.
+    abbrev_pattern = r"\b(" + "|".join(_ADDRESS_ABBREVIATIONS) + r")\.(?=\s|$)"
+    raw = re.sub(abbrev_pattern, lambda m: m.group(1), raw, flags=re.I)
+    raw = re.sub(r"\.", ",", raw)
 
     postal_code = ""
     # Preferir CP explícito o el de 4 dígitos al FINAL (no la altura de la calle)

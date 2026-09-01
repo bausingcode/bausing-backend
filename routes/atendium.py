@@ -21,7 +21,10 @@ from models.order import Order
 from models.user import User
 from routes.orders import create_order_for_user, order_to_dict
 from services import atendium_commerce as commerce
-from utils.crm_payment_methods import crm_medios_pago_id_for_checkout_method
+from utils.crm_payment_methods import (
+    CRM_MEDIOS_PAGO_EFECTIVO,
+    crm_medios_pago_id_for_checkout_method,
+)
 
 atendium_bp = Blueprint("atendium", __name__)
 
@@ -593,25 +596,9 @@ def create_order():
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 
-    # El bot a veces "completa" el medio de pago con un valor por defecto en vez de
-    # preguntarlo cuando el cliente no lo dijo. payment_method_quote (la cita textual
-    # de cómo dijo que iba a pagar) es opcional, pero si la manda la validamos contra
-    # payment_method — no evita un bot que decida inventar la cita también, pero le
-    # pone una traba extra a adivinar en silencio.
-    PAYMENT_KEYWORDS = {
-        "cash": ("efectivo", "cash", "contado"),
-        "transfer": ("transfer", "transferencia"),
-        "card": ("tarjeta", "card", "credito", "crédito", "debito", "débito"),
-    }
-    if payment_method and payment_method_quote:
-        quote_norm = payment_method_quote.lower()
-        keywords = PAYMENT_KEYWORDS.get(payment_method, ())
-        if not any(kw in quote_norm for kw in keywords):
-            return _err(
-                f"payment_method_quote ('{payment_method_quote}') no menciona '{payment_method}' — "
-                "el cliente todavía no dijo explícitamente cómo va a pagar, hay que preguntárselo",
-                200,
-            )
+    # payment_method_quote es la cita textual de cómo el cliente dijo que iba a pagar.
+    # Se manda tal cual venga, sin validar que mencione payment_method — el chequeo por
+    # palabras clave rechazaba citas legítimas (ej. "3 cuotas con 20% de recargo").
 
     # El bot a veces solo manda la frase completa (address.address) sin desglosar
     # street/city/etc. Completamos los campos estructurados a partir de esa frase
@@ -695,7 +682,13 @@ def create_order():
         for line in quote_data["items"]
     ]
 
-    medios_pago_id = crm_medios_pago_id_for_checkout_method(payment_method)
+    # TEMPORAL: en Atendium mandamos el medios_pago_id de efectivo también para
+    # tarjeta (en vez de CRM_MEDIOS_PAGO_TARJETA). Sacar este override cuando esté
+    # resuelto del lado del CRM para pedidos que vienen del bot.
+    if payment_method == "card":
+        medios_pago_id = CRM_MEDIOS_PAGO_EFECTIVO
+    else:
+        medios_pago_id = crm_medios_pago_id_for_checkout_method(payment_method)
     observations = (body.get("observations") or "").strip()
 
     if payment_method == "card":
