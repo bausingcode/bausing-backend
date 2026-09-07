@@ -335,6 +335,9 @@ def _normalize_city_province(city: str, province_name: Optional[str]) -> Tuple[s
         "cordova",
         "cordova capital",
     }
+    cordoba_words = {"cordoba", "corodba", "cordova"}
+    city_words = city_n.split()
+
     if city_n in cordoba_aliases or city_n.replace(" ", "") in {
         "cordobacapital",
         "corodbacapital",
@@ -343,6 +346,10 @@ def _normalize_city_province(city: str, province_name: Optional[str]) -> Tuple[s
         city_clean = "Córdoba"
         if not prov_clean:
             prov_clean = "Córdoba"
+    elif len(city_words) == 2 and city_words[0] == city_words[1] and city_words[0] in cordoba_words:
+        # "cordoba cordoba" (ciudad y provincia repetidas, sin la palabra "capital")
+        city_clean = "Córdoba"
+        prov_clean = prov_clean or "Córdoba"
     elif "cordoba" in city_n or "corodba" in city_n or "cordova" in city_n:
         # "Villa Carlos Paz, Cordoba" ya viene separado; si city trae typo suelto
         if city_n.startswith("corodba") or city_n.startswith("cordova"):
@@ -412,6 +419,16 @@ def parse_freeform_address(text: str) -> Dict[str, str]:
                     postal_code = compact
                 continue
             if re.fullmatch(r"(?:cp|codigo postal|código postal)\s*[A-Z]?\d{4}", part, re.I):
+                continue
+            # La parte puede traer ciudad (y a veces provincia) pegada al CP sin coma
+            # propia (ej. "cordoba cordoba 5021"): sacamos el CP del final antes de
+            # tomar el resto como ciudad.
+            tail_cp = re.search(r"\s+([A-Z]?\d{4})\s*$", part, re.I)
+            if tail_cp:
+                if not postal_code:
+                    postal_code = tail_cp.group(1)
+                part = part[: tail_cp.start()].strip()
+            if not part:
                 continue
             city = part
             break
