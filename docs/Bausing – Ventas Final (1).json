@@ -3343,7 +3343,14 @@
         "headers": [],
         "factKeys": [
           "direccion_completa",
-          "address"
+          "address",
+          "catalog_id",
+          "crm_zone_id",
+          "localityid",
+          "label",
+          "is_third_party_transport",
+          "cost_label",
+          "is_free"
         ],
         "aiModelId": "",
         "bodyFiles": [],
@@ -3353,7 +3360,99 @@
           "direccion_completa": "Dirección completa"
         },
         "ragEnabled": false,
-        "dataSources": [],
+        "dataSources": [
+          {
+            "id": "130",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa corregida, formato calle y altura, ciudad, provincia, código postal\", optional:false, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "dirección completa corregida, formato calle y altura, ciudad, provincia, código postal",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente te dio o corrigió la dirección completa y necesitás resolver la zona/localidad real antes de seguir. Si devuelve error, la dirección no se pudo ubicar — pedile al cliente que la revise de nuevo, nunca inventes ni asumas la zona. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "description": "Resuelve zona/localidad/catálogo a partir de una dirección completa.",
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
         "outputSchema": {
           "type": "object",
           "required": [
@@ -3366,7 +3465,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que la corrija ya que puede haber un error de tipeo.\n\nCuando el cliente conteste — aunque solo corrija una parte (ej. solo la calle) — combiná esa corrección con los datos de dirección que ya tenías de antes (ciudad, provincia, CP) y guardá la dirección COMPLETA en facts.direccion_completa y facts.address con el mismo valor, NORMALIZADA en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si el cliente la escribió con puntos, saltos de línea u otro separador, o todo junto sin comas, pasala vos a ese formato antes de guardarla — no guardes el texto crudo tal cual. NO llames tools acá.\n\nTu respuesta en ese turno es UNA frase corta confirmando que guardaste la dirección (ej. \"Dale, guardé Rodolfo Martinez 6034, Córdoba, Córdoba, 5021.\").\n\nSI EL CLIENTE YA CONTESTÓ ESO Y AHORA SOLO CONFIRMA (sí, dale, ok, okey, confirmo, exacto): NO vuelvas a repetir la misma confirmación de nuevo — la dirección ya está guardada, dejá que el flujo avance.\n\nPROHIBIDO ABSOLUTO:\n- Decir que \"ahora podés buscar productos\", mencionar catálogo, colchones, precios, ni ningún otro tema — eso no pasa en este nodo.\n- Responder cualquier pregunta que no sea sobre la dirección (ej. si pregunta por productos u opciones): no inventes nada, decile que primero necesitás confirmar la dirección y volvé a pedírsela.",
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que la corrija ya que puede haber un error de tipeo.\n\nFLUJO\n1) Cuando el cliente conteste con una corrección (aunque sea parcial, ej. solo la calle), combinala con los datos de dirección que ya tenías de antes (ciudad, provincia, CP) y armá la dirección COMPLETA normalizada en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si la escribió con puntos, saltos de línea, todo junto sin comas, u otro separador, pasala vos a ese formato antes de usarla.\n2) Guardá esa dirección en facts.direccion_completa y facts.address, y llamá SIEMPRE la tool \"Bausing - Resolver Zona\" con esa dirección — no la des por buena sin llamar la tool.\n3) SI LA TOOL RESPONDE ERROR (no encontró la dirección): decile al cliente que tampoco pudiste encontrar esa dirección y pedile que la revise o corrija de nuevo (puede haber otro error de tipeo, en la calle o en la ciudad). Quedate en este mismo paso esperando una nueva corrección — NO avances, NO digas que se guardó bien.\n4) SI LA TOOL RESPONDE OK (encontró la zona): guardá de la respuesta catalog_id, crm_zone_id, localityid (= data.locality.id), label (= data.estimated_delivery.label), is_third_party_transport, cost_label (= data.shipping_summary.cost_label) e is_free (= data.shipping_summary.is_free). Confirmá en una frase corta (ej. \"Dale, ya ubiqué tu zona.\") y avanzá.\n\nPodés reintentar tantas veces como haga falta si el cliente te sigue corrigiendo la dirección. Si después de 3 intentos o más sigue sin encontrarse, ofrecele derivarlo con un asesor humano.\n\nSI EL CLIENTE YA RECIBIÓ LA CONFIRMACIÓN Y AHORA SOLO CONFIRMA (sí, dale, ok, okey, confirmo): NO vuelvas a llamar la tool de nuevo ni a repetir la confirmación — ya está resuelto, dejá que el flujo avance.\n\nPROHIBIDO ABSOLUTO:\n- Decir que \"ahora podés buscar productos\", mencionar catálogo, colchones, precios, ni ningún otro tema.\n- Responder cualquier pregunta que no sea sobre la dirección: no inventes nada, decile que primero necesitás confirmar la dirección.\n- Decir que la dirección se guardó/encontró sin haber llamado la tool y recibido una respuesta OK.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
@@ -3374,7 +3473,7 @@
         "savedVariables": [],
         "nextStartNodeId": "",
         "factDescriptions": {},
-        "continueCondition": "Avanzar cuando el cliente corrija la dirección, O cuando ya la haya corregido en un mensaje anterior y ahora solo confirme (sí, dale, ok, okey, confirmo, exacto). No hace falta que repita la corrección de nuevo si ya la dio y solo está confirmando.",
+        "continueCondition": "La tool \"Bausing - Resolver Zona\" ya respondió éxito (status:true) y localityid/catalog_id quedaron guardados — en este turno o en uno anterior. NO avanza si la tool todavía no se llamó, o si la última llamada devolvió error (en ese caso hay que seguir pidiendo la corrección) o si el cliente todavía no mandó ninguna corrección.",
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": true
@@ -3382,126 +3481,6 @@
       "position": {
         "x": 778.7210683341947,
         "y": 42.54466940503355
-      }
-    },
-    {
-      "id": "node-zona-retry-01",
-      "name": "Obtener ID Localidad (reintento)",
-      "type": "http_request",
-      "config": {
-        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
-        "body": "",
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "method": "POST",
-        "headers": [],
-        "retries": 0,
-        "timeout": 10000,
-        "useMock": false,
-        "bodyMode": "json",
-        "bodyFiles": [],
-        "timeoutMs": 10000,
-        "bodyParams": [],
-        "mockNodeId": "",
-        "dataSources": [],
-        "errorHandling": "branch",
-        "ragDataSources": {},
-        "savedVariables": [
-          {
-            "key": "catalog_id",
-            "path": "body.data.catalog_id",
-            "label": "Catalog Id"
-          },
-          {
-            "key": "crm_zone_id",
-            "path": "body.data.crm_zone_id",
-            "label": "Crm Zone Id"
-          },
-          {
-            "key": "localityid",
-            "path": "body.data.locality.id",
-            "label": "LocalityId"
-          },
-          {
-            "key": "label",
-            "path": "body.data.estimated_delivery.label",
-            "label": "Label"
-          },
-          {
-            "key": "is_third_party_transport",
-            "path": "body.data.is_third_party_transport",
-            "label": "Is Third Party Transport"
-          },
-          {
-            "key": "cost_label",
-            "path": "body.data.shipping_summary.cost_label",
-            "label": "Cost Label"
-          },
-          {
-            "key": "is_free",
-            "path": "body.data.shipping_summary.is_free",
-            "label": "Is Free"
-          }
-        ],
-        "sections_config": {
-          "body": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "address",
-                "value": "{{direccion_completa}}",
-                "isArray": false,
-                "required": true,
-                "valueMode": "variable",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "headers": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "X-API-Key",
-                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              },
-              {
-                "name": "Content-Type",
-                "value": "application/json",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "pathParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          },
-          "queryParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          }
-        },
-        "include_metadata": false,
-        "dataSourceConfigs": {}
-      },
-      "position": {
-        "x": 793.1110234829778,
-        "y": 158.96021479127774
       }
     },
     {
@@ -3515,7 +3494,14 @@
         "headers": [],
         "factKeys": [
           "direccion_completa",
-          "address"
+          "address",
+          "catalog_id",
+          "crm_zone_id",
+          "localityid",
+          "label",
+          "is_third_party_transport",
+          "cost_label",
+          "is_free"
         ],
         "aiModelId": "",
         "bodyFiles": [],
@@ -3525,7 +3511,99 @@
           "direccion_completa": "Dirección completa"
         },
         "ragEnabled": false,
-        "dataSources": [],
+        "dataSources": [
+          {
+            "id": "131",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
+                "body": {
+                  "address": "@AI(\"dirección completa corregida, formato calle y altura, ciudad, provincia, código postal\", optional:false, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json"
+                },
+                "timeout": 15000
+              },
+              "custom_title": "Bausing - Resolver Zona",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "dirección completa corregida, formato calle y altura, ciudad, provincia, código postal",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR CUANDO: el cliente te dio o corrigió la dirección completa y necesitás resolver la zona/localidad real antes de seguir. Si devuelve error, la dirección no se pudo ubicar — pedile al cliente que la revise de nuevo, nunca inventes ni asumas la zona. POST /resolve-zone.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "description": "Resuelve zona/localidad/catálogo a partir de una dirección completa.",
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
+          }
+        ],
         "outputSchema": {
           "type": "object",
           "required": [
@@ -3538,7 +3616,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que la corrija ya que puede haber un error de tipeo.\n\nCuando el cliente conteste — aunque solo corrija una parte (ej. solo la calle) — combiná esa corrección con los datos de dirección que ya tenías de antes (ciudad, provincia, CP) y guardá la dirección COMPLETA en facts.direccion_completa y facts.address con el mismo valor, NORMALIZADA en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si el cliente la escribió con puntos, saltos de línea u otro separador, o todo junto sin comas, pasala vos a ese formato antes de guardarla — no guardes el texto crudo tal cual. NO llames tools acá.\n\nTu respuesta en ese turno es UNA frase corta confirmando que guardaste la dirección (ej. \"Dale, guardé Rodolfo Martinez 6034, Córdoba, Córdoba, 5021.\").\n\nSI EL CLIENTE YA CONTESTÓ ESO Y AHORA SOLO CONFIRMA (sí, dale, ok, okey, confirmo, exacto): NO vuelvas a repetir la misma confirmación de nuevo — la dirección ya está guardada, dejá que el flujo avance.\n\nPROHIBIDO ABSOLUTO:\n- Decir que \"ahora podés buscar productos\", mencionar catálogo, colchones, precios, ni ningún otro tema — eso no pasa en este nodo.\n- Responder cualquier pregunta que no sea sobre la dirección (ej. si pregunta por productos u opciones): no inventes nada, decile que primero necesitás confirmar la dirección y volvé a pedírsela.",
+        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que la corrija ya que puede haber un error de tipeo.\n\nFLUJO\n1) Cuando el cliente conteste con una corrección (aunque sea parcial, ej. solo la calle), combinala con los datos de dirección que ya tenías de antes (ciudad, provincia, CP) y armá la dirección COMPLETA normalizada en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si la escribió con puntos, saltos de línea, todo junto sin comas, u otro separador, pasala vos a ese formato antes de usarla.\n2) Guardá esa dirección en facts.direccion_completa y facts.address, y llamá SIEMPRE la tool \"Bausing - Resolver Zona\" con esa dirección — no la des por buena sin llamar la tool.\n3) SI LA TOOL RESPONDE ERROR (no encontró la dirección): decile al cliente que tampoco pudiste encontrar esa dirección y pedile que la revise o corrija de nuevo (puede haber otro error de tipeo, en la calle o en la ciudad). Quedate en este mismo paso esperando una nueva corrección — NO avances, NO digas que se guardó bien.\n4) SI LA TOOL RESPONDE OK (encontró la zona): guardá de la respuesta catalog_id, crm_zone_id, localityid (= data.locality.id), label (= data.estimated_delivery.label), is_third_party_transport, cost_label (= data.shipping_summary.cost_label) e is_free (= data.shipping_summary.is_free). Confirmá en una frase corta (ej. \"Dale, ya ubiqué tu zona.\") y avanzá.\n\nPodés reintentar tantas veces como haga falta si el cliente te sigue corrigiendo la dirección. Si después de 3 intentos o más sigue sin encontrarse, ofrecele derivarlo con un asesor humano.\n\nSI EL CLIENTE YA RECIBIÓ LA CONFIRMACIÓN Y AHORA SOLO CONFIRMA (sí, dale, ok, okey, confirmo): NO vuelvas a llamar la tool de nuevo ni a repetir la confirmación — ya está resuelto, dejá que el flujo avance.\n\nPROHIBIDO ABSOLUTO:\n- Decir que \"ahora podés buscar productos\", mencionar catálogo, colchones, precios, ni ningún otro tema.\n- Responder cualquier pregunta que no sea sobre la dirección: no inventes nada, decile que primero necesitás confirmar la dirección.\n- Decir que la dirección se guardó/encontró sin haber llamado la tool y recibido una respuesta OK.",
         "clearFactKeys": [],
         "executionMode": "execute_and_continue",
         "ragDataSources": {},
@@ -3548,132 +3626,12 @@
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": false,
-        "continueCondition": "Avanzar cuando el cliente corrija la dirección, O cuando ya la haya corregido en un mensaje anterior y ahora solo confirme (sí, dale, ok, okey, confirmo, exacto). No hace falta que repita la corrección de nuevo si ya la dio y solo está confirmando.",
+        "continueCondition": "La tool \"Bausing - Resolver Zona\" ya respondió éxito (status:true) y localityid/catalog_id quedaron guardados — en este turno o en uno anterior. NO avanza si la tool todavía no se llamó, o si la última llamada devolvió error (en ese caso hay que seguir pidiendo la corrección) o si el cliente todavía no mandó ninguna corrección.",
         "requiredSlots": []
       },
       "position": {
         "x": 784.4499784698744,
         "y": 1029.095981681955
-      }
-    },
-    {
-      "id": "node-zona-retry-02",
-      "name": "Obtener ID Localidad (reintento)",
-      "type": "http_request",
-      "config": {
-        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
-        "body": "",
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "method": "POST",
-        "headers": [],
-        "retries": 0,
-        "timeout": 10000,
-        "useMock": false,
-        "bodyMode": "json",
-        "bodyFiles": [],
-        "timeoutMs": 10000,
-        "bodyParams": [],
-        "mockNodeId": "",
-        "dataSources": [],
-        "errorHandling": "branch",
-        "ragDataSources": {},
-        "savedVariables": [
-          {
-            "key": "catalog_id",
-            "path": "body.data.catalog_id",
-            "label": "Catalog Id"
-          },
-          {
-            "key": "crm_zone_id",
-            "path": "body.data.crm_zone_id",
-            "label": "Crm Zone Id"
-          },
-          {
-            "key": "localityid",
-            "path": "body.data.locality.id",
-            "label": "LocalityId"
-          },
-          {
-            "key": "label",
-            "path": "body.data.estimated_delivery.label",
-            "label": "Label"
-          },
-          {
-            "key": "is_third_party_transport",
-            "path": "body.data.is_third_party_transport",
-            "label": "Is Third Party Transport"
-          },
-          {
-            "key": "cost_label",
-            "path": "body.data.shipping_summary.cost_label",
-            "label": "Cost Label"
-          },
-          {
-            "key": "is_free",
-            "path": "body.data.shipping_summary.is_free",
-            "label": "Is Free"
-          }
-        ],
-        "sections_config": {
-          "body": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "address",
-                "value": "{{direccion_completa}}",
-                "isArray": false,
-                "required": true,
-                "valueMode": "variable",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "headers": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "X-API-Key",
-                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              },
-              {
-                "name": "Content-Type",
-                "value": "application/json",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "pathParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          },
-          "queryParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          }
-        },
-        "include_metadata": false,
-        "dataSourceConfigs": {}
-      },
-      "position": {
-        "x": 784.4499784698744,
-        "y": 1219.095981681955
       }
     },
     {
@@ -7044,36 +7002,8 @@
       "sourceHandle": "error"
     },
     {
-      "to": "node-zona-retry-01",
-      "from": "node-zona-ask-01"
-    },
-    {
-      "to": "node-1786739435672-15",
-      "from": "node-zona-retry-01",
-      "sourceHandle": "success"
-    },
-    {
-      "to": "10",
-      "from": "node-zona-retry-01",
-      "sourceHandle": "error"
-    },
-    {
       "to": "node-zona-ask-02",
       "from": "node-1786732711679-13",
-      "sourceHandle": "error"
-    },
-    {
-      "to": "node-zona-retry-02",
-      "from": "node-zona-ask-02"
-    },
-    {
-      "to": "node-1786732774278-14",
-      "from": "node-zona-retry-02",
-      "sourceHandle": "success"
-    },
-    {
-      "to": "10",
-      "from": "node-zona-retry-02",
       "sourceHandle": "error"
     },
     {
@@ -7177,6 +7107,14 @@
     {
       "to": "node-pago-tarjeta-recotizar-resumen",
       "from": "node-reset-recotizar-resumen"
+    },
+    {
+      "from": "node-zona-ask-01",
+      "to": "node-1786739435672-15"
+    },
+    {
+      "from": "node-zona-ask-02",
+      "to": "node-1786732774278-14"
     }
   ],
   "finalOutputSchema": {
