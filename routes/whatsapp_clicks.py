@@ -10,7 +10,7 @@ whatsapp_clicks_bp = Blueprint('whatsapp_clicks', __name__)
 VALID_CLICK_TYPES = {'contact', 'checkout'}
 
 
-@whatsapp_clicks_bp.route('/track/whatsapp-click', methods=['POST'])
+@whatsapp_clicks_bp.route('/wa/click', methods=['POST'])
 def track_whatsapp_click():
     """
     Registra un click en un botón/flujo de WhatsApp (sin autenticación, llamado desde el storefront).
