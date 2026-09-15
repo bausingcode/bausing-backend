@@ -17,7 +17,8 @@ def track_whatsapp_click():
     Body: { "type": "contact" | "checkout", "page": "/ruta-opcional" }
     """
     try:
-        data = request.get_json(silent=True) or {}
+        # force=True: sendBeacon manda el body con Content-Type: text/plain (no application/json)
+        data = request.get_json(silent=True, force=True) or {}
         click_type = data.get('type')
 
         if click_type not in VALID_CLICK_TYPES:
