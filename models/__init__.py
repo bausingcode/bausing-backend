@@ -32,6 +32,7 @@ from .faq_item import FaqItem
 from .coupon import Coupon
 from .coupon_category_discount import CouponCategoryDiscount
 from .category_pdp_cross_sell import CategoryPdpCrossSell
+from .whatsapp_click import WhatsappClick
 
 __all__ = [
     'Category',
@@ -86,5 +87,6 @@ __all__ = [
     'Coupon',
     'CouponCategoryDiscount',
     'CategoryPdpCrossSell',
+    'WhatsappClick',
 ]
 
