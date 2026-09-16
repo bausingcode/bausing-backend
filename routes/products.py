@@ -1064,15 +1064,20 @@ def get_product(product_id):
         else:
             target_catalog_id = get_cordoba_capital_catalog_id()
 
+        # selectinload en las colecciones (images, subcategorías, variantes/opciones/precios):
+        # evita multiplicar filas en el SELECT principal (mismo fix ya aplicado al listado, ver
+        # comentario en get_products más arriba). Con joinedload acá, el producto vuelve
+        # cruzado images x subcategorías x variantes x opciones x precios x catálogos/localidades,
+        # lo que puede devolver miles de filas para un solo producto y era la causa del PDP lento.
         product = Product.query.options(
-            joinedload(Product.images),
+            selectinload(Product.images),
             joinedload(Product.category),
             joinedload(Product.category_option),
-            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
-            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
-            joinedload(Product.variants)
-            .joinedload(ProductVariant.options)
-            .joinedload(ProductVariantOption.prices)
+            selectinload(Product.subcategory_associations).selectinload(ProductSubcategory.subcategory),
+            selectinload(Product.subcategory_associations).selectinload(ProductSubcategory.category_option),
+            selectinload(Product.variants)
+            .selectinload(ProductVariant.options)
+            .selectinload(ProductVariantOption.prices)
             .options(
                 joinedload(ProductPrice.catalog),
                 joinedload(ProductPrice.locality),
