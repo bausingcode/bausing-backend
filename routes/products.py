@@ -1064,20 +1064,20 @@ def get_product(product_id):
         else:
             target_catalog_id = get_cordoba_capital_catalog_id()
 
-        # selectinload en las colecciones (images, subcategorías, variantes/opciones/precios):
-        # evita multiplicar filas en el SELECT principal (mismo fix ya aplicado al listado, ver
-        # comentario en get_products más arriba). Con joinedload acá, el producto vuelve
-        # cruzado images x subcategorías x variantes x opciones x precios x catálogos/localidades,
-        # lo que puede devolver miles de filas para un solo producto y era la causa del PDP lento.
+        # joinedload: para UN producto el fanout (variantes x opciones x precios x imágenes x
+        # subcategorías) es chico (decenas de filas como mucho), así que conviene 1 round-trip
+        # a Supabase antes que varios round-trips en serie (selectinload por nivel):
+        # cada round-trip mide ~100-150ms acá, y son ese es el costo real del endpoint (ver
+        # medición con SQLALCHEMY_ECHO: ~10 queries en serie == la demora del PDP).
         product = Product.query.options(
-            selectinload(Product.images),
+            joinedload(Product.images),
             joinedload(Product.category),
             joinedload(Product.category_option),
-            selectinload(Product.subcategory_associations).selectinload(ProductSubcategory.subcategory),
-            selectinload(Product.subcategory_associations).selectinload(ProductSubcategory.category_option),
-            selectinload(Product.variants)
-            .selectinload(ProductVariant.options)
-            .selectinload(ProductVariantOption.prices)
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.subcategory),
+            joinedload(Product.subcategory_associations).joinedload(ProductSubcategory.category_option),
+            joinedload(Product.variants)
+            .joinedload(ProductVariant.options)
+            .joinedload(ProductVariantOption.prices)
             .options(
                 joinedload(ProductPrice.catalog),
                 joinedload(ProductPrice.locality),
@@ -1096,10 +1096,21 @@ def get_product(product_id):
                 'error': 'Producto no disponible'
             }), 404
 
+        # card_row/transfer_row (más abajo) ya hacen exactamente esta misma consulta para
+        # target_catalog_id (min/max por catalog_id, filtro card / filtro transfer): antes se
+        # pedían por triplicado (esta más card_row más transfer_row), 3 round-trips a Supabase
+        # para el mismo dato. Se calculan una sola vez y se derivan los 3 pares min/max de ahí
+        # (precalc_min/max_price sigue con la prioridad original: tarjeta, si no hay, transferencia).
         precalc_min_price = None
         precalc_max_price = None
+        precalc_min_card_price = None
+        precalc_max_card_price = None
+        precalc_min_transfer_price = None
+        precalc_max_transfer_price = None
+        card_row = None
+        transfer_row = None
         if target_catalog_id:
-            price_row = (
+            card_row = (
                 db.session.query(
                     func.min(ProductPrice.price).label('min_price'),
                     func.max(ProductPrice.price).label('max_price'),
@@ -1120,38 +1131,68 @@ def get_product(product_id):
                 )
                 .first()
             )
-            if price_row is None or (
-                price_row.min_price is None and price_row.max_price is None
-            ):
-                price_row = (
-                    db.session.query(
-                        func.min(ProductPrice.price).label('min_price'),
-                        func.max(ProductPrice.price).label('max_price'),
-                    )
-                    .select_from(ProductVariant)
-                    .join(
-                        ProductVariantOption,
-                        ProductVariantOption.product_variant_id == ProductVariant.id,
-                    )
-                    .join(
-                        ProductPrice,
-                        ProductPrice.product_variant_id == ProductVariantOption.id,
-                    )
-                    .filter(
-                        ProductVariant.product_id == product.id,
-                        ProductPrice.catalog_id == target_catalog_id,
-                        product_price_transfer_filter(),
-                    )
-                    .first()
+            transfer_row = (
+                db.session.query(
+                    func.min(ProductPrice.price).label('min_price'),
+                    func.max(ProductPrice.price).label('max_price'),
                 )
-            if price_row is not None and (
-                price_row.min_price is not None or price_row.max_price is not None
+                .select_from(ProductVariant)
+                .join(
+                    ProductVariantOption,
+                    ProductVariantOption.product_variant_id == ProductVariant.id,
+                )
+                .join(
+                    ProductPrice,
+                    ProductPrice.product_variant_id == ProductVariantOption.id,
+                )
+                .filter(
+                    ProductVariant.product_id == product.id,
+                    ProductPrice.catalog_id == target_catalog_id,
+                    product_price_transfer_filter(),
+                )
+                .first()
+            )
+
+            price_row = None
+            if card_row is not None and (
+                card_row.min_price is not None or card_row.max_price is not None
             ):
+                price_row = card_row
+            elif transfer_row is not None and (
+                transfer_row.min_price is not None or transfer_row.max_price is not None
+            ):
+                price_row = transfer_row
+
+            if price_row is not None:
                 precalc_min_price = (
                     float(price_row.min_price) if price_row.min_price is not None else 0.0
                 )
                 precalc_max_price = (
                     float(price_row.max_price) if price_row.max_price is not None else 0.0
+                )
+
+            if card_row is not None and (
+                card_row.min_price is not None or card_row.max_price is not None
+            ):
+                precalc_min_card_price = (
+                    float(card_row.min_price) if card_row.min_price is not None else 0.0
+                )
+                precalc_max_card_price = (
+                    float(card_row.max_price) if card_row.max_price is not None else 0.0
+                )
+
+            if transfer_row is not None and (
+                transfer_row.min_price is not None or transfer_row.max_price is not None
+            ):
+                precalc_min_transfer_price = (
+                    float(transfer_row.min_price)
+                    if transfer_row.min_price is not None
+                    else 0.0
+                )
+                precalc_max_transfer_price = (
+                    float(transfer_row.max_price)
+                    if transfer_row.max_price is not None
+                    else 0.0
                 )
         elif locality_uuid is not None:
             price_row = (
@@ -1209,77 +1250,7 @@ def get_product(product_id):
                     float(price_row.max_price) if price_row.max_price is not None else 0.0
                 )
 
-        precalc_min_card_price = None
-        precalc_max_card_price = None
-        precalc_min_transfer_price = None
-        precalc_max_transfer_price = None
-        if target_catalog_id:
-            card_row = (
-                db.session.query(
-                    func.min(ProductPrice.price).label('min_price'),
-                    func.max(ProductPrice.price).label('max_price'),
-                )
-                .select_from(ProductVariant)
-                .join(
-                    ProductVariantOption,
-                    ProductVariantOption.product_variant_id == ProductVariant.id,
-                )
-                .join(
-                    ProductPrice,
-                    ProductPrice.product_variant_id == ProductVariantOption.id,
-                )
-                .filter(
-                    ProductVariant.product_id == product.id,
-                    ProductPrice.catalog_id == target_catalog_id,
-                    ProductPrice.price_kind == PRICE_KIND_CARD,
-                )
-                .first()
-            )
-            if card_row is not None and (
-                card_row.min_price is not None or card_row.max_price is not None
-            ):
-                precalc_min_card_price = (
-                    float(card_row.min_price) if card_row.min_price is not None else 0.0
-                )
-                precalc_max_card_price = (
-                    float(card_row.max_price) if card_row.max_price is not None else 0.0
-                )
-
-            transfer_row = (
-                db.session.query(
-                    func.min(ProductPrice.price).label('min_price'),
-                    func.max(ProductPrice.price).label('max_price'),
-                )
-                .select_from(ProductVariant)
-                .join(
-                    ProductVariantOption,
-                    ProductVariantOption.product_variant_id == ProductVariant.id,
-                )
-                .join(
-                    ProductPrice,
-                    ProductPrice.product_variant_id == ProductVariantOption.id,
-                )
-                .filter(
-                    ProductVariant.product_id == product.id,
-                    ProductPrice.catalog_id == target_catalog_id,
-                    product_price_transfer_filter(),
-                )
-                .first()
-            )
-            if transfer_row is not None and (
-                transfer_row.min_price is not None or transfer_row.max_price is not None
-            ):
-                precalc_min_transfer_price = (
-                    float(transfer_row.min_price)
-                    if transfer_row.min_price is not None
-                    else 0.0
-                )
-                precalc_max_transfer_price = (
-                    float(transfer_row.max_price)
-                    if transfer_row.max_price is not None
-                    else 0.0
-                )
-        elif locality_uuid is not None:
+        if locality_uuid is not None and target_catalog_id is None:
             transfer_row_loc = (
                 db.session.query(
                     func.min(ProductPrice.price).label('min_price'),
