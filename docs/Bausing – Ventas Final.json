@@ -1,6 +1,6 @@
 {
   "name": "Bausing – Ventas Final",
-  "description": "Flujo secuencial Bausing: zona → catálogo → cupón/referido → cotizar → handoff o crear orden. Seguimiento en rama aparte. URLs de producción y X-API-Key ya cargadas. Default (Paso del bot): respond_and_end + finalizeConversationSession para que el próximo mensaje vuelva al router. Incluye paso 1b para elegir subcategoría antes de buscar catálogo. Incluye paso 2a medio de pago (sin asumir efectivo) antes de cotizar. 2a elige medio; si tarjeta → 2b banco/cuotas antes de cotizar.   v4: reset transform usa clearFactKeys + return { facts } (sandbox QuickJS).",
+  "description": "Flujo Bausing v6.5: si eligió efectivo/transferencia y después pide tarjeta, el wait-gate de cotizar/datos/resumen AVANZA y el router post-* manda a datos tarjeta (cuotas/promos) + recotizar. Sin ciclos. Resto del flujo intacto.",
   "status": "draft",
   "nodes": [
     {
@@ -14,11 +14,14 @@
             "label": "Quiere comprar",
             "examples": [
               "quiero comprar",
+              "busco electrodomesticos",
               "quiero llevar el colchón Alpes",
-              "dale, lo compro",
+              "dale",
+              "lo compro",
               "quiero cerrar el pedido",
               "quiero pagar",
-              "lo quiero, cómo hago para comprarlo"
+              "lo quiero",
+              "cómo hago para comprarlo"
             ],
             "expression": "",
             "description": "El cliente quiere realizar una compra"
@@ -75,16 +78,20 @@
             "id": "case_1",
             "label": "Cambiar a tarjeta / pagar con tarjeta",
             "examples": [
-              "Quiero cambiar a tarjeta",
-              "prefiero tarjeta",
+              "quiero pagar con tarjeta",
+              "mejor con tarjeta",
               "pago con tarjeta",
+              "tarjeta de crédito",
               "en cuotas",
-              "me arrepentí, quiero tarjeta",
+              "cambiar a tarjeta",
+              "prefiero tarjeta",
               "crédito",
-              "cambiar el medio de pago"
+              "me arrepentí, quiero tarjeta",
+              "pasame a tarjeta",
+              "quiero cuotas"
             ],
             "expression": "",
-            "description": "El cliente quiere pagar con tarjeta, cambiar de efectivo/transferencia a tarjeta, o redefinir banco/cuotas/tarjeta aunque ya haya cotizado o esté cerrando la compra."
+            "description": "El cliente quiere pagar con tarjeta o crédito, pedir cuotas, o cambiar el medio de pago desde efectivo/transferencia hacia tarjeta. Priorizá esta rama sobre confirmar la compra si menciona tarjeta/crédito/cuotas aunque también diga algo de seguir."
           }
         ],
         "rules": [],
@@ -254,12 +261,12 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: mostrar opciones del catálogo para la subcategoría YA elegida y ayudar a elegir un producto concreto.\n\nLa subcategoría elegida está en los hechos (subcategory_id / subcategory_name) o en el historial reciente. Categorías de referencia: {{categorias}}\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" UNA sola vez con el subcategory_id real de la subcategoría elegida.\n- Si falta el id, buscalo en {{categorias}} por el nombre elegido. Nunca inventes IDs.\n- NUNCA busques varias subcategorías en el mismo turno.\n- NUNCA amplíes a toda la categoría padre (ej. todos los colchones). Solo la subcategoría confirmada.\n- Si el cliente cambia de subcategoría, pedí confirmación y recién ahí buscá de nuevo con el nuevo id.\n\nPRODUCTOS\nMostrá solo 3 o 4 opciones con nombre y price_transfer (o price_card si no hay transfer).\nSi menciona un producto puntual por nombre, buscá ese producto (sin inventar product_id).\n\nCOTIZACIÓN / CARRITO (puede haber varios productos)\nConsultar precios no es comprar. Solo agregá al carrito si dice \"quiero ese\", \"lo llevo\" o similar.\n- Cuando el cliente confirma uno o más productos, agregalos a facts.cart_items como {\"product_id\": \"...\", \"quantity\": N, \"name\": \"...\"} (product_id real, nunca inventado; quantity default 1 salvo que pida más). Si cart_items ya tenía productos, SUMÁ estos sin borrar los anteriores.\n- Después de agregar, terminá SIEMPRE tu mensaje con la pregunta textual \"¿Algo más o cotizamos así?\" (no la omitas ni la cambies de forma).\n- Si contesta con otro producto/medida: agregalo y volvé a preguntar.\n- Si contesta afirmativo a esa pregunta (sí, dale, exacto, confirmo, así está bien, cotizá) o dice que ya eligió todo (\"eso es todo\", \"nada más\", \"cotizame\", \"listo\"): NO vuelvas a repetir la confirmación — avanzá al paso siguiente ya, en ese mismo turno.\n- Si pide sacar o cambiar la cantidad de algo, actualizá cart_items en consecuencia.\n- Compatibilidad: si cart_items termina con un solo producto, guardá también facts.product_id con ese mismo id.\nImágenes solo si las pide para un producto puntual.\n\nCuando el cliente elige un producto puntual, confirmalo breve. NO cotices totales con medio de pago. NO asumas efectivo. El medio de pago se pide en el paso siguiente.\n\nAL ENTRAR A ESTE NODO\nSi facts.subcategory_name o el historial ya tiene una medida (ej. \"una plaza\", \"1 plaza\", \"2 plazas\", \"queen\"):\n- Resolvé el subcategory_id real desde {{categorias}} (sinónimos OK).\n- Llamá YA \"Bausing - Buscar Catalogo\" con ese subcategory_id y facts.locality_id / localityid.\n- Mostrá 3–4 productos con precio. No digas \"te mostraré\" sin listar.\n- No vuelvas a preguntar la subcategoría si ya está.\n\nSi facts.subcategory_name ya está, NO preguntes la medida otra vez: buscá y listá productos ya.\n\nSi más adelante ya hay facts.card_surcharge_percent y mostrás un precio de compra/total (no el listado inicial del catálogo), aplicá el recargo al total mostrado. En el listado inicial del catálogo mostrá price_transfer/price_card de la API sin inventar recargos.",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Nunca inventes datos.\n\nOBJETIVO\nMostrar opciones del catálogo para la subcategoría ya elegida y armar el carrito. El medio de pago y la cotización son pasos siguientes: no cotices totales ni asumas efectivo.\n\nCONTEXTO\n- Subcategoría: subcategory_name / subcategory_id en memoria o historial.\n- Categorías de referencia: {{categorias}}\n- Localidad: localityid (o locality_id) ya guardada.\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" una sola vez con el subcategory_id real.\n- Si falta el id, buscalo en {{categorias}} por el nombre. Nunca inventes IDs ni uses textos como \"2 plazas\" como id.\n- No busques varias subcategorías en el mismo turno ni amplíes a toda la categoría padre.\n- Si cambia de subcategoría, confirmá y recién ahí buscá de nuevo.\n\nPRODUCTOS\n- Mostrá 3 o 4 opciones con nombre y price_transfer (o price_card si no hay transfer).\n- Si nombra un producto puntual, buscá ese (sin inventar product_id).\n- Imágenes solo si las pide para un producto puntual.\n\nAL ENTRAR\nSi ya hay subcategory_name/medida en memoria o historial: resolvé el id en {{categorias}}, llamá el catálogo ya y listá productos. No vuelvas a preguntar la medida.\n\nCARRITO\nConsultar precios no es comprar. Agregá solo con intención clara (\"quiero ese\", \"lo llevo\", etc.).\n- Sumá a cart_items objetos {product_id, quantity, name} con product_id real (quantity=1 si no dice otra). No borres ítems previos al agregar.\n- Después de agregar, terminá SIEMPRE con exactamente: \"¿Algo más o cotizamos así?\"\n- Si elige otro producto: agregalo y volvé a preguntar.\n- Si pide sacar o cambiar cantidad: actualizá cart_items.\n- Si cart_items queda con un solo producto, guardá también product_id con ese id.\n\nNo digas que avanzás de nodo ni que cotizás acá. Cuando el cliente confirme que el carrito está listo, solo confirmá breve el/los producto(s); el flujo sigue solo.\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
-        "continueCondition": "El cliente ya tiene al menos un producto en facts.cart_items y quiere avanzar a cotizar: dijo que ya eligió todo (ej. \"eso es todo\", \"cotizame\") O respondió afirmativo (sí, dale, exacto, confirmo, así está bien) a la pregunta \"¿Algo más o cotizamos así?\".",
+        "continueCondition": "Avanzar solo si el asistente ya mostró productos y preguntó si cotizan así (o equivalente), Y el último mensaje del cliente confirma que quiere seguir con lo elegido (sí, dale, exacto, confirmo, así está bien, cotizame, eso es todo, nada más, listo). No avances si sigue eligiendo productos, pide otra medida, pregunta precios o agrega/cambia ítems.",
         "dataSourceConfigs": {
           "102": {
             "active": true,
@@ -553,7 +560,7 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
                   "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
-                  "locality_id": "@AI(\"usar el dato ya guardado: facts.locality_id\", optional:false, isArray:false)"
+                  "locality_id": "@AI(\"usar facts.localityid (o facts.locality_id) ya guardado\", optional:false, isArray:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -625,7 +632,7 @@
                     },
                     {
                       "name": "locality_id",
-                      "value": "usar el dato ya guardado: facts.locality_id",
+                      "value": "usar facts.localityid (o facts.locality_id) ya guardado",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -678,14 +685,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío. No inventes cash.\n2) Guardá quote_total (total base de la tool, ya suma todos los productos) y la lista de items que devolvió la tool (cada uno con product_name, quantity, unit_price y line_total).\n3) PRECIO CON RECARGO DE TARJETA, OBLIGATORIO SI EL METODO DE PAGO ELEGIDO ES TARJETA \n\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo segun cuotas).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá cada producto con su cantidad y precio (si hay más de uno, LISTALOS TODOS, no muestres solo uno), envío, medio de pago (al recibir) y el PRECIO FINAL total a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nCAMBIO A TARJETA\nSi el cliente pide pagar con tarjeta/crédito/cuotas o cambiar el medio de pago: confirmá breve (ej. \"Dale, armamos el pago con tarjeta.\") y NO insistas en confirmar la compra en efectivo/transferencia. No cotices de nuevo acá con card si todavía no tenés banco/cuotas/recargo; el flujo siguiente pide esos datos.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA de estas: (A) el asistente YA mostró una cotización con total Y el cliente confirma seguir (sí, dale, procede, confirmo, ok, lo quiero, adelante, lo llevo); (B) el cliente quiere pagar con tarjeta / crédito / cuotas, o cambiar el medio de pago de efectivo/transferencia a tarjeta (ej: \"quiero tarjeta\", \"pago con tarjeta\", \"mejor con crédito\", \"en cuotas\", \"cambiar a tarjeta\"). No avances con preguntas sueltas sobre el total/envío sin confirmar ni pedir tarjeta.",
         "dataSourceConfigs": {
           "106": {
             "active": true,
@@ -938,15 +945,15 @@
         "headers": [],
         "bodyFiles": [],
         "bodyParams": [],
-        "expression": "{{requires_human_handoff}}",
+        "expression": "Boolean({{requires_human_handoff}} === true || {{requires_human_handoff}} === \"true\" || {{requires_human_handoff}} === 1 || {{requires_human_handoff}} === \"1\")",
         "dataSources": [],
         "conditionType": "simple",
         "ragDataSources": {},
         "dataSourceConfigs": {}
       },
       "position": {
-        "x": 2521.149919052817,
-        "y": -119.37268229117319
+        "x": 2337.9216364986282,
+        "y": -93.60620505699039
       }
     },
     {
@@ -1013,7 +1020,7 @@
                   "first_name": "@AI(\"nombre\", optional:false, isArray:false)",
                   "document_type": "DNI",
                   "payment_method": "@AI(\"Metodo de pago: efectivo, transferencia o tarjeta.\", optional:false, isArray:false)",
-                  "payment_method_quote": "@AI(\"Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas\", optional:true, isArray:false)"
+                  "payment_method_quote": "@AI(\"Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas. Si no, enviar el metodo de pago elegido.\", optional:true, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1095,7 +1102,7 @@
                     },
                     {
                       "name": "payment_method_quote",
-                      "value": "Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas",
+                      "value": "Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas. Si no, enviar el metodo de pago elegido.",
                       "isArray": false,
                       "required": false,
                       "valueMode": "text",
@@ -1167,7 +1174,7 @@
                 }
               },
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items[] con TODOS los productos ya cotizados (uno o varios, los mismos que mandaste a Cotizar Pedido). Si payment_method no es card, mandá payment_method_quote vacío (nunca null).",
+              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items[] con TODOS los productos ya cotizados (uno o varios, los mismos que mandaste a Cotizar Pedido).",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -1192,7 +1199,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nEl cliente YA confirmó el resumen. ESTE nodo SOLO crea la orden con la tool.\n\n1) Llamá SÍ O SÍ \"Bausing - Crear Orden\" con:\n   - items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío ni inventes un product_id\n   - address / dirección de facts.address\n   - payment_method = facts.payment_method (cash|transfer|card)\n   - payment_method_quote = facts.payment_method_quote\n   - customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - installments/bank/card_type si es card\n2) SOLO si la tool responde OK: confirmá la orden con datos reales (order_id si viene).\n3) Si falla: explicá el error. NUNCA inventes \"orden creada\".\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo acá.\n\nSi es tarjeta, al confirmar la orden mencioná cuotas y que el total incluye el recargo (facts.price_final / card_surcharge_percent) si están.\n\nEn el metodo de pago si es efectivo enviar cash, si es transferencia enviar transfer y si es tarjeta enviar card.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nEl cliente YA confirmó el resumen. Este nodo SOLO crea la orden.\n\nSI LA TOOL FALLA POR DIRECCIÓN: pedí corregir calle/altura/ciudad/CP y reintentá recién con la dirección nueva.\n\n1) Llamá \"Bausing - Crear Orden\" con:\n   - items: string desde cart_items (ids separados por coma, formato id:cantidad). Todos los productos. Nunca vacío ni inventado.\n   - address desde address/direccion_completa\n   - payment_method: cash|transfer|card\n   - payment_method_quote, customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n   - si card: installments, bank, card_type\n2) Solo si la tool responde OK: confirmá con datos reales (order_id si viene). Si es tarjeta, mencioná cuotas y que el total incluye recargo (price_final / card_surcharge_percent) si están.\n3) Si falla, deci que hubo un error y que tendra que terminar la compra al numero +3510000000. Y mostrale el resumen de compra para que lo copie y pegue a ese numero.\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo.\n",
         "clearFactKeys": [],
         "executionMode": "respond_and_end",
         "requiredSlots": [],
@@ -1217,7 +1224,7 @@
                   "first_name": "@AI(\"nombre\", optional:false, isArray:false)",
                   "document_type": "DNI",
                   "payment_method": "@AI(\"Metodo de pago: efectivo, transferencia o tarjeta.\", optional:false, isArray:false)",
-                  "payment_method_quote": "@AI(\"Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas\", optional:true, isArray:false)"
+                  "payment_method_quote": "@AI(\"Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas. Si no, enviar el metodo de pago elegido.\", optional:true, isArray:false)"
                 },
                 "method": "POST",
                 "headers": {
@@ -1299,7 +1306,7 @@
                     },
                     {
                       "name": "payment_method_quote",
-                      "value": "Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas",
+                      "value": "Solo si el metodo de pago es card, enviar facts.bank, facts.card_type y numero de cantidad de cuotas elegidas. Si no, enviar el metodo de pago elegido.",
                       "isArray": false,
                       "required": false,
                       "valueMode": "text",
@@ -1371,7 +1378,7 @@
                 }
               },
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items[] con TODOS los productos ya cotizados (uno o varios, los mismos que mandaste a Cotizar Pedido). Si payment_method no es card, mandá payment_method_quote vacío (nunca null).",
+              "tool_description": "USAR CUANDO: ya cotizaste el pedido con Cotizar Pedido y el cliente confirmó que quiere comprar. Necesita customer (nombre, apellido, email, teléfono, DNI), address e items[] con TODOS los productos ya cotizados (uno o varios, los mismos que mandaste a Cotizar Pedido).",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -1482,12 +1489,12 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "SALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nTONO Y REGLAS DE ESTILO (siempre): Si no saludo anteriormente, asegurarse de saludar ahora. Atención al cliente, empática y clara. hablás como un vendedor humano de Bausing por WhatsApp — breve, cálido, natural, nunca como un bot. Si no tenés el dato real, preguntalo, no lo completes/inventes vos.\nNunca uses markdown (negrita, links, corchetes de imagen).\n\n\"Bausing - Listar Pedidos\": el cliente quiere ver sus pedidos en general — necesita teléfono y/o DNI.\n\"Bausing - Estado de Pedido\": pregunta por UN pedido puntual (con número/ID) — necesita el número + teléfono.\n\nOBLIGATORIO: SI es el primer mensaje que se responde al usuario siempre comenzar con un mensaje amigable de saludo por haberse comunicado con Bausing.",
+        "systemPrompt": "Hablá como atención al cliente de Bausing por WhatsApp: breve, cálida y clara. Sin markdown. No inventes datos.\n\nSALUDO\nSi no hay mensaje tuyo previo en el historial, empezá con: \"¡Hola! Gracias por comunicarte con Bausing.\" Luego pedí lo necesario. Si ya saludaste, no repitas el saludo.\n\nTOOLS\n- \"Bausing - Listar Pedidos\": listado general → pedí teléfono y/o DNI.\n- \"Bausing - Estado de Pedido\": un pedido puntual → pedí número/ID + teléfono.\n\nRespondé solo con datos reales de las tools.\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
-        "continueCondition": "",
+        "continueCondition": "Avanzar solo si el cliente cerró el tema de seguimiento (gracias, listo, no necesito nada más) o pidió explícitamente otra cosa fuera de pedidos. Si sigue preguntando por pedidos o estado, no avances.",
         "dataSourceConfigs": {
           "108": {
             "id": "108",
@@ -1572,6 +1579,7 @@
         "bodyFiles": [],
         "assigneeId": "",
         "bodyParams": [],
+        "assigneeIds": [],
         "dataSources": [],
         "notifyEmail": true,
         "notifyInApp": false,
@@ -1583,370 +1591,6 @@
       "position": {
         "x": 528.8078803895968,
         "y": 426.0558463603473
-      }
-    },
-    {
-      "id": "12",
-      "name": "1a. Resolver Zona",
-      "type": "agent",
-      "config": {
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "headers": [],
-        "factKeys": [
-          "direccion_completa",
-          "address"
-        ],
-        "aiModelId": "",
-        "bodyFiles": [],
-        "bodyParams": [],
-        "factLabels": {
-          "address": "Dirección (alias)",
-          "direccion_completa": "Dirección completa"
-        },
-        "ragEnabled": false,
-        "dataSources": [],
-        "outputSchema": {
-          "type": "object",
-          "required": [
-            "output",
-            "zone_resolved"
-          ],
-          "properties": {
-            "output": {
-              "type": "string"
-            },
-            "zone_resolved": {
-              "type": "boolean"
-            }
-          },
-          "additionalProperties": false
-        },
-        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- Guardá la dirección en el hecho direccion_completa (y address con el mismo valor) NORMALIZADA en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si el cliente la escribió con puntos, saltos de línea u otro separador, pasala vos a ese formato con comas antes de guardarla — no guardes el texto crudo tal cual si usó otro separador.\nIMPORTANTE: Si el cliente te lo dio sin comas, tambien normaliza vos siguiendo el formato de Nombre numero de calle, ciudad, provincia, codigo postal. Un ejemplo puede ser que te de: \"calle 123 ciudad provincia codigopostal\". En ese caso debes normalizar al formato anteriormente mencionado. Otro ejemplo puede ser: \"calle 123, ciudad, pronvincia, codigo postal\". Asi y otras combinaciones de comas. OBLIGATORIO: Debes interpretrar el mensaje.\n\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.\n\n- OBLIGATORIO: Si ves al menos una palabra mal escrita en la direccion enviada por el usuario, pregunta para confirmar la direccion interpretada.",
-        "clearFactKeys": [],
-        "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "direccion_completa",
-            "label": "Dirección completa",
-            "description": "Texto de dirección del cliente (calle y número, ciudad, provincia y/o CP). Aceptá el mensaje completo aunque tenga typos. No hace falta formato perfecto."
-          }
-        ],
-        "ragDataSources": {},
-        "savedVariables": [],
-        "nextStartNodeId": "",
-        "factDescriptions": {},
-        "continueCondition": "facts.direccion_completa ya tiene valor.",
-        "dataSourceConfigs": {},
-        "captureFactsEnabled": true,
-        "waitForUserResponse": true
-      },
-      "position": {
-        "x": 369.8203727422435,
-        "y": -91.90618227675212
-      }
-    },
-    {
-      "id": "node-1786633793742-14",
-      "name": "Obtener ID Localidad copia",
-      "type": "http_request",
-      "config": {
-        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
-        "body": "",
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "method": "POST",
-        "headers": [],
-        "retries": 0,
-        "timeout": 10000,
-        "useMock": false,
-        "bodyMode": "json",
-        "bodyFiles": [],
-        "timeoutMs": 10000,
-        "bodyParams": [],
-        "mockNodeId": "",
-        "dataSources": [],
-        "errorHandling": "branch",
-        "ragDataSources": {},
-        "savedVariables": [
-          {
-            "key": "catalog_id",
-            "path": "body.data.catalog_id",
-            "label": "Catalog Id"
-          },
-          {
-            "key": "crm_zone_id",
-            "path": "body.data.crm_zone_id",
-            "label": "Crm Zone Id"
-          },
-          {
-            "key": "localityid",
-            "path": "body.data.locality.id",
-            "label": "LocalityId"
-          },
-          {
-            "key": "label",
-            "path": "body.data.estimated_delivery.label",
-            "label": "Label"
-          },
-          {
-            "key": "is_third_party_transport",
-            "path": "body.data.is_third_party_transport",
-            "label": "Is Third Party Transport"
-          },
-          {
-            "key": "cost_label",
-            "path": "body.data.shipping_summary.cost_label",
-            "label": "Cost Label"
-          },
-          {
-            "key": "is_free",
-            "path": "body.data.shipping_summary.is_free",
-            "label": "Is Free"
-          }
-        ],
-        "sections_config": {
-          "body": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "address",
-                "value": "{{direccion_completa}}",
-                "isArray": false,
-                "required": true,
-                "valueMode": "variable",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "headers": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "X-API-Key",
-                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              },
-              {
-                "name": "Content-Type",
-                "value": "application/json",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "pathParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          },
-          "queryParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          }
-        },
-        "include_metadata": false,
-        "dataSourceConfigs": {}
-      },
-      "position": {
-        "x": 754.4069276789571,
-        "y": -123.14118993972892
-      }
-    },
-    {
-      "id": "node-1786732711679-12",
-      "name": "2. Resolver Zona",
-      "type": "agent",
-      "config": {
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "headers": [],
-        "factKeys": [
-          "direccion_completa",
-          "address"
-        ],
-        "aiModelId": "",
-        "bodyFiles": [],
-        "bodyParams": [],
-        "factLabels": {
-          "address": "Dirección (alias)",
-          "direccion_completa": "Dirección completa"
-        },
-        "ragEnabled": false,
-        "dataSources": [],
-        "outputSchema": {
-          "type": "object",
-          "required": [
-            "output",
-            "zone_resolved"
-          ],
-          "properties": {
-            "output": {
-              "type": "string"
-            },
-            "zone_resolved": {
-              "type": "boolean"
-            }
-          },
-          "additionalProperties": false
-        },
-        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes datos.\n\nSALUDO EN LA PRIMERA RESPUESTA (prioridad máxima)\nSi en el historial todavía NO hay ningún mensaje tuyo (asistente/bot), tu respuesta DEBE empezar SIEMPRE con un saludo amigable de Bausing, por ejemplo:\n\"¡Hola! Gracias por comunicarte con Bausing.\"\nRecién DESPUÉS del saludo, en el mismo mensaje, pedí lo que corresponda al objetivo del nodo.\nNunca empieces de una con \"Genial,\" / \"Perfecto,\" / la pregunta de dirección sin haber saludado antes.\nSi ya saludaste antes en el historial, no vuelvas a saludar: seguí directo con el objetivo del nodo.\n\nOBJETIVO\nPedir la dirección de entrega UNA vez y, cuando el cliente la pase, confirmarla en UNA frase corta. El siguiente nodo (HTTP) resuelve la zona solo: vos NO digas \"estoy procesando\" ni esperes otro mensaje.\n\nMENSAJE INICIAL (si todavía no hay dirección)\nSi es tu primera respuesta en la conversación, usá ESTE formato (saludo + pedido):\n\"¡Hola! Gracias por comunicarte con Bausing. Para ofrecerte productos disponibles en tu zona, ¿me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal.\"\nSi YA saludaste antes y solo falta la dirección:\n\"¿Me pasás tu dirección completa? Necesito calle, número, ciudad, provincia y código postal para ver qué hay disponible en tu zona.\"\n\nCUANDO EL CLIENTE MANDA LA DIRECCIÓN\n- Contá como válida una dirección típica aunque falte un detalle menor o haya typos (ej. \"corodba\" → Córdoba).\n- Guardá la dirección en el hecho direccion_completa (y address con el mismo valor) NORMALIZADA en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si el cliente la escribió con puntos, saltos de línea u otro separador, pasala vos a ese formato con comas antes de guardarla — no guardes el texto crudo tal cual si usó otro separador.\nIMPORTANTE: Si el cliente te lo dio sin comas, tambien normaliza vos siguiendo el formato de Nombre numero de calle, ciudad, provincia, codigo postal. Un ejemplo puede ser que te de: \"calle 123 ciudad provincia codigopostal\". En ese caso debes normalizar al formato anteriormente mencionado. Otro ejemplo puede ser: \"calle 123, ciudad, pronvincia, codigo postal\". Asi y otras combinaciones de comas. OBLIGATORIO: Debes interpretrar el mensaje.\n\n- PROHIBIDO: \"estoy procesando\", \"dame un momento\", volver a pedir la dirección si ya la dio, preguntar de nuevo calle/CP si el mensaje ya trae calle, ciudad y CP.\n\nNO llames tools acá. No listes productos.\n\n- OBLIGATORIO: Si ves al menos una palabra mal escrita en la direccion enviada por el usuario, pregunta para confirmar la direccion interpretada.",
-        "clearFactKeys": [],
-        "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "direccion_completa",
-            "label": "Dirección completa",
-            "description": "Texto de dirección del cliente (calle y número, ciudad, provincia y/o CP). Aceptá el mensaje completo aunque tenga typos. No hace falta formato perfecto."
-          }
-        ],
-        "ragDataSources": {},
-        "savedVariables": [],
-        "nextStartNodeId": "",
-        "factDescriptions": {},
-        "continueCondition": "facts.direccion_completa ya tiene valor.",
-        "dataSourceConfigs": {},
-        "captureFactsEnabled": true,
-        "waitForUserResponse": true
-      },
-      "position": {
-        "x": 523.4235000783437,
-        "y": 833.234654806886
-      }
-    },
-    {
-      "id": "node-1786732711679-13",
-      "name": "Obtener ID Localidad copia copia",
-      "type": "http_request",
-      "config": {
-        "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
-        "body": "",
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "method": "POST",
-        "headers": [],
-        "retries": 0,
-        "timeout": 10000,
-        "useMock": false,
-        "bodyMode": "json",
-        "bodyFiles": [],
-        "timeoutMs": 10000,
-        "bodyParams": [],
-        "mockNodeId": "",
-        "dataSources": [],
-        "errorHandling": "branch",
-        "ragDataSources": {},
-        "savedVariables": [
-          {
-            "key": "catalog_id",
-            "path": "body.data.catalog_id",
-            "label": "Catalog Id"
-          },
-          {
-            "key": "crm_zone_id",
-            "path": "body.data.crm_zone_id",
-            "label": "Crm Zone Id"
-          },
-          {
-            "key": "localityid",
-            "path": "body.data.locality.id",
-            "label": "LocalityId"
-          },
-          {
-            "key": "label",
-            "path": "body.data.estimated_delivery.label",
-            "label": "Label"
-          },
-          {
-            "key": "is_third_party_transport",
-            "path": "body.data.is_third_party_transport",
-            "label": "Is Third Party Transport"
-          },
-          {
-            "key": "cost_label",
-            "path": "body.data.shipping_summary.cost_label",
-            "label": "Cost Label"
-          },
-          {
-            "key": "is_free",
-            "path": "body.data.shipping_summary.is_free",
-            "label": "Is Free"
-          }
-        ],
-        "sections_config": {
-          "body": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "address",
-                "value": "{{direccion_completa}}",
-                "isArray": false,
-                "required": true,
-                "valueMode": "variable",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "headers": {
-            "json": "{}",
-            "list": [
-              {
-                "name": "X-API-Key",
-                "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              },
-              {
-                "name": "Content-Type",
-                "value": "application/json",
-                "isArray": false,
-                "required": true,
-                "valueMode": "text",
-                "aiGenerated": false
-              }
-            ],
-            "mode": "list",
-            "enabled": true
-          },
-          "pathParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          },
-          "queryParams": {
-            "json": "{}",
-            "list": [],
-            "mode": "list",
-            "enabled": false
-          }
-        },
-        "include_metadata": false,
-        "dataSourceConfigs": {}
-      },
-      "position": {
-        "x": 784.4499784698744,
-        "y": 839.0959816819549
       }
     },
     {
@@ -2122,12 +1766,12 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos. No uses markdown.\n\nObjetivo: ayudar al cliente a identificar productos y sus precios.\n\nCATEGORÍAS\nSi el cliente pide una categoría general, con o sin medida, llamá SIEMPRE primero \"Bausing - Categorías y Subcategorías\".\n\nNunca uses el texto del cliente como subcategory_id. \"2 plazas\", \"queen\", \"1 plaza\", etc. NO son IDs.\n\nBuscá en la respuesta de esa tool la categoría padre correcta y luego la subcategoría correspondiente. Recién entonces usá SU id real en \"Bausing - Buscar Catalogo\".\n\nEjemplo: si pide \"colchones de 2 plazas\":\n\n1. Categorías y Subcategorías.\n2. Buscar \"2 plazas\" dentro de la categoría padre \"Colchones\".\n3. Tomar su id real.\n4. Buscar Catalogo con ese id.\n\nNunca uses una subcategoría perteneciente a otra categoría padre.\n\nPRODUCTOS\nCon subcategory_id real, usá \"Bausing - Buscar Catalogo\".\nSi menciona un producto puntual por nombre, usá \"Bausing - Buscar Producto\".\nNunca inventes product_id.\nMostrá solo 3 o 4 opciones con nombre y price_transfer, o price_card si no existe.\n\nCOTIZACIÓN\nSolo llamá \"Bausing - Cotizar Pedido\" después de que el cliente elija un producto puntual.\nConsultar precios NO significa querer comprar.\n\nPAGO\nNunca preguntes el método de pago por iniciativa propia.\n\nSolo hablá de tarjeta, cuotas, banco, transferencia o efectivo si el cliente pregunta o menciona explícitamente una forma de pago.\n\n\"Bausing - Validar Cuotas Tarjeta\" SOLO se usa si el cliente menciona explícitamente tarjeta, crédito o cuotas.\n\nSi el cliente no habló de cómo va a pagar, no preguntes nada sobre el método de pago.\n\nCARRITO (puede haber varios productos)\nSolo agregá un producto si el cliente expresa intención de compra, por ejemplo \"quiero ese\", \"lo llevo\" o \"dale, ese\".\n- Al agregarlo, sumalo a facts.cart_items como {\"product_id\": \"...\", \"quantity\": N, \"name\": \"...\"} (product_id real, nunca inventado). Si ya había productos en cart_items, NO los borres, solo agregá el nuevo.\n- Después de agregar, terminá SIEMPRE tu mensaje con la pregunta textual \"¿Algo más o cotizamos así?\" (no la omitas ni la cambies de forma).\n- Si pide sacar o cambiar cantidad de algo ya agregado, actualizá cart_items.\n- Si contesta afirmativo a esa pregunta (sí, dale, exacto, confirmo, así está bien, cotizá) o dice que ya eligió todo: NO vuelvas a repetir la confirmación — avanzá al siguiente paso (cotizar) ya, en ese mismo turno.\n- Compatibilidad: si cart_items termina con un solo producto, guardá también facts.product_id con ese mismo id.\n\nIMÁGENES\nSolo mostrales una imagen si la piden explícitamente para un producto puntual.\n\nDIRECCIÓN\nSi cambia la dirección, llamá nuevamente \"Bausing - Resolver Zona\" con la nueva dirección completa.\n\nSUBCATEGORÍA OBLIGATORIA\nSi el pedido es genérico (solo \"colchones\" u otra categoría padre con varias subcategorías), NO busques todavía.\nPreguntá amablemente qué subcategoría quiere, listando opciones reales. Solo buscá cuando tengas subcategory_id concreto.",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Nunca inventes datos.\n\nOBJETIVO\nAyudar a identificar un producto puntual y armar el carrito. No cotices totales ni preguntes medio de pago salvo que el cliente lo mencione.\n\nTOOLS\n- Producto por nombre: \"Bausing - Buscar Producto\".\n- Detalle: \"Bausing - Detalle de Producto\".\n- locality_id/localityid ya guardado para búsquedas. Nunca inventes product_id.\n\nPRODUCTOS\nMostrá pocas opciones claras con nombre y price_transfer (o price_card). Imágenes solo si las pide.\n\nCARRITO\nAgregá solo con intención de compra (\"quiero ese\", \"lo llevo\", etc.).\n- Sumá a cart_items {product_id, quantity, name}. No borres ítems previos.\n- Después de agregar, terminá SIEMPRE con: \"¿Algo más o cotizamos así?\"\n- Si confirma que está listo: confirmá breve los productos; no digas que pasás de nodo.\n- Si cart_items queda con un solo producto, guardá también product_id.\n\nSi cambia la dirección, pedí la nueva completa (el flujo de zona la resuelve en otro paso).\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
-        "continueCondition": "El cliente ya tiene al menos un producto en facts.cart_items y quiere avanzar a cotizar: dijo que ya eligió todo (ej. \"eso es todo\", \"cotizame\") O respondió afirmativo (sí, dale, exacto, confirmo, así está bien) a la pregunta \"¿Algo más o cotizamos así?\".",
+        "continueCondition": "Avanzar solo si el asistente ya ofreció producto(s) y preguntó si cotizan así, Y el cliente confirma que quiere seguir con lo elegido (sí, dale, cotizame, eso es todo, listo, etc.). No avances si sigue buscando o cambiando productos.",
         "dataSourceConfigs": {
           "103": {
             "id": "103",
@@ -2272,8 +1916,8 @@
         "waitForUserResponse": true
       },
       "position": {
-        "x": 1100.3930407905984,
-        "y": 834.0188017501099
+        "x": 1379.094760771495,
+        "y": 997.3956720837389
       }
     },
     {
@@ -2386,7 +2030,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "TONO: vendedor humano de Bausing por WhatsApp — breve, cálido, natural. Sin markdown.\n\nEste es el saludo / dudas generales.\nRespondé siempre empezando con: \"¡Hola! Gracias por comunicarte con Bausing, ¿cómo te puedo ayudar?\"\nSolo resolvé dudas generales del negocio. Si preguntan productos, precios u opciones concretas, no inventes datos: invitá a decir qué busca (ej. colchones) para ayudarlo.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown.\n\nSaludo / dudas generales. Empezá siempre con: \"¡Hola! Gracias por comunicarte con Bausing, ¿cómo te puedo ayudar?\"\nSolo resolvé dudas generales. Si preguntan productos, precios u opciones concretas, no inventes: invitá a decir qué busca (ej. colchones) para ayudarlo.\n{{workflow.rag.context}}\n",
         "executionMode": "respond_and_end",
         "requiredSlots": [],
         "ragDataSources": {
@@ -2404,8 +2048,8 @@
         "finalizeConversationSession": true
       },
       "position": {
-        "x": 610.3498301370469,
-        "y": 632.0568701226462
+        "x": 879.4411459806712,
+        "y": 590.4117855277996
       }
     },
     {
@@ -2447,7 +2091,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nContexto de categorías (fuente de verdad):\n{{categorias}}\n\nTenés el historial completo de la conversación. Tu ÚNICO trabajo: ver si el cliente YA eligió una medida/tipo.\n\nIMPORTANTE — categorías sin subdivisión: si lo que nombró el cliente aparece TAL CUAL (o con typo evidente) como nombre de categoría o subcategoría en {{categorias}}, y esa categoría/subcategoría no tiene subcategorías propias listadas debajo de ella en {{categorias}}, ya es una elección completa — aunque no sea un patrón de medida como \"1 plaza\". Ejemplo: si pide \"almohadas\" y en {{categorias}} \"Almohadas\" no tiene hijos, tratala como subcategoría ya elegida (no le preguntes por tipos que no existen en {{categorias}}, como \"ortopédica\" o \"estándar\" si no están listados ahí).\n\nCUENTA como elegida (sinónimos OK → normalizá al nombre de {{categorias}}):\n- una plaza / 1 plaza\n- plaza y media\n- dos plazas / 2 plazas\n- queen / queen size / king / extra queen / cuna\nu otra subcategoría real de la lista.\n\nSI YA HAY medida/tipo en CUALQUIER mensaje del historial (aunque el último sea la dirección):\n1) Guardá subcategory_name (nombre canónico) y subcategory_id si aparece en {{categorias}}.\n2) Respondé UNA sola frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/\"colchones\"/genérico o nada):\n1) subcategory_name = null (obligatorio: no inventes).\n2) Respondé exactamente un string vacío: \"\"\n   (no digas OK, no preguntes; el siguiente paso pedirá la medida).\n\nProhibido listar productos o precios.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nCategorías (fuente de verdad):\n{{categorias}}\n\nÚNICO TRABAJO: detectar si el cliente YA eligió una medida/tipo real de esa lista.\n\nCategorías sin hijos: si nombró una categoría/subcategoría que aparece en {{categorias}} y no tiene subcategorías listadas debajo, tratála como elección completa (ej. \"almohadas\").\n\nCuenta como elegida (normalizá al nombre canónico de {{categorias}}): 1 plaza / una plaza, plaza y media, 2 plazas / dos plazas, queen, king, extra queen, cuna u otra subcategoría real.\n\nSI YA HAY medida/tipo en el historial:\n1) Guardá subcategory_name (canónico) y subcategory_id si está en {{categorias}}.\n2) Respondé UNA frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/genérico):\n1) subcategory_name = null (no inventes).\n2) Respondé exactamente string vacío: \"\"\n\nProhibido listar productos o precios.\n",
         "executionMode": "execute_and_continue",
         "ragDataSources": {},
         "dataSourceConfigs": {},
@@ -2496,20 +2140,20 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como un vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nTu ÚNICO trabajo: que el cliente elija medio de pago (efectivo, transferencia o tarjeta).\nEl pago se hace AL RECIBIR en el domicilio.\n\nPROHIBIDO\n- Asumir efectivo/transferencia/tarjeta.\n- Cotizar, mostrar totales o llamar tools de cotizar/orden.\n- Si eligió producto, eso NO es medio de pago.\n\nPROHIBIDO ABSOLUTO, SIN EXCEPCIÓN: decir que la compra/pedido/orden fue confirmada, creada, está en camino, o cualquier variante de eso. Este nodo NO crea órdenes ni confirma compras bajo ningún concepto — solo registra el medio de pago. No inventes fecha de entrega ni digas \"gracias por tu compra\". Elegir medio de pago es apenas un paso intermedio, todavía faltan varios pasos antes de que exista una orden real.\n\nFLUJO\n1) Si aún no eligió medio, preguntá UNA vez:\n   \"El pago se hace al recibir el pedido en tu domicilio. ¿Preferís efectivo, transferencia o tarjeta?\"\n2) Cuando responda:\n   - efectivo → guardá payment_method=cash\n   - transferencia → payment_method=transfer\n   - tarjeta/crédito/cuotas → payment_method=card\n3) Guardá payment_method_quote con la frase del cliente.\n4) Confirmá breve el medio. Si es tarjeta, NO pidas banco/cuotas acá (eso es el siguiente paso). Si es cash/transfer, listo.\n\nIMPORTANTE: payment_method en hechos debe ser exactamente: cash, transfer o card (nunca en español).",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nÚNICO TRABAJO: que elija medio de pago. El pago es al recibir en domicilio.\n\nPROHIBIDO\n- Asumir efectivo, transferencia o tarjeta.\n- Cotizar, mostrar totales o llamar tools.\n- Decir que la compra/pedido/orden fue creada o confirmada.\n- Tratar la elección de producto como medio de pago.\n\nFLUJO\n1) Si falta el medio, preguntá una vez: \"El pago se hace al recibir el pedido en tu domicilio. ¿Preferís efectivo, transferencia o tarjeta?\"\n2) Al responder:\n   - efectivo → payment_method=cash\n   - transferencia → payment_method=transfer\n   - tarjeta/crédito/cuotas → payment_method=card\n3) Guardá payment_method_quote con la frase del cliente.\n4) Confirmá breve. Si es tarjeta, no pidas banco/cuotas acá.\n\npayment_method en hechos debe ser exactamente: cash, transfer o card.\n\nSi el cliente cambia de opinión en este mismo paso (ej. dijo efectivo y ahora tarjeta), guardá payment_method=card y confirmá breve. El siguiente paso pedirá banco/cuotas si es tarjeta.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
             "id": "payment_method",
             "label": "Medio de pago",
-            "description": "Valor normalizado: cash, transfer o card (según efectivo/transferencia/tarjeta). Obligatorio."
+            "description": "Valor normalizado: cash, transfer o card."
           }
         ],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "Avanzar cuando el usuario haya seleccionado un metodo de pago valido",
+        "continueCondition": "El cliente eligió un medio de pago válido: efectivo (cash), transferencia (transfer) o tarjeta (card). No avances si solo habló del producto o no eligió medio.",
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": true
@@ -2707,7 +2351,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes números de cuotas ni recargos.\n\nEl cliente paga con tarjeta al recibir en domicilio.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (OBLIGATORIA para cualquier dato de cuotas/recargo):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo O el cliente pregunta \"¿hasta cuántas cuotas?\": llamá la tool YA (sin inventar).\n   - Si la tool pidió tarjeta: mostrá las card_types reales y pedí Visa/Mastercard/Naranja/etc.\n   - Si devolvió installments: listá las opciones reales (ej. 1/3/6/9/12 con su % de recargo) y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con bank+card_type+installments. Guardá:\n   - bank, card_type, installments\n   - card_surcharge_percent = recargo_porcentaje de la tool\n   - payment_method_quote (ej. \"Visa Santander 12 cuotas\")\n   - card_validation_ok=true\n4) Confirmá breve: cuotas OK + recargo % real. NO cotices el producto acá (eso es Cotizar), pero sí mencioná el % de recargo.\n\nbank se encuentra en facts.bank\n\nPROHIBIDO\n- Respuestas genéricas tipo \"hasta 12 cuotas sin interés\" sin tool.\n- Avanzar sin card_validation_ok=true y card_surcharge_percent numérico de la tool.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -2719,18 +2363,18 @@
           {
             "id": "card_type",
             "label": "Tipo de tarjeta",
-            "description": "Visa/Mastercard/Naranja/Amex/Cabal según API."
+            "description": "Visa/Mastercard/Naranja/Amex/Cabal según opciones reales."
           },
           {
             "id": "installments",
             "label": "Cantidad de cuotas",
-            "description": "Cantidad de cuotas elegida por el cliente, de las opciones reales que devolvió la tool (no avanzar sin esto)."
+            "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "El cliente ya eligió banco, tipo de tarjeta Y una cantidad de cuotas concreta (ej. \"12\", \"6\"), y la tool \"Bausing - Validar Cuotas Tarjeta\" devolvió card_validation_ok=true con el recargo real. NO avanza solo con banco y tipo de tarjeta — falta que el cliente elija la cantidad de cuotas de las opciones reales que le mostraste.",
+        "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
             "active": true,
@@ -2918,16 +2562,17 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown.\n\nEl cliente todavía no eligió medida/tipo. Pedí UNA sola vez usando opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza=1 plaza, dos plazas=2 plazas, etc.\n\nNo listes productos. No cotices.\n\nPROHIBIDO inventar tipos/variantes que no figuren en {{categorias}}. Si llegaste a este paso es porque la categoría/subcategoría que nombró el cliente SÍ tiene más subcategorías reales para elegir en {{categorias}} — usá EXACTAMENTE esos nombres, ninguno inventado.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown.\n\nEl cliente aún no eligió medida/tipo. Pedí UNA vez con opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza → 1 plaza, dos plazas → 2 plazas.\n\nNo listes productos ni cotices. No inventes tipos que no estén en {{categorias}}.\n",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
             "id": "subcategory_name",
             "label": "Subcategoría / medida",
-            "description": "Medida elegida: una plaza, 1 plaza, dos plazas, 2 plazas, queen, king, plaza y media, etc. Normalizá al nombre de {{categorias}}."
+            "description": "Medida o tipo elegido, normalizado al nombre canónico de la lista de categorías (1 plaza, 2 plazas, queen, etc.)."
           }
         ],
         "ragDataSources": {},
+        "continueCondition": "",
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": true
@@ -2952,6 +2597,8 @@
           "customer_dni",
           "customer_email",
           "customer_phone",
+          "direccion_completa",
+          "address",
           "recotizar_con_tarjeta"
         ],
         "aiModelId": "",
@@ -2962,7 +2609,9 @@
           "customer_email": "Email",
           "customer_phone": "Teléfono",
           "customer_last_name": "Apellido",
-          "customer_first_name": "Nombre"
+          "customer_first_name": "Nombre",
+          "direccion_completa": "Dirección completa",
+          "address": "Dirección (alias)"
         },
         "ragEnabled": false,
         "dataSources": [],
@@ -2978,37 +2627,17 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nTu ÚNICO trabajo: completar datos del comprador para la orden:\n- nombre (customer_first_name)\n- apellido (customer_last_name)\n- DNI (customer_dni)\n- email (customer_email)\n- teléfono (customer_phone)\n\nSi YA están todos en facts/historial: confirmá en una frase corta y no vuelvas a pedirlos.\nSi faltan: pedí lo que falte (juntos o lo pendiente).\n\nPROHIBIDO ABSOLUTO EN ESTE NODO, SIN EXCEPCIÓN:\n- Decir que la compra, el pedido o la orden fue confirmada, creada, procesada o generada.\n- Inventar fecha de entrega, número de orden, o cualquier dato de una orden real — acá no existe ninguna orden todavía.\n- Cotizar, mostrar totales, o volver a pedir confirmación de compra (eso ya pasó en el nodo anterior, no se repite acá).\nEste nodo NO tiene ninguna tool y NO crea órdenes bajo ningún concepto — la orden recién se crea más adelante, después del resumen final. Si no tenés los 5 datos del comprador, tu ÚNICA respuesta válida en este turno es pedir los que faltan, nada más.\n\nSi pide cambiar a tarjeta o cuotas: decile que lo vemos en un momento y seguí pidiendo los datos que falten si aún no están completos. El workflow enruta el cambio de pago al siguiente paso.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nÚNICO TRABAJO: completar datos del comprador y su dirección real de entrega:\n- customer_first_name (nombre)\n- customer_last_name (apellido)\n- customer_dni (DNI)\n- customer_email (email)\n- customer_phone (teléfono)\n- direccion_completa / address (calle y número, ciudad, provincia y código postal)\n\nHasta ahora el envío se cotizó por zona aproximada. Cuando pidas la dirección, aclaralo en una frase (ej. \"para calcular el envío exacto, ¿me pasás tu dirección completa? calle y número, ciudad, provincia y código postal\").\n\nSi ya están todos en memoria/historial: confirmá en una frase corta y no los vuelvas a pedir.\nSi faltan: pedí solo lo pendiente.\n\nDIRECCIÓN\n- Aceptala aunque tenga typos o falte un detalle menor.\n- Guardá direccion_completa y address en el mismo formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si vino sin comas o con otro separador, normalizalo vos.\n- Confirmá en una frase corta repitiendo la dirección normalizada.\n\nPROHIBIDO\n- Decir que la orden/compra fue creada o confirmada.\n- Inventar fecha de entrega o número de orden.\n- Cotizar vos mismo el total o volver a pedir confirmación de compra (eso lo hace el paso siguiente con la dirección real).\n\nSi pide cambiar a tarjeta: decile que lo vemos en un momento y seguí completando datos faltantes.\n\nCAMBIO A TARJETA\nSi pide tarjeta/cuotas: confirmá breve (\"Dale, lo vemos con tarjeta.\") y no digas que la orden se creó. Seguí pidiendo datos solo si no pidió cambiar el pago.",
         "executionMode": "wait_for_user",
         "requiredSlots": [
           {
-            "id": "customer_first_name",
-            "label": "Nombre",
-            "description": "Nombre del comprador"
-          },
-          {
-            "id": "customer_last_name",
-            "label": "Apellido",
-            "description": "Apellido del comprador"
-          },
-          {
-            "id": "customer_dni",
-            "label": "DNI",
-            "description": "DNI numérico del comprador"
-          },
-          {
-            "id": "customer_email",
-            "label": "Email",
-            "description": "Email de contacto"
-          },
-          {
-            "id": "customer_phone",
-            "label": "Teléfono",
-            "description": "Teléfono de contacto"
+            "id": "direccion_completa",
+            "label": "Dirección completa",
+            "description": "Dirección real del cliente para el envío (calle y número, ciudad, provincia y/o CP). Aceptá el mensaje completo aunque tenga typos."
           }
         ],
         "ragDataSources": {},
-        "continueCondition": "Avanzar cuando están completos customer_first_name, customer_last_name, customer_dni, customer_email y customer_phone en facts o historial.",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA: (A) ya están nombre, apellido, DNI, email, teléfono Y una dirección de entrega usable (calle/altura y ciudad al menos) del comprador; (B) el cliente quiere pagar con tarjeta / crédito / cuotas o cambiar a tarjeta (aunque falten datos). No avances con saludos ni mensajes sin datos ni sin pedido de tarjeta.",
         "dataSourceConfigs": {},
         "captureFactsEnabled": true,
         "waitForUserResponse": true
@@ -3048,7 +2677,9 @@
           "price_final",
           "display_total",
           "cart_items",
-          "recotizar_con_tarjeta"
+          "recotizar_con_tarjeta",
+          "requires_human_handoff",
+          "can_create_order"
         ],
         "aiModelId": "",
         "bodyFiles": [],
@@ -3179,6 +2810,126 @@
             "selected_credentials": {
               "custom_request": ""
             }
+          },
+          {
+            "id": "130",
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
+                "body": {
+                  "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1) desde cart_items\", optional:false, isArray:false)",
+                  "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección real ya guardada en este nodo). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
+                  "payment_method": "@AI(\"OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. NUNCA inventes cash.\", optional:false, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Cotizar Pedido (dirección real)",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "usar facts.direccion_completa o facts.address (dirección real ya guardada en este nodo). No pedirle de nuevo al usuario si ya existe.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method",
+                      "value": "OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. NUNCA inventes cash.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "items",
+                      "value": "product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1) desde cart_items",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR UNA SOLA VEZ EN ESTE NODO, antes de mostrar el resumen final: hasta acá el envío se cotizó por zona aproximada (sin dirección exacta), y ahora ya tenés la dirección real del cliente (direccion_completa/address). Llamala para refrescar el total y el envío con la dirección real antes de mostrárselo al cliente — si no lo hacés, el total puede no coincidir con el que se valida al crear la orden. POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {
+              "custom_request": ""
+            }
           }
         ],
         "outputSchema": {
@@ -3193,20 +2944,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nANTES de crear la orden, mostrá el resumen completo:\n\n1) Producto(s) y cantidad: si facts.cart_items tiene más de un producto, LISTALOS TODOS (nombre + cantidad + precio de cada uno) — no muestres solo uno cuando hay varios\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir el recargo (no el precio base solo).\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nPRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n\nPreguntá: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO (en este mismo nodo): pedí el dato nuevo, actualizá SOLO ese dato en facts, recalculá precio_final si cambian cuotas/recargo, y volvé a mostrar el RESUMEN COMPLETO de nuevo.\n\nOBLIGATORIO al volver a mostrar el resumen después de cualquier cambio: usá TODOS los facts ya conocidos de antes (product_id/cart_items, quote_total, direccion_completa, customer_first_name/last_name/dni/email/phone, payment_method), no solo lo que se tocó en este turno. Si un dato no cambió, seguís teniendo el valor de antes — NUNCA digas \"no se especificó\" o \"no se especificaron productos\" para un dato que ya estaba guardado en facts de un paso anterior.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para cualquier dato de cuotas/recargo, usala en este mismo nodo si el cliente cambia a tarjeta acá):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\nPasos: 1) Pedí banco si falta. 2) Con banco, si falta tipo O el cliente pregunta cuántas cuotas hay: llamá la tool YA (sin inventar) — mostrale las opciones/tarjetas reales que devuelva y pedile que elija. 3) Cuando ya tengas los tres datos: llamá la tool y guardá bank, card_type, installments, card_surcharge_percent=recargo_porcentaje, payment_method_quote. PROHIBIDO decir un % o cantidad de cuotas sin que salga de esta tool.\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" NO digas que ya se creó. NO llames Crear Orden.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nPRIMERO, EN SILENCIO: el total que tenés hasta ahora (quote_total/price_final/display_total) se calculó con una zona aproximada, no con la dirección exacta del cliente. Antes de mostrar nada, llamá \"Bausing - Cotizar Pedido (dirección real)\" UNA VEZ con cart_items, payment_method y la dirección real (direccion_completa/address) ya guardada, y actualizá quote_total, price_final, display_total y el envío con la respuesta. No le digas al cliente que estás recalculando, hacelo antes de tu mensaje.\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"): no muestres el resumen todavía. Pedile al cliente que corrija calle, altura, ciudad y CP, y recién cuando la corrija volvé a llamar la tool antes de mostrar el resumen.\nSi la tool devuelve requires_human_handoff en true, avisale al cliente que un asesor va a seguir con él y no muestres el resumen para crear la orden.\n\nLUEGO, mostrá el resumen completo ANTES de crear la orden:\n1) Producto(s) y cantidad: si cart_items tiene varios, listalos TODOS (nombre, cantidad, precio).\n2) Precio: usá price_final/display_total ya actualizados; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir recargo.\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nRecargo tarjeta: price_final = base * (1 + card_surcharge_percent/100). Mostrá ese total. Guardá price_final/display_total. Sin recargo si cash/transfer.\n\nCerrá con: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO: actualizá solo ese dato, recalculá precio si cambian cuotas (tool \"Bausing - Validar Cuotas Tarjeta\" si hace falta) o si cambia la dirección (volvé a llamar \"Bausing - Cotizar Pedido (dirección real)\"), y volvé a mostrar el resumen COMPLETO con todos los datos ya conocidos. Nunca digas \"no se especificó\" de un dato que ya estaba.\n\nSi cambia tarjeta/cuotas, usá la tool \"Bausing - Validar Cuotas Tarjeta\":\n- bank → card_types\n- bank+card_type → installments\n- bank+card_type+installments → card_surcharge_percent y card_validation_ok=true\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" No digas que ya se creó. No llames Crear Orden acá.\n\nCAMBIO A TARJETA\nSi pide tarjeta/crédito/cuotas: confirmá breve y no digas que creaste la orden. El flujo siguiente valida banco/cuotas y recotiza.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "order_confirmed_final",
-            "label": "Confirmación final del resumen",
-            "description": "El cliente confirmó EXPLÍCITAMENTE que el resumen está bien y quiere crear la orden (sí / confirmo / dale / está bien / crear). Si pide cambiar producto, dirección, pago, tarjeta o datos: NO es confirmación (advance=false); el nodo corrige en el mismo paso y vuelve a mostrar el resumen."
-          }
-        ],
+        "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "Avanzar SOLO cuando el cliente confirmó el resumen para crear la orden (sí/confirmo/dale/está bien/creala/adelante). Si pide cambiar producto, dirección, datos o medio de pago, advance=false para corregir en este nodo.",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA: (A) el cliente confirma explícitamente el resumen para crear la orden (sí, confirmo, dale, está bien, creala, adelante); (B) el cliente quiere pagar con tarjeta / crédito / cuotas o cambiar a tarjeta. Si pide cambiar producto/dirección/datos (sin ser tarjeta), no avances.",
         "dataSourceConfigs": {
           "121": {
             "active": true,
@@ -3322,6 +3067,121 @@
               ],
               "direct_response_enabled": false
             }
+          },
+          "130": {
+            "active": true,
+            "metadata": {
+              "retries": 0,
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
+                "body": {
+                  "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1) desde cart_items\", optional:false, isArray:false)",
+                  "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección real ya guardada en este nodo). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
+                  "payment_method": "@AI(\"OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. NUNCA inventes cash.\", optional:false, isArray:false)"
+                },
+                "method": "POST",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Cotizar Pedido (dirección real)",
+              "credential_id": "",
+              "sections_config": {
+                "body": {
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "address",
+                      "value": "usar facts.direccion_completa o facts.address (dirección real ya guardada en este nodo). No pedirle de nuevo al usuario si ya existe.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "payment_method",
+                      "value": "OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. NUNCA inventes cash.",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    },
+                    {
+                      "name": "items",
+                      "value": "product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1) desde cart_items",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": true
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true
+                },
+                "headers": {
+                  "to": false,
+                  "json": "{}",
+                  "list": [
+                    {
+                      "name": "X-API-Key",
+                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    },
+                    {
+                      "name": "Authorization",
+                      "value": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                      "isArray": false,
+                      "required": true,
+                      "valueMode": "text",
+                      "aiGenerated": false
+                    }
+                  ],
+                  "mode": "list",
+                  "enabled": true,
+                  "agent_id": false,
+                  "agent_type": false
+                },
+                "pathParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "queryParams": {
+                  "json": "{}",
+                  "list": [],
+                  "mode": "list",
+                  "enabled": false
+                },
+                "credential_id": ""
+              },
+              "tool_parameters": {
+                "custom_request": {
+                  "return_to_model": true
+                }
+              },
+              "include_metadata": true,
+              "tool_description": "USAR UNA SOLA VEZ EN ESTE NODO, antes de mostrar el resumen final: hasta acá el envío se cotizó por zona aproximada (sin dirección exacta), y ahora ya tenés la dirección real del cliente (direccion_completa/address). Llamala para refrescar el total y el envío con la dirección real antes de mostrárselo al cliente — si no lo hacés, el total puede no coincidir con el que se valida al crear la orden. POST /quote.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ],
+              "direct_response_enabled": false
+            }
           }
         },
         "captureFactsEnabled": true,
@@ -3333,378 +3193,6 @@
       }
     },
     {
-      "id": "node-zona-ask-01",
-      "name": "Pedir dirección corregida",
-      "type": "agent",
-      "config": {
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "headers": [],
-        "factKeys": [
-          "direccion_completa",
-          "address"
-        ],
-        "aiModelId": "",
-        "bodyFiles": [],
-        "bodyParams": [],
-        "factLabels": {
-          "address": "Dirección",
-          "direccion_completa": "Dirección completa"
-        },
-        "ragEnabled": false,
-        "dataSources": [
-          {
-            "id": "130",
-            "active": true,
-            "metadata": {
-              "retries": 0,
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
-                "body": {
-                  "address": "@AI(\"dirección completa corregida, formato calle y altura, ciudad, provincia, código postal\", optional:false, isArray:false)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 15000
-              },
-              "custom_title": "Bausing - Resolver Zona",
-              "credential_id": "",
-              "sections_config": {
-                "body": {
-                  "json": "{}",
-                  "list": [
-                    {
-                      "name": "address",
-                      "value": "dirección completa corregida, formato calle y altura, ciudad, provincia, código postal",
-                      "isArray": false,
-                      "required": true,
-                      "valueMode": "text",
-                      "aiGenerated": true
-                    }
-                  ],
-                  "mode": "list",
-                  "enabled": true
-                },
-                "headers": {
-                  "json": "{}",
-                  "list": [
-                    {
-                      "name": "X-API-Key",
-                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                      "isArray": false,
-                      "required": true,
-                      "valueMode": "text",
-                      "aiGenerated": false
-                    },
-                    {
-                      "name": "Content-Type",
-                      "value": "application/json",
-                      "isArray": false,
-                      "required": true,
-                      "valueMode": "text",
-                      "aiGenerated": false
-                    }
-                  ],
-                  "mode": "list",
-                  "enabled": true
-                },
-                "pathParams": {
-                  "json": "{}",
-                  "list": [],
-                  "mode": "list",
-                  "enabled": false
-                },
-                "queryParams": {
-                  "json": "{}",
-                  "list": [],
-                  "mode": "list",
-                  "enabled": false
-                },
-                "credential_id": ""
-              },
-              "tool_parameters": {
-                "custom_request": {
-                  "return_to_model": true
-                }
-              },
-              "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente te dio o corrigió la dirección completa y necesitás resolver la zona/localidad real antes de seguir. Si devuelve error, la dirección no se pudo ubicar — pedile al cliente que la revise de nuevo, nunca inventes ni asumas la zona. POST /resolve-zone.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ],
-              "direct_response_enabled": false
-            },
-            "description": "Resuelve zona/localidad/catálogo a partir de una dirección completa.",
-            "templateName": "custom_api_rest",
-            "selected_credentials": {
-              "custom_request": ""
-            }
-          }
-        ],
-        "outputSchema": {
-          "type": "object",
-          "required": [
-            "output"
-          ],
-          "properties": {
-            "output": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que la corrija ya que puede haber un error de tipeo.\n\nFLUJO\n1) Cuando el cliente conteste con una corrección (aunque sea parcial, ej. solo la calle), combinala con los datos de dirección que ya tenías de antes (ciudad, provincia, CP) y armá la dirección COMPLETA normalizada en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si la escribió con puntos, saltos de línea, todo junto sin comas, u otro separador, pasala vos a ese formato antes de usarla.\n2) Guardá esa dirección en facts.direccion_completa y facts.address, y llamá SIEMPRE la tool \"Bausing - Resolver Zona\" con esa dirección — no la des por buena sin llamar la tool.\n3) SI LA TOOL RESPONDE ERROR (no encontró la dirección): decile al cliente que tampoco pudiste encontrar esa dirección y pedile que la revise o corrija de nuevo (puede haber otro error de tipeo, en la calle o en la ciudad). Quedate en este mismo paso esperando una nueva corrección — NO avances, NO digas que se guardó bien.\n4) SI LA TOOL RESPONDE OK (encontró la zona): los datos de la zona (catalog_id, crm_zone_id, localityid, etc.) se guardan solos, no hace falta que los repitas vos. Confirmá en una frase corta REPITIENDO la dirección que quedó guardada (ej. \"Dale, ya ubiqué tu zona en Rodolfo Martinez 6034, Córdoba, Córdoba, 5021.\") y avanzá.\n\nPodés reintentar tantas veces como haga falta si el cliente te sigue corrigiendo la dirección. Si después de 3 intentos o más sigue sin encontrarse, ofrecele derivarlo con un asesor humano.\n\nSI EL CLIENTE YA RECIBIÓ LA CONFIRMACIÓN Y AHORA SOLO CONFIRMA (sí, dale, ok, okey, confirmo): NO vuelvas a llamar la tool de nuevo ni a repetir la confirmación — ya está resuelto, dejá que el flujo avance.\n\nPROHIBIDO ABSOLUTO:\n- Decir que \"ahora podés buscar productos\", mencionar catálogo, colchones, precios, ni ningún otro tema.\n- Responder cualquier pregunta que no sea sobre la dirección: no inventes nada, decile que primero necesitás confirmar la dirección.\n- Decir que la dirección se guardó/encontró sin haber llamado la tool y recibido una respuesta OK.",
-        "clearFactKeys": [],
-        "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "localityid",
-            "label": "Zona resuelta",
-            "description": "Se llena solo cuando la tool \"Bausing - Resolver Zona\" encontró la dirección (savedVariables). No se lo pidas al cliente — es interno."
-          }
-        ],
-        "ragDataSources": {},
-        "savedVariables": [
-          {
-            "key": "catalog_id",
-            "path": "body.data.catalog_id",
-            "label": "Catalog Id"
-          },
-          {
-            "key": "crm_zone_id",
-            "path": "body.data.crm_zone_id",
-            "label": "Crm Zone Id"
-          },
-          {
-            "key": "localityid",
-            "path": "body.data.locality.id",
-            "label": "LocalityId"
-          },
-          {
-            "key": "label",
-            "path": "body.data.estimated_delivery.label",
-            "label": "Label"
-          },
-          {
-            "key": "is_third_party_transport",
-            "path": "body.data.is_third_party_transport",
-            "label": "Is Third Party Transport"
-          },
-          {
-            "key": "cost_label",
-            "path": "body.data.shipping_summary.cost_label",
-            "label": "Cost Label"
-          },
-          {
-            "key": "is_free",
-            "path": "body.data.shipping_summary.is_free",
-            "label": "Is Free"
-          }
-        ],
-        "nextStartNodeId": "",
-        "factDescriptions": {},
-        "continueCondition": "facts.localityid ya tiene valor.",
-        "dataSourceConfigs": {},
-        "captureFactsEnabled": true,
-        "waitForUserResponse": true
-      },
-      "position": {
-        "x": 778.7210683341947,
-        "y": 42.54466940503355
-      }
-    },
-    {
-      "id": "node-zona-ask-02",
-      "name": "Pedir dirección corregida",
-      "type": "agent",
-      "config": {
-        "cases": [],
-        "rules": [],
-        "tools": [],
-        "headers": [],
-        "factKeys": [
-          "direccion_completa",
-          "address"
-        ],
-        "aiModelId": "",
-        "bodyFiles": [],
-        "bodyParams": [],
-        "factLabels": {
-          "address": "Dirección",
-          "direccion_completa": "Dirección completa"
-        },
-        "ragEnabled": false,
-        "dataSources": [
-          {
-            "id": "131",
-            "active": true,
-            "metadata": {
-              "retries": 0,
-              "parameters": {
-                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/resolve-zone",
-                "body": {
-                  "address": "@AI(\"dirección completa corregida, formato calle y altura, ciudad, provincia, código postal\", optional:false, isArray:false)"
-                },
-                "method": "POST",
-                "headers": {
-                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                  "Content-Type": "application/json"
-                },
-                "timeout": 15000
-              },
-              "custom_title": "Bausing - Resolver Zona",
-              "credential_id": "",
-              "sections_config": {
-                "body": {
-                  "json": "{}",
-                  "list": [
-                    {
-                      "name": "address",
-                      "value": "dirección completa corregida, formato calle y altura, ciudad, provincia, código postal",
-                      "isArray": false,
-                      "required": true,
-                      "valueMode": "text",
-                      "aiGenerated": true
-                    }
-                  ],
-                  "mode": "list",
-                  "enabled": true
-                },
-                "headers": {
-                  "json": "{}",
-                  "list": [
-                    {
-                      "name": "X-API-Key",
-                      "value": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
-                      "isArray": false,
-                      "required": true,
-                      "valueMode": "text",
-                      "aiGenerated": false
-                    },
-                    {
-                      "name": "Content-Type",
-                      "value": "application/json",
-                      "isArray": false,
-                      "required": true,
-                      "valueMode": "text",
-                      "aiGenerated": false
-                    }
-                  ],
-                  "mode": "list",
-                  "enabled": true
-                },
-                "pathParams": {
-                  "json": "{}",
-                  "list": [],
-                  "mode": "list",
-                  "enabled": false
-                },
-                "queryParams": {
-                  "json": "{}",
-                  "list": [],
-                  "mode": "list",
-                  "enabled": false
-                },
-                "credential_id": ""
-              },
-              "tool_parameters": {
-                "custom_request": {
-                  "return_to_model": true
-                }
-              },
-              "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente te dio o corrigió la dirección completa y necesitás resolver la zona/localidad real antes de seguir. Si devuelve error, la dirección no se pudo ubicar — pedile al cliente que la revise de nuevo, nunca inventes ni asumas la zona. POST /resolve-zone.",
-              "credential_provider": "api_rest",
-              "credential_providers": [
-                "api_rest"
-              ],
-              "direct_response_enabled": false
-            },
-            "description": "Resuelve zona/localidad/catálogo a partir de una dirección completa.",
-            "templateName": "custom_api_rest",
-            "selected_credentials": {
-              "custom_request": ""
-            }
-          }
-        ],
-        "outputSchema": {
-          "type": "object",
-          "required": [
-            "output"
-          ],
-          "properties": {
-            "output": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "systemPrompt": "TONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\nNo pudimos encontrar la dirección exacta que nos diste. Decile al cliente que no la encontraste y pedile que la corrija ya que puede haber un error de tipeo.\n\nFLUJO\n1) Cuando el cliente conteste con una corrección (aunque sea parcial, ej. solo la calle), combinala con los datos de dirección que ya tenías de antes (ciudad, provincia, CP) y armá la dirección COMPLETA normalizada en este formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si la escribió con puntos, saltos de línea, todo junto sin comas, u otro separador, pasala vos a ese formato antes de usarla.\n2) Guardá esa dirección en facts.direccion_completa y facts.address, y llamá SIEMPRE la tool \"Bausing - Resolver Zona\" con esa dirección — no la des por buena sin llamar la tool.\n3) SI LA TOOL RESPONDE ERROR (no encontró la dirección): decile al cliente que tampoco pudiste encontrar esa dirección y pedile que la revise o corrija de nuevo (puede haber otro error de tipeo, en la calle o en la ciudad). Quedate en este mismo paso esperando una nueva corrección — NO avances, NO digas que se guardó bien.\n4) SI LA TOOL RESPONDE OK (encontró la zona): los datos de la zona (catalog_id, crm_zone_id, localityid, etc.) se guardan solos, no hace falta que los repitas vos. Confirmá en una frase corta REPITIENDO la dirección que quedó guardada (ej. \"Dale, ya ubiqué tu zona en Rodolfo Martinez 6034, Córdoba, Córdoba, 5021.\") y avanzá.\n\nPodés reintentar tantas veces como haga falta si el cliente te sigue corrigiendo la dirección. Si después de 3 intentos o más sigue sin encontrarse, ofrecele derivarlo con un asesor humano.\n\nSI EL CLIENTE YA RECIBIÓ LA CONFIRMACIÓN Y AHORA SOLO CONFIRMA (sí, dale, ok, okey, confirmo): NO vuelvas a llamar la tool de nuevo ni a repetir la confirmación — ya está resuelto, dejá que el flujo avance.\n\nPROHIBIDO ABSOLUTO:\n- Decir que \"ahora podés buscar productos\", mencionar catálogo, colchones, precios, ni ningún otro tema.\n- Responder cualquier pregunta que no sea sobre la dirección: no inventes nada, decile que primero necesitás confirmar la dirección.\n- Decir que la dirección se guardó/encontró sin haber llamado la tool y recibido una respuesta OK.",
-        "clearFactKeys": [],
-        "executionMode": "execute_and_continue",
-        "ragDataSources": {},
-        "savedVariables": [
-          {
-            "key": "catalog_id",
-            "path": "body.data.catalog_id",
-            "label": "Catalog Id"
-          },
-          {
-            "key": "crm_zone_id",
-            "path": "body.data.crm_zone_id",
-            "label": "Crm Zone Id"
-          },
-          {
-            "key": "localityid",
-            "path": "body.data.locality.id",
-            "label": "LocalityId"
-          },
-          {
-            "key": "label",
-            "path": "body.data.estimated_delivery.label",
-            "label": "Label"
-          },
-          {
-            "key": "is_third_party_transport",
-            "path": "body.data.is_third_party_transport",
-            "label": "Is Third Party Transport"
-          },
-          {
-            "key": "cost_label",
-            "path": "body.data.shipping_summary.cost_label",
-            "label": "Cost Label"
-          },
-          {
-            "key": "is_free",
-            "path": "body.data.shipping_summary.is_free",
-            "label": "Is Free"
-          }
-        ],
-        "nextStartNodeId": "",
-        "factDescriptions": {},
-        "dataSourceConfigs": {},
-        "captureFactsEnabled": true,
-        "waitForUserResponse": false,
-        "continueCondition": "facts.localityid ya tiene valor.",
-        "requiredSlots": [
-          {
-            "id": "localityid",
-            "label": "Zona resuelta",
-            "description": "Se llena solo cuando la tool \"Bausing - Resolver Zona\" encontró la dirección (savedVariables). No se lo pidas al cliente — es interno."
-          }
-        ]
-      },
-      "position": {
-        "x": 784.4499784698744,
-        "y": 1029.095981681955
-      }
-    },
-    {
       "id": "node-router-post-cotizar",
       "name": "¿Confirma o cambia a tarjeta?",
       "type": "conversation_router",
@@ -3712,41 +3200,39 @@
         "cases": [
           {
             "id": "tarjeta",
-            "label": "Cambiar a tarjeta / recotizar con tarjeta",
+            "label": "Cambiar a tarjeta / pagar con tarjeta",
             "examples": [
-              "mejor quiero pagar con tarjeta",
-              "mejor quiero pagar con tarjeta se puede",
-              "prefiero tarjeta",
+              "quiero pagar con tarjeta",
+              "mejor con tarjeta",
               "pago con tarjeta",
-              "se puede con tarjeta",
+              "tarjeta de crédito",
               "en cuotas",
               "cambiar a tarjeta",
-              "cambiar el medio de pago",
+              "prefiero tarjeta",
               "crédito",
-              "me arrepentí quiero tarjeta",
-              "banco santander",
-              "tengo visa",
-              "mastercard",
-              "cuotas"
+              "me arrepentí, quiero tarjeta",
+              "pasame a tarjeta",
+              "quiero cuotas"
             ],
             "expression": "",
-            "description": "El usuario quiere pagar con tarjeta, cambiar de efectivo/transferencia a tarjeta, cambiar banco/cuotas, pregunta si se puede con tarjeta, o está dando datos de tarjeta para recotizar. NO es confirmación de compra."
+            "description": "El cliente quiere pagar con tarjeta o crédito, pedir cuotas, o cambiar el medio de pago desde efectivo/transferencia hacia tarjeta. Priorizá esta rama sobre confirmar la compra si menciona tarjeta/crédito/cuotas aunque también diga algo de seguir."
           },
           {
             "id": "confirma",
-            "label": "Confirma cotización para seguir",
+            "label": "Confirma para seguir (sin cambiar a tarjeta)",
             "examples": [
               "sí",
               "dale",
-              "procede",
               "confirmo",
               "ok",
-              "lo llevo",
+              "procede",
               "adelante",
-              "sí dale"
+              "lo quiero",
+              "sí, seguimos",
+              "está bien"
             ],
             "expression": "",
-            "description": "El usuario confirma que quiere proceder con la cotización mostrada, sin pedir cambiar el medio de pago a tarjeta."
+            "description": "Confirma continuar con el medio de pago YA elegido (efectivo/transferencia/tarjeta ya cargada). NO uses esta rama si pide tarjeta, crédito o cuotas."
           }
         ],
         "rules": [],
@@ -3766,8 +3252,8 @@
         "dataSourceConfigs": {}
       },
       "position": {
-        "x": 2883.08708731884,
-        "y": -72.5272225425338
+        "x": 2745.6658754031982,
+        "y": -52.48662913816942
       }
     },
     {
@@ -3936,7 +3422,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta después de ver una cotización con otro medio. payment_method=card.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes números de cuotas ni recargos.\n\nEl cliente cambió a tarjeta (o quiere cambiar banco/cuotas). Forzá payment_method=card. Pedí banco, tipo y cuotas desde cero si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (OBLIGATORIA para cualquier dato de cuotas/recargo):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo O el cliente pregunta \"¿hasta cuántas cuotas?\": llamá la tool YA (sin inventar).\n   - Si la tool pidió tarjeta: mostrá las card_types reales y pedí Visa/Mastercard/Naranja/etc.\n   - Si devolvió installments: listá las opciones reales (ej. 1/3/6/9/12 con su % de recargo) y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con bank+card_type+installments. Guardá:\n   - bank, card_type, installments\n   - card_surcharge_percent = recargo_porcentaje de la tool\n   - payment_method_quote (ej. \"Visa Santander 12 cuotas\")\n   - card_validation_ok=true\n4) Confirmá breve: cuotas OK + recargo % real. NO cotices el producto acá (eso es Cotizar), pero sí mencioná el % de recargo.\n\nbank se encuentra en facts.bank\n\nPROHIBIDO\n- Respuestas genéricas tipo \"hasta 12 cuotas sin interés\" sin tool.\n- Avanzar sin card_validation_ok=true y card_surcharge_percent numérico de la tool.",
+        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -3948,18 +3434,18 @@
           {
             "id": "card_type",
             "label": "Tipo de tarjeta",
-            "description": "Visa/Mastercard/Naranja/Amex/Cabal según API."
+            "description": "Visa/Mastercard/Naranja/Amex/Cabal según opciones reales."
           },
           {
             "id": "installments",
             "label": "Cantidad de cuotas",
-            "description": "Cantidad de cuotas elegida por el cliente, de las opciones reales que devolvió la tool (no avanzar sin esto)."
+            "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "El cliente ya eligió banco, tipo de tarjeta Y una cantidad de cuotas concreta (ej. \"12\", \"6\"), y la tool \"Bausing - Validar Cuotas Tarjeta\" devolvió card_validation_ok=true con el recargo real. NO avanza solo con banco y tipo de tarjeta — falta que el cliente elija la cantidad de cuotas de las opciones reales que le mostraste.",
+        "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
             "active": true,
@@ -4267,7 +3753,7 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
                   "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
-                  "locality_id": "@AI(\"usar el dato ya guardado: facts.locality_id\", optional:false, isArray:false)"
+                  "locality_id": "@AI(\"usar facts.localityid (o facts.locality_id) ya guardado\", optional:false, isArray:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -4339,7 +3825,7 @@
                     },
                     {
                       "name": "locality_id",
-                      "value": "usar el dato ya guardado: facts.locality_id",
+                      "value": "usar facts.localityid (o facts.locality_id) ya guardado",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -4392,25 +3878,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió de opinión y quiere pagar con tarjeta (o cambiar banco/cuotas). Los productos, dirección y carrito YA están en facts — no los vuelvas a pedir.\n\nTONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nRECOTIZAR con tarjeta. payment_method debe ser card. Usá card_surcharge_percent de facts. No crees órdenes.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío. No inventes cash.\n2) Guardá quote_total (total base de la tool, ya suma todos los productos) y la lista de items que devolvió la tool (cada uno con product_name, quantity, unit_price y line_total).\n3) PRECIO CON RECARGO DE TARJETA, OBLIGATORIO SI EL METODO DE PAGO ELEGIDO ES TARJETA \n\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo segun cuotas).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá cada producto con su cantidad y precio (si hay más de uno, LISTALOS TODOS, no muestres solo uno), envío, medio de pago (al recibir) y el PRECIO FINAL total a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "quote_total",
-            "label": "Total cotizado",
-            "description": "Total real de Bausing - Cotizar Pedido (ya mostrado al cliente)."
-          },
-          {
-            "id": "quote_confirmed",
-            "label": "Cliente confirmó cotización",
-            "description": "Confirmación explícita de querer proceder/crear la orden: sí, dale, procede, confirmo, ok, lo quiero, etc. NO alcanza con haber mostrado la cotización. NO es confirmación de orden creada."
-          }
-        ],
+        "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "Ya se mostró la nueva cotización con tarjeta Y el cliente confirmó que quiere proceder (sí/dale/procede/confirmo/ok/lo llevo/adelante).",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA de estas: (A) el asistente YA mostró una cotización con total Y el cliente confirma seguir (sí, dale, procede, confirmo, ok, lo quiero, adelante, lo llevo); (B) el cliente quiere pagar con tarjeta / crédito / cuotas, o cambiar el medio de pago de efectivo/transferencia a tarjeta (ej: \"quiero tarjeta\", \"pago con tarjeta\", \"mejor con crédito\", \"en cuotas\", \"cambiar a tarjeta\"). No avances con preguntas sueltas sobre el total/envío sin confirmar ni pedir tarjeta.",
         "dataSourceConfigs": {
           "106": {
             "active": true,
@@ -4648,8 +4123,8 @@
         "waitForUserResponse": true
       },
       "position": {
-        "x": 3306.065284467545,
-        "y": -254.66562252677926
+        "x": 3304.7297009351278,
+        "y": -273.36379198061627
       }
     },
     {
@@ -4660,37 +4135,39 @@
         "cases": [
           {
             "id": "tarjeta",
-            "label": "Cambiar a tarjeta / recotizar con tarjeta",
+            "label": "Cambiar a tarjeta / pagar con tarjeta",
             "examples": [
-              "mejor quiero pagar con tarjeta",
-              "prefiero tarjeta",
+              "quiero pagar con tarjeta",
+              "mejor con tarjeta",
               "pago con tarjeta",
+              "tarjeta de crédito",
               "en cuotas",
               "cambiar a tarjeta",
+              "prefiero tarjeta",
               "crédito",
-              "banco santander",
-              "tengo visa",
-              "mastercard",
-              "cuotas"
+              "me arrepentí, quiero tarjeta",
+              "pasame a tarjeta",
+              "quiero cuotas"
             ],
             "expression": "",
-            "description": "El usuario quiere pagar con tarjeta, cambiar de efectivo/transferencia a tarjeta, cambiar banco/cuotas, o está dando datos de tarjeta para recotizar. NO es confirmación de compra."
+            "description": "El cliente quiere pagar con tarjeta o crédito, pedir cuotas, o cambiar el medio de pago desde efectivo/transferencia hacia tarjeta. Priorizá esta rama sobre confirmar la compra si menciona tarjeta/crédito/cuotas aunque también diga algo de seguir."
           },
           {
             "id": "confirma",
-            "label": "Confirma cotización para seguir",
+            "label": "Confirma para seguir (sin cambiar a tarjeta)",
             "examples": [
               "sí",
               "dale",
-              "procede",
               "confirmo",
               "ok",
-              "lo llevo",
+              "procede",
               "adelante",
-              "sí dale"
+              "lo quiero",
+              "sí, seguimos",
+              "está bien"
             ],
             "expression": "",
-            "description": "El usuario confirma que quiere proceder con la cotización mostrada, sin pedir cambiar el medio de pago a tarjeta."
+            "description": "Confirma continuar con el medio de pago YA elegido (efectivo/transferencia/tarjeta ya cargada). NO uses esta rama si pide tarjeta, crédito o cuotas."
           }
         ],
         "rules": [],
@@ -4704,7 +4181,7 @@
         "routingMode": "llm",
         "clearFactKeys": [],
         "conditionType": "conversational",
-        "minConfidence": 0.6,
+        "minConfidence": 0.55,
         "ragDataSources": {},
         "nextStartNodeId": "",
         "dataSourceConfigs": {}
@@ -4880,7 +4357,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió de opinión y quiere pagar con tarjeta (o cambiar banco/cuotas). Los productos, dirección y carrito YA están en facts — no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes números de cuotas ni recargos.\n\nEl cliente cambió a tarjeta (o quiere cambiar banco/cuotas). Forzá payment_method=card. Pedí banco, tipo y cuotas desde cero si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (OBLIGATORIA para cualquier dato de cuotas/recargo):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo O el cliente pregunta \"¿hasta cuántas cuotas?\": llamá la tool YA (sin inventar).\n   - Si la tool pidió tarjeta: mostrá las card_types reales y pedí Visa/Mastercard/Naranja/etc.\n   - Si devolvió installments: listá las opciones reales (ej. 1/3/6/9/12 con su % de recargo) y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con bank+card_type+installments. Guardá:\n   - bank, card_type, installments\n   - card_surcharge_percent = recargo_porcentaje de la tool\n   - payment_method_quote (ej. \"Visa Santander 12 cuotas\")\n   - card_validation_ok=true\n4) Confirmá breve: cuotas OK + recargo % real. NO cotices el producto acá (eso es Cotizar), pero sí mencioná el % de recargo.\n\nbank se encuentra en facts.bank\n\nPROHIBIDO\n- Respuestas genéricas tipo \"hasta 12 cuotas sin interés\" sin tool.\n- Avanzar sin card_validation_ok=true y card_surcharge_percent numérico de la tool.",
+        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
         "clearFactKeys": [
           "quote_total",
           "quote_confirmed",
@@ -4904,18 +4381,18 @@
           {
             "id": "card_type",
             "label": "Tipo de tarjeta",
-            "description": "Visa/Mastercard/Naranja/Amex/Cabal según API."
+            "description": "Visa/Mastercard/Naranja/Amex/Cabal según opciones reales."
           },
           {
             "id": "installments",
             "label": "Cantidad de cuotas",
-            "description": "Cantidad de cuotas elegida por el cliente, de las opciones reales que devolvió la tool (no avanzar sin esto)."
+            "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "El cliente ya eligió banco, tipo de tarjeta Y una cantidad de cuotas concreta (ej. \"12\", \"6\"), y la tool \"Bausing - Validar Cuotas Tarjeta\" devolvió card_validation_ok=true con el recargo real. NO avanza solo con banco y tipo de tarjeta — falta que el cliente elija la cantidad de cuotas de las opciones reales que le mostraste.",
+        "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
             "active": true,
@@ -5223,7 +4700,7 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
                   "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
-                  "locality_id": "@AI(\"usar el dato ya guardado: facts.locality_id\", optional:false, isArray:false)"
+                  "locality_id": "@AI(\"usar facts.localityid (o facts.locality_id) ya guardado\", optional:false, isArray:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -5295,7 +4772,7 @@
                     },
                     {
                       "name": "locality_id",
-                      "value": "usar el dato ya guardado: facts.locality_id",
+                      "value": "usar facts.localityid (o facts.locality_id) ya guardado",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -5348,25 +4825,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió de opinión y quiere pagar con tarjeta (o cambiar banco/cuotas). Los productos, dirección y carrito YA están en facts — no los vuelvas a pedir.\n\nTONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nRECOTIZAR con tarjeta. payment_method debe ser card. Usá card_surcharge_percent de facts. No crees órdenes.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío. No inventes cash.\n2) Guardá quote_total (total base de la tool, ya suma todos los productos) y la lista de items que devolvió la tool (cada uno con product_name, quantity, unit_price y line_total).\n3) PRECIO CON RECARGO DE TARJETA, OBLIGATORIO SI EL METODO DE PAGO ELEGIDO ES TARJETA \n\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo segun cuotas).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá cada producto con su cantidad y precio (si hay más de uno, LISTALOS TODOS, no muestres solo uno), envío, medio de pago (al recibir) y el PRECIO FINAL total a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "quote_total",
-            "label": "Total cotizado",
-            "description": "Total real de Bausing - Cotizar Pedido (ya mostrado al cliente)."
-          },
-          {
-            "id": "quote_confirmed",
-            "label": "Cliente confirmó cotización",
-            "description": "Confirmación explícita de querer proceder/crear la orden: sí, dale, procede, confirmo, ok, lo quiero, etc. NO alcanza con haber mostrado la cotización. NO es confirmación de orden creada."
-          }
-        ],
+        "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "Ya se mostró la nueva cotización con tarjeta Y el cliente confirmó que quiere proceder (sí/dale/procede/confirmo/ok/lo llevo/adelante).",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA de estas: (A) el asistente YA mostró una cotización con total Y el cliente confirma seguir (sí, dale, procede, confirmo, ok, lo quiero, adelante, lo llevo); (B) el cliente quiere pagar con tarjeta / crédito / cuotas, o cambiar el medio de pago de efectivo/transferencia a tarjeta (ej: \"quiero tarjeta\", \"pago con tarjeta\", \"mejor con crédito\", \"en cuotas\", \"cambiar a tarjeta\"). No avances con preguntas sueltas sobre el total/envío sin confirmar ni pedir tarjeta.",
         "dataSourceConfigs": {
           "106": {
             "active": true,
@@ -5616,37 +5082,39 @@
         "cases": [
           {
             "id": "tarjeta",
-            "label": "Cambiar a tarjeta / recotizar con tarjeta",
+            "label": "Cambiar a tarjeta / pagar con tarjeta",
             "examples": [
-              "mejor quiero pagar con tarjeta",
-              "prefiero tarjeta",
+              "quiero pagar con tarjeta",
+              "mejor con tarjeta",
               "pago con tarjeta",
+              "tarjeta de crédito",
               "en cuotas",
               "cambiar a tarjeta",
+              "prefiero tarjeta",
               "crédito",
-              "banco santander",
-              "tengo visa",
-              "mastercard",
-              "cuotas"
+              "me arrepentí, quiero tarjeta",
+              "pasame a tarjeta",
+              "quiero cuotas"
             ],
             "expression": "",
-            "description": "El usuario quiere pagar con tarjeta, cambiar de efectivo/transferencia a tarjeta, cambiar banco/cuotas, o está dando datos de tarjeta para recotizar. NO es confirmación de compra."
+            "description": "El cliente quiere pagar con tarjeta o crédito, pedir cuotas, o cambiar el medio de pago desde efectivo/transferencia hacia tarjeta. Priorizá esta rama sobre confirmar la compra si menciona tarjeta/crédito/cuotas aunque también diga algo de seguir."
           },
           {
             "id": "confirma",
-            "label": "Confirma cotización para seguir",
+            "label": "Confirma para seguir (sin cambiar a tarjeta)",
             "examples": [
               "sí",
               "dale",
-              "procede",
               "confirmo",
               "ok",
-              "lo llevo",
+              "procede",
               "adelante",
-              "sí dale"
+              "lo quiero",
+              "sí, seguimos",
+              "está bien"
             ],
             "expression": "",
-            "description": "El usuario confirma que quiere proceder con la cotización mostrada, sin pedir cambiar el medio de pago a tarjeta."
+            "description": "Confirma continuar con el medio de pago YA elegido (efectivo/transferencia/tarjeta ya cargada). NO uses esta rama si pide tarjeta, crédito o cuotas."
           }
         ],
         "rules": [],
@@ -5660,7 +5128,7 @@
         "routingMode": "llm",
         "clearFactKeys": [],
         "conditionType": "conversational",
-        "minConfidence": 0.6,
+        "minConfidence": 0.55,
         "ragDataSources": {},
         "nextStartNodeId": "",
         "dataSourceConfigs": {}
@@ -5836,7 +5304,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió de opinión y quiere pagar con tarjeta (o cambiar banco/cuotas). Los productos, dirección y carrito YA están en facts — no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes números de cuotas ni recargos.\n\nEl cliente cambió a tarjeta (o quiere cambiar banco/cuotas). Forzá payment_method=card. Pedí banco, tipo y cuotas desde cero si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (OBLIGATORIA para cualquier dato de cuotas/recargo):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo O el cliente pregunta \"¿hasta cuántas cuotas?\": llamá la tool YA (sin inventar).\n   - Si la tool pidió tarjeta: mostrá las card_types reales y pedí Visa/Mastercard/Naranja/etc.\n   - Si devolvió installments: listá las opciones reales (ej. 1/3/6/9/12 con su % de recargo) y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con bank+card_type+installments. Guardá:\n   - bank, card_type, installments\n   - card_surcharge_percent = recargo_porcentaje de la tool\n   - payment_method_quote (ej. \"Visa Santander 12 cuotas\")\n   - card_validation_ok=true\n4) Confirmá breve: cuotas OK + recargo % real. NO cotices el producto acá (eso es Cotizar), pero sí mencioná el % de recargo.\n\nbank se encuentra en facts.bank\n\nPROHIBIDO\n- Respuestas genéricas tipo \"hasta 12 cuotas sin interés\" sin tool.\n- Avanzar sin card_validation_ok=true y card_surcharge_percent numérico de la tool.",
+        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
         "clearFactKeys": [
           "quote_total",
           "quote_confirmed",
@@ -5860,18 +5328,18 @@
           {
             "id": "card_type",
             "label": "Tipo de tarjeta",
-            "description": "Visa/Mastercard/Naranja/Amex/Cabal según API."
+            "description": "Visa/Mastercard/Naranja/Amex/Cabal según opciones reales."
           },
           {
             "id": "installments",
             "label": "Cantidad de cuotas",
-            "description": "Cantidad de cuotas elegida por el cliente, de las opciones reales que devolvió la tool (no avanzar sin esto)."
+            "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "El cliente ya eligió banco, tipo de tarjeta Y una cantidad de cuotas concreta (ej. \"12\", \"6\"), y la tool \"Bausing - Validar Cuotas Tarjeta\" devolvió card_validation_ok=true con el recargo real. NO avanza solo con banco y tipo de tarjeta — falta que el cliente elija la cantidad de cuotas de las opciones reales que le mostraste.",
+        "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
             "active": true,
@@ -6179,7 +5647,7 @@
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog",
                 "query": {
                   "q": "@AI(\"nombre del producto puntual que busca el cliente\", optional:false, isArray:false)",
-                  "locality_id": "@AI(\"usar el dato ya guardado: facts.locality_id\", optional:false, isArray:false)"
+                  "locality_id": "@AI(\"usar facts.localityid (o facts.locality_id) ya guardado\", optional:false, isArray:false)"
                 },
                 "method": "GET",
                 "headers": {
@@ -6251,7 +5719,7 @@
                     },
                     {
                       "name": "locality_id",
-                      "value": "usar el dato ya guardado: facts.locality_id",
+                      "value": "usar facts.localityid (o facts.locality_id) ya guardado",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -6304,25 +5772,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió de opinión y quiere pagar con tarjeta (o cambiar banco/cuotas). Los productos, dirección y carrito YA están en facts — no los vuelvas a pedir.\n\nTONO: vendedor Bausing por WhatsApp — breve, cálido, natural. Sin markdown. No inventes.\n\n0) SI LA TOOL RESPONDE ERROR POR DIRECCIÓN NO UBICADA (mensaje tipo \"No pudimos ubicar la dirección exacta...\"): NO reintentes la misma tool con los mismos datos ni asumas que la dirección está bien igual. Decile al cliente que no pudiste encontrar esa dirección exacta y pedile que confirme o corrija calle, altura, ciudad y código postal (puede haber un error de tipeo en la calle). Recién volvé a llamar la tool cuando tengas la dirección corregida.\n\nRECOTIZAR con tarjeta. payment_method debe ser card. Usá card_surcharge_percent de facts. No crees órdenes.\n\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN SOLO STRING (no array) armado desde facts.cart_items, con los product_id separados por coma (formato 'id:cantidad' si querés aclarar cantidad, ej. 'a6eff0bd-...:2,d3684f06-...:1'). Meté TODOS los productos ahí, incluso si es uno solo — nunca dejes items vacío. No inventes cash.\n2) Guardá quote_total (total base de la tool, ya suma todos los productos) y la lista de items que devolvió la tool (cada uno con product_name, quantity, unit_price y line_total).\n3) PRECIO CON RECARGO DE TARJETA, OBLIGATORIO SI EL METODO DE PAGO ELEGIDO ES TARJETA \n\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo segun cuotas).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n4) Mostrá cada producto con su cantidad y precio (si hay más de uno, LISTALOS TODOS, no muestres solo uno), envío, medio de pago (al recibir) y el PRECIO FINAL total a pagar (con recargo si es tarjeta).\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma (sí/dale/procede): \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá SIEMPRE zone.shipping_summary.message (o shipping_cost/shipping_kind) de la respuesta de la tool para decir cuánto vale el envío — nunca asumas \"gratuito\" por default. shipping_kind puede ser: \"free\" (gratis), \"third_party\" o \"accessories\" (envío pago, monto en shipping_cost/shipping_summary.cost_label), \"viacargo\" (Catálogo País, cotización aparte). Si el cliente pregunta puntualmente cuánto vale el envío, contestale con ese dato real, no con un default.",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "quote_total",
-            "label": "Total cotizado",
-            "description": "Total real de Bausing - Cotizar Pedido (ya mostrado al cliente)."
-          },
-          {
-            "id": "quote_confirmed",
-            "label": "Cliente confirmó cotización",
-            "description": "Confirmación explícita de querer proceder/crear la orden: sí, dale, procede, confirmo, ok, lo quiero, etc. NO alcanza con haber mostrado la cotización. NO es confirmación de orden creada."
-          }
-        ],
+        "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "Ya se mostró la nueva cotización con tarjeta Y el cliente confirmó que quiere proceder (sí/dale/procede/confirmo/ok/lo llevo/adelante).",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA de estas: (A) el asistente YA mostró una cotización con total Y el cliente confirma seguir (sí, dale, procede, confirmo, ok, lo quiero, adelante, lo llevo); (B) el cliente quiere pagar con tarjeta / crédito / cuotas, o cambiar el medio de pago de efectivo/transferencia a tarjeta (ej: \"quiero tarjeta\", \"pago con tarjeta\", \"mejor con crédito\", \"en cuotas\", \"cambiar a tarjeta\"). No avances con preguntas sueltas sobre el total/envío sin confirmar ni pedir tarjeta.",
         "dataSourceConfigs": {
           "106": {
             "active": true,
@@ -6739,20 +6196,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nANTES de crear la orden, mostrá el resumen completo:\n\n1) Producto(s) y cantidad: si facts.cart_items tiene más de un producto, LISTALOS TODOS (nombre + cantidad + precio de cada uno) — no muestres solo uno cuando hay varios\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir el recargo (no el precio base solo).\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nPRECIO CON RECARGO DE TARJETA (obligatorio si payment_method=card y hay card_surcharge_percent):\n- Tomá el precio base / quote_total que devolvió la API de cotización o el price del producto.\n- Calculá precio_final = base * (1 + card_surcharge_percent/100).\n  Ejemplo: base 330000 y recargo 35 → 330000 * 1.35 = 445500.\n- Cuando muestres precio al cliente, mostrá SIEMPRE el precio_final (con recargo).\n- Podés aclarar en una línea: \"incluye X% de recargo por pagar en N cuotas\".\n- Guardá price_final / display_total con ese valor. No muestres solo el precio sin recargo como si fuera el total a pagar.\n- Si es cash/transfer, no apliques recargo de tarjeta.\n\nPreguntá: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO (en este mismo nodo): pedí el dato nuevo, actualizá facts, recalculá precio_final si cambian cuotas/recargo, volvé a mostrar el resumen.\nSi lo que cambia es el medio de pago a tarjeta y no tenés banco/tipo de tarjeta/cuotas todavía, seguí el mismo FLUJO de abajo antes de recalcular precio_final y volver a mostrar el resumen. No asumas ni inventes el recargo.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para cualquier dato de cuotas/recargo, usala en este mismo nodo si el cliente cambia a tarjeta acá):\n- Solo bank → la API indica qué tarjetas hay (data.card_types). Aunque status=false, USÁ esa data.\n- bank + card_type → la API lista cuotas y recargoPorcentaje de cada una (data.installments). Aunque status=false, USÁ esa lista. NUNCA digas \"generalmente hasta 12\".\n- bank + card_type + installments → valida y devuelve recargo_porcentaje. Guardá card_validation_ok=true y card_surcharge_percent.\nPasos: 1) Pedí banco si falta. 2) Con banco, si falta tipo O el cliente pregunta cuántas cuotas hay: llamá la tool YA (sin inventar) — mostrale las opciones/tarjetas reales que devuelva y pedile que elija. 3) Cuando ya tengas los tres datos: llamá la tool y guardá bank, card_type, installments, card_surcharge_percent=recargo_porcentaje, payment_method_quote. PROHIBIDO decir un % o cantidad de cuotas sin que salga de esta tool.\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" NO digas que ya se creó. NO llames Crear Orden.\n\nCAMBIO A TARJETA (ya recotizado)\nEl total ya fue recotizado con tarjeta. Mostrá el resumen actualizado con price_final/display_total y el recargo. Si pide OTRO cambio de tarjeta, decile que lo gestionás en otro paso.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nMostrá el resumen completo ANTES de crear la orden:\n1) Producto(s) y cantidad: si cart_items tiene varios, listalos TODOS (nombre, cantidad, precio).\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir recargo.\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nRecargo tarjeta: price_final = base * (1 + card_surcharge_percent/100). Mostrá ese total. Guardá price_final/display_total. Sin recargo si cash/transfer.\n\nCerrá con: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO: actualizá solo ese dato, recalculá precio si cambian cuotas (tool \"Bausing - Validar Cuotas Tarjeta\" si hace falta) y volvé a mostrar el resumen COMPLETO con todos los datos ya conocidos. Nunca digas \"no se especificó\" de un dato que ya estaba.\n\nSi cambia tarjeta/cuotas, usá la tool:\n- bank → card_types\n- bank+card_type → installments\n- bank+card_type+installments → card_surcharge_percent y card_validation_ok=true\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" No digas que ya se creó. No llames Crear Orden acá.\n\n\nEste resumen es post-recotización: usá los totales/recargo actualizados.\n\nCAMBIO A TARJETA\nSi pide tarjeta/crédito/cuotas: confirmá breve y no digas que creaste la orden. El flujo siguiente valida banco/cuotas y recotiza.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
-        "requiredSlots": [
-          {
-            "id": "order_confirmed_final",
-            "label": "Confirmación final del resumen",
-            "description": "El cliente confirmó EXPLÍCITAMENTE que el resumen está bien y quiere crear la orden (sí / confirmo / dale / está bien / crear). Si pide cambiar producto, dirección, pago, tarjeta o datos: NO es confirmación (advance=false); el nodo corrige en el mismo paso y vuelve a mostrar el resumen."
-          }
-        ],
+        "requiredSlots": [],
         "ragDataSources": {},
         "savedVariables": [],
         "nextStartNodeId": "",
-        "continueCondition": "El cliente confirmó el resumen actualizado post-recotización para crear la orden (sí/confirmo/dale/está bien/creala).",
+        "continueCondition": "Avanzar si se cumple CUALQUIERA: (A) el cliente confirmó el resumen actualizado post-recotización para crear la orden; (B) el cliente quiere cambiar otra vez a tarjeta / cuotas / banco. Si solo pregunta algo del resumen sin confirmar ni pedir tarjeta, no avances.",
         "dataSourceConfigs": {
           "121": {
             "active": true,
@@ -6930,8 +6381,8 @@
         "dataSourceConfigs": {}
       },
       "position": {
-        "x": 2950,
-        "y": 80
+        "x": 2895.6041036167253,
+        "y": 151.57354787273
       }
     },
     {
@@ -6961,6 +6412,444 @@
         "x": 2950,
         "y": 420
       }
+    },
+    {
+      "id": "node-zona-tag-buy",
+      "name": "Marcar retorno: catálogo",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: { zona_return_to_detail: false } };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 369,
+        "y": -260
+      }
+    },
+    {
+      "id": "node-zona-tag-detail",
+      "name": "Marcar retorno: detalle de producto",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: { zona_return_to_detail: true } };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 369,
+        "y": 60
+      }
+    },
+    {
+      "id": "node-zona-menu-ask",
+      "name": "Preguntar zona (menú)",
+      "type": "static_message",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "message": "Para mostrarte lo que tenemos disponible en tu zona, contame dónde estás:\n1) Córdoba Capital\n2) Provincia de Córdoba\n3) La Pampa\n4) Mendoza\n5) Otras provincias (San Luis, San Juan, Santa Fe, La Rioja, Catamarca, Santiago del Estero, Tucumán)\n6) Resto del país",
+        "factKeys": [],
+        "bodyFiles": [],
+        "bodyParams": [],
+        "dataSources": [],
+        "factMappings": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": false,
+        "waitForUserResponse": true,
+        "finalizeConversationSession": false
+      },
+      "position": {
+        "x": 620,
+        "y": -90
+      }
+    },
+    {
+      "id": "node-zona-menu-router",
+      "name": "Elegir zona",
+      "type": "conversation_router",
+      "config": {
+        "cases": [
+          {
+            "id": "cordoba_capital",
+            "label": "Córdoba Capital",
+            "examples": [
+              "córdoba capital",
+              "capital",
+              "cordoba",
+              "la 1",
+              "opción 1",
+              "uno",
+              "centro de córdoba",
+              "ciudad de córdoba"
+            ],
+            "expression": "",
+            "description": "El cliente está en la ciudad de Córdoba (capital) o alrededores cercanos."
+          },
+          {
+            "id": "provincia_cordoba",
+            "label": "Provincia de Córdoba",
+            "examples": [
+              "provincia de córdoba",
+              "interior de córdoba",
+              "villa carlos paz",
+              "río cuarto",
+              "opción 2",
+              "dos",
+              "cordoba interior"
+            ],
+            "expression": "",
+            "description": "El cliente está en el interior de la provincia de Córdoba, fuera de la capital."
+          },
+          {
+            "id": "la_pampa",
+            "label": "La Pampa",
+            "examples": [
+              "la pampa",
+              "santa rosa",
+              "general pico",
+              "realicó",
+              "opción 3",
+              "tres"
+            ],
+            "expression": "",
+            "description": "El cliente está en la provincia de La Pampa."
+          },
+          {
+            "id": "mendoza",
+            "label": "Mendoza",
+            "examples": [
+              "mendoza",
+              "opción 4",
+              "cuatro"
+            ],
+            "expression": "",
+            "description": "El cliente está en la provincia de Mendoza."
+          },
+          {
+            "id": "otras_provincias",
+            "label": "Otras provincias",
+            "examples": [
+              "san luis",
+              "san juan",
+              "santa fe",
+              "paraná",
+              "rafaela",
+              "la rioja",
+              "catamarca",
+              "santiago del estero",
+              "tucumán",
+              "opción 5",
+              "cinco",
+              "otra provincia"
+            ],
+            "expression": "",
+            "description": "El cliente está en San Luis, San Juan, Santa Fe, La Rioja, Catamarca, Santiago del Estero, Tucumán u otra provincia de esa lista."
+          },
+          {
+            "id": "pais",
+            "label": "Resto del país",
+            "examples": [
+              "ninguna de esas",
+              "no está en la lista",
+              "resto del país",
+              "otra provincia no listada",
+              "opción 6",
+              "seis"
+            ],
+            "expression": "",
+            "description": "El cliente está en una provincia o zona que no aparece en ninguna de las opciones anteriores."
+          }
+        ],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "entities": [],
+        "fallback": "default",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "dataSources": [],
+        "routingMode": "llm",
+        "clearFactKeys": [],
+        "conditionType": "conversational",
+        "minConfidence": 0.6,
+        "ragDataSources": {},
+        "nextStartNodeId": "",
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 870,
+        "y": -90
+      }
+    },
+    {
+      "id": "node-zona-set-cordoba-capital",
+      "name": "Fijar zona: Córdoba Capital",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: {\"localityid\": \"f6b8a63c-721f-4f9b-95df-ce84f8b674e7\", \"locality_id\": \"f6b8a63c-721f-4f9b-95df-ce84f8b674e7\", \"catalog_id\": \"708b144a-305f-4d6d-b59f-4efdba0db0a1\", \"catalog_name\": \"Cordoba capital\", \"is_pais_catalog\": false, \"estimated_delivery_label\": \"1 a 2 días hábiles\"} };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": -320
+      }
+    },
+    {
+      "id": "node-zona-set-provincia-cordoba",
+      "name": "Fijar zona: Provincia de Córdoba",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: {\"localityid\": \"03f26a5e-dc99-47d4-8a1a-858536ba0c72\", \"locality_id\": \"03f26a5e-dc99-47d4-8a1a-858536ba0c72\", \"catalog_id\": \"4c9e82dd-4f2b-4087-9744-a3b6942ab1a0\", \"catalog_name\": \"Provincia de cordoba\", \"is_pais_catalog\": false, \"estimated_delivery_label\": \"3 a 7 días hábiles\"} };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": -210
+      }
+    },
+    {
+      "id": "node-zona-set-la-pampa",
+      "name": "Fijar zona: La Pampa",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: {\"localityid\": \"a0f00a9b-b671-4d27-ae61-f1dd3c7acff9\", \"locality_id\": \"a0f00a9b-b671-4d27-ae61-f1dd3c7acff9\", \"catalog_id\": \"991adcf3-c07b-465c-bc28-432d9c8c2ba8\", \"catalog_name\": \"La pampa\", \"is_pais_catalog\": false, \"estimated_delivery_label\": \"7 a 10 días hábiles\"} };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": -100
+      }
+    },
+    {
+      "id": "node-zona-set-mendoza",
+      "name": "Fijar zona: Mendoza",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: {\"localityid\": \"ee9221bd-620e-422b-9040-374d06f5b956\", \"locality_id\": \"ee9221bd-620e-422b-9040-374d06f5b956\", \"catalog_id\": \"c3c599e8-35aa-4892-96d4-2b186d1d0f4a\", \"catalog_name\": \"Mendoza\", \"is_pais_catalog\": false, \"estimated_delivery_label\": \"7 a 10 días hábiles\"} };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": 10
+      }
+    },
+    {
+      "id": "node-zona-set-otras-provincias",
+      "name": "Fijar zona: Otras provincias",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: {\"localityid\": \"8fd9014e-5291-46e4-b003-5e0891b38399\", \"locality_id\": \"8fd9014e-5291-46e4-b003-5e0891b38399\", \"catalog_id\": \"a34f74a6-718f-43a9-85f4-e077afa77ece\", \"catalog_name\": \"Provincias seleccionadas\", \"is_pais_catalog\": false, \"estimated_delivery_label\": \"7 a 10 días hábiles\"} };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": 120
+      }
+    },
+    {
+      "id": "node-zona-set-pais",
+      "name": "Fijar zona: Resto del país",
+      "type": "transform",
+      "config": {
+        "code": "return { facts: {\"localityid\": \"7168bee8-f88e-4513-8fc2-a7ca4e18e381\", \"locality_id\": \"7168bee8-f88e-4513-8fc2-a7ca4e18e381\", \"catalog_id\": \"8335e521-f25a-4f92-8f59-c4439671ef26\", \"catalog_name\": \"Pais\", \"is_pais_catalog\": true, \"estimated_delivery_label\": \"\"} };",
+        "dataSources": [],
+        "clearFactKeys": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": 230
+      }
+    },
+    {
+      "id": "node-zona-fallback-ask",
+      "name": "Aclarar zona (no reconocida)",
+      "type": "static_message",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "message": "No llegué a ubicar bien tu zona. Decime con cuál de estas coincide más:\n1) Córdoba Capital\n2) Provincia de Córdoba\n3) La Pampa\n4) Mendoza\n5) Otras provincias\n6) Resto del país",
+        "factKeys": [],
+        "bodyFiles": [],
+        "bodyParams": [],
+        "dataSources": [],
+        "factMappings": [],
+        "ragDataSources": {},
+        "dataSourceConfigs": {},
+        "captureFactsEnabled": false,
+        "waitForUserResponse": true,
+        "finalizeConversationSession": false
+      },
+      "position": {
+        "x": 870,
+        "y": 260
+      }
+    },
+    {
+      "id": "node-zona-menu-router-retry",
+      "name": "Elegir zona (reintento)",
+      "type": "conversation_router",
+      "config": {
+        "cases": [
+          {
+            "id": "cordoba_capital",
+            "label": "Córdoba Capital",
+            "examples": [
+              "córdoba capital",
+              "capital",
+              "cordoba",
+              "la 1",
+              "opción 1",
+              "uno",
+              "centro de córdoba",
+              "ciudad de córdoba"
+            ],
+            "expression": "",
+            "description": "El cliente está en la ciudad de Córdoba (capital) o alrededores cercanos."
+          },
+          {
+            "id": "provincia_cordoba",
+            "label": "Provincia de Córdoba",
+            "examples": [
+              "provincia de córdoba",
+              "interior de córdoba",
+              "villa carlos paz",
+              "río cuarto",
+              "opción 2",
+              "dos",
+              "cordoba interior"
+            ],
+            "expression": "",
+            "description": "El cliente está en el interior de la provincia de Córdoba, fuera de la capital."
+          },
+          {
+            "id": "la_pampa",
+            "label": "La Pampa",
+            "examples": [
+              "la pampa",
+              "santa rosa",
+              "general pico",
+              "realicó",
+              "opción 3",
+              "tres"
+            ],
+            "expression": "",
+            "description": "El cliente está en la provincia de La Pampa."
+          },
+          {
+            "id": "mendoza",
+            "label": "Mendoza",
+            "examples": [
+              "mendoza",
+              "opción 4",
+              "cuatro"
+            ],
+            "expression": "",
+            "description": "El cliente está en la provincia de Mendoza."
+          },
+          {
+            "id": "otras_provincias",
+            "label": "Otras provincias",
+            "examples": [
+              "san luis",
+              "san juan",
+              "santa fe",
+              "paraná",
+              "rafaela",
+              "la rioja",
+              "catamarca",
+              "santiago del estero",
+              "tucumán",
+              "opción 5",
+              "cinco",
+              "otra provincia"
+            ],
+            "expression": "",
+            "description": "El cliente está en San Luis, San Juan, Santa Fe, La Rioja, Catamarca, Santiago del Estero, Tucumán u otra provincia de esa lista."
+          },
+          {
+            "id": "pais",
+            "label": "Resto del país",
+            "examples": [
+              "ninguna de esas",
+              "no está en la lista",
+              "resto del país",
+              "otra provincia no listada",
+              "opción 6",
+              "seis"
+            ],
+            "expression": "",
+            "description": "El cliente está en una provincia o zona que no aparece en ninguna de las opciones anteriores."
+          }
+        ],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "entities": [],
+        "fallback": "default",
+        "bodyFiles": [],
+        "bodyParams": [],
+        "dataSources": [],
+        "routingMode": "llm",
+        "clearFactKeys": [],
+        "conditionType": "conversational",
+        "minConfidence": 0.6,
+        "ragDataSources": {},
+        "nextStartNodeId": "",
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1120,
+        "y": 260
+      }
+    },
+    {
+      "id": "node-zona-return-router",
+      "name": "¿Vuelve a catálogo o a detalle de producto?",
+      "type": "conditional",
+      "config": {
+        "cases": [],
+        "rules": [],
+        "tools": [],
+        "headers": [],
+        "bodyFiles": [],
+        "bodyParams": [],
+        "expression": "Boolean({{zona_return_to_detail}} === true || {{zona_return_to_detail}} === \"true\")",
+        "dataSources": [],
+        "conditionType": "simple",
+        "ragDataSources": {},
+        "dataSourceConfigs": {}
+      },
+      "position": {
+        "x": 1370,
+        "y": -90
+      }
     }
   ],
   "edges": [
@@ -6975,46 +6864,13 @@
       "sourceHandle": "203"
     },
     {
-      "to": "12",
-      "from": "2",
-      "sourceHandle": "204"
-    },
-    {
       "to": "10",
       "from": "7",
       "sourceHandle": "true"
     },
     {
-      "to": "node-1786633793742-14",
-      "from": "12"
-    },
-    {
-      "to": "12",
-      "from": "2",
-      "sourceHandle": "201"
-    },
-    {
-      "to": "node-1786732711679-12",
-      "from": "2",
-      "sourceHandle": "case_0"
-    },
-    {
-      "to": "node-1786732711679-13",
-      "from": "node-1786732711679-12"
-    },
-    {
-      "to": "node-1786732774278-14",
-      "from": "node-1786732711679-13",
-      "sourceHandle": "success"
-    },
-    {
       "to": "node-subcat-clarify-01",
       "from": "node-1786739435672-15"
-    },
-    {
-      "to": "node-1786739435672-15",
-      "from": "node-1786633793742-14",
-      "sourceHandle": "success"
     },
     {
       "to": "node-1786752306412-15",
@@ -7065,16 +6921,6 @@
     {
       "to": "node-pago-clarify-01",
       "from": "4"
-    },
-    {
-      "to": "node-zona-ask-01",
-      "from": "node-1786633793742-14",
-      "sourceHandle": "error"
-    },
-    {
-      "to": "node-zona-ask-02",
-      "from": "node-1786732711679-13",
-      "sourceHandle": "error"
     },
     {
       "to": "node-cotizar-recotizar",
@@ -7179,14 +7025,176 @@
       "from": "node-reset-recotizar-resumen"
     },
     {
-      "from": "node-zona-ask-01",
-      "to": "node-1786739435672-15"
+      "from": "2",
+      "to": "node-zona-tag-buy",
+      "sourceHandle": "201"
     },
     {
-      "from": "node-zona-ask-02",
-      "to": "node-1786732774278-14"
+      "from": "2",
+      "to": "node-zona-tag-buy",
+      "sourceHandle": "204"
+    },
+    {
+      "from": "2",
+      "to": "node-zona-tag-detail",
+      "sourceHandle": "case_0"
+    },
+    {
+      "from": "node-zona-tag-buy",
+      "to": "node-zona-menu-ask"
+    },
+    {
+      "from": "node-zona-tag-detail",
+      "to": "node-zona-menu-ask"
+    },
+    {
+      "from": "node-zona-menu-ask",
+      "to": "node-zona-menu-router"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-set-cordoba-capital",
+      "sourceHandle": "cordoba_capital"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-set-provincia-cordoba",
+      "sourceHandle": "provincia_cordoba"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-set-la-pampa",
+      "sourceHandle": "la_pampa"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-set-mendoza",
+      "sourceHandle": "mendoza"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-set-otras-provincias",
+      "sourceHandle": "otras_provincias"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-set-pais",
+      "sourceHandle": "pais"
+    },
+    {
+      "from": "node-zona-menu-router",
+      "to": "node-zona-fallback-ask",
+      "sourceHandle": "default"
+    },
+    {
+      "from": "node-zona-fallback-ask",
+      "to": "node-zona-menu-router-retry"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "node-zona-set-cordoba-capital",
+      "sourceHandle": "cordoba_capital"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "node-zona-set-provincia-cordoba",
+      "sourceHandle": "provincia_cordoba"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "node-zona-set-la-pampa",
+      "sourceHandle": "la_pampa"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "node-zona-set-mendoza",
+      "sourceHandle": "mendoza"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "node-zona-set-otras-provincias",
+      "sourceHandle": "otras_provincias"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "node-zona-set-pais",
+      "sourceHandle": "pais"
+    },
+    {
+      "from": "node-zona-menu-router-retry",
+      "to": "10",
+      "sourceHandle": "default"
+    },
+    {
+      "from": "node-zona-set-cordoba-capital",
+      "to": "node-zona-return-router"
+    },
+    {
+      "from": "node-zona-set-provincia-cordoba",
+      "to": "node-zona-return-router"
+    },
+    {
+      "from": "node-zona-set-la-pampa",
+      "to": "node-zona-return-router"
+    },
+    {
+      "from": "node-zona-set-mendoza",
+      "to": "node-zona-return-router"
+    },
+    {
+      "from": "node-zona-set-otras-provincias",
+      "to": "node-zona-return-router"
+    },
+    {
+      "from": "node-zona-set-pais",
+      "to": "node-zona-return-router"
+    },
+    {
+      "from": "node-zona-return-router",
+      "to": "node-1786732774278-14",
+      "sourceHandle": "true"
+    },
+    {
+      "from": "node-zona-return-router",
+      "to": "node-1786739435672-15",
+      "sourceHandle": "false"
     }
   ],
+  "metadata": {
+    "entryNodeId": "2",
+    "finalOutputSchema": {
+      "type": "object",
+      "required": [
+        "content",
+        "resources"
+      ],
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "url",
+              "title"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
   "finalOutputSchema": {
     "type": "object",
     "required": [

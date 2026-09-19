@@ -241,13 +241,14 @@ def _build_pais_catalog_zone(lon: float, lat: float) -> Dict[str, Any]:
     }
 
 
-def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
+def _zone_payload_for_locality(
+    locality, shipping_zone_locality=None, coordinates: Optional[Dict[str, float]] = None
+) -> Optional[Dict[str, Any]]:
+    """Arma el payload de zona (catálogo, envío, días estimados) para una
+    localidad ya identificada, sin importar si vino de un match por polígono
+    (coords) o de un locality_id ya conocido de antemano. Devuelve None si la
+    localidad no tiene catálogo mapeado (el caller decide el fallback País)."""
     from models.crm_delivery_zone import CrmDeliveryZone, CrmZoneLocality
-
-    locality, shipping_zone_locality = find_locality_by_coordinates(lon, lat)
-    if not locality:
-        # Paridad con la web (/detect-locality): fuera de polígono → Catálogo País
-        return _build_pais_catalog_zone(lon, lat)
 
     is_third_party = False
     shipping_price = None
@@ -279,9 +280,8 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
         crm_zone_id = get_crm_zone_id_from_locality(locality.name)
 
     catalog, catalog_id = catalog_for_locality(locality.id)
-    # Si la localidad no tiene catálogo mapeado, también País
     if not catalog_id:
-        return _build_pais_catalog_zone(lon, lat)
+        return None
 
     is_pais = str(catalog_id) == PAIS_CATALOG_ID
     delivery = estimated_delivery_payload(catalog)
@@ -291,12 +291,11 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
         is_pais=is_pais,
     )
 
-    return {
+    payload = {
         "locality": {
             "id": str(locality.id),
             "name": locality.name,
         },
-        "coordinates": {"lon": lon, "lat": lat},
         "crm_zone_id": crm_zone_id,
         "catalog_id": catalog_id,
         "catalog_name": catalog.name if catalog else None,
@@ -306,6 +305,45 @@ def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
         "estimated_delivery": delivery,
         "shipping_summary": shipping_summary,
     }
+    if coordinates is not None:
+        payload["coordinates"] = coordinates
+    return payload
+
+
+def build_zone_from_coords(lon: float, lat: float) -> Dict[str, Any]:
+    locality, shipping_zone_locality = find_locality_by_coordinates(lon, lat)
+    if not locality:
+        # Paridad con la web (/detect-locality): fuera de polígono → Catálogo País
+        return _build_pais_catalog_zone(lon, lat)
+
+    payload = _zone_payload_for_locality(
+        locality, shipping_zone_locality, coordinates={"lon": lon, "lat": lat}
+    )
+    # Si la localidad no tiene catálogo mapeado, también País
+    if payload is None:
+        return _build_pais_catalog_zone(lon, lat)
+    return payload
+
+
+def resolve_zone_from_locality_id(locality_id: Any) -> Dict[str, Any]:
+    """Resuelve zona/catálogo a partir de un locality_id ya conocido (por
+    ejemplo, el que el cliente eligió en un menú de zonas al principio de la
+    conversación), sin geocodificar ninguna dirección. No calcula coordinates
+    ni un envío exacto por dirección puntual — para eso hace falta la
+    dirección real (ver resolve_zone_from_address)."""
+    try:
+        loc_uuid = uuid.UUID(str(locality_id))
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError(f"locality_id inválido: {locality_id}")
+
+    locality = Locality.query.get(loc_uuid)
+    if not locality:
+        raise ValueError(f"No existe una localidad con id {locality_id}")
+
+    payload = _zone_payload_for_locality(locality)
+    if payload is None:
+        raise ValueError(f"La localidad '{locality.name}' no tiene catálogo asignado")
+    return payload
 
 
 def _normalize_city_province(city: str, province_name: Optional[str]) -> Tuple[str, Optional[str]]:
@@ -479,6 +517,10 @@ def parse_freeform_address(text: str) -> Dict[str, str]:
 
 
 def resolve_zone_from_address(address: Dict[str, Any]) -> Dict[str, Any]:
+    locality_id = address.get("locality_id")
+    if locality_id:
+        return resolve_zone_from_locality_id(locality_id)
+
     lat = address.get("lat")
     lon = address.get("lon")
     # lat/lon vacíos del bot ("", null) no cuentan
