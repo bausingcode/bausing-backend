@@ -439,8 +439,8 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
+                  "locality_id": "@AI(\"OBLIGATORIO: usar facts.locality_id o facts.localityid ya guardado (de la zona que el cliente eligió al principio). Es un UUID interno, nunca se lo pidas al cliente ni le pidas su dirección completa: eso se pide más adelante, en el paso de datos del cliente.\", optional:false, isArray:false)",
                   "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)",
-                  "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
                   "payment_method": "@AI(\"OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. Si NO hay facts.payment_method, NO llames esta tool. NUNCA inventes cash ni otro valor.\", optional:false, isArray:false)"
                 },
                 "method": "POST",
@@ -455,11 +455,11 @@
               "credential_id": "",
               "sections_config": {
                 "body": {
-                  "json": "{\n  \"address\": {\n    \"address\": \"@AI(\\\"dirección completa: calle y número, ciudad, provincia y código postal\\\", optional:false)\"\n  },\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
+                  "json": "{\n  \"locality_id\": \"@AI(\\\"usar facts.locality_id o facts.localityid ya guardado\\\", optional:false)\",\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
                   "list": [
                     {
-                      "name": "address",
-                      "value": "usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.",
+                      "name": "locality_id",
+                      "value": "OBLIGATORIO: usar facts.locality_id o facts.localityid ya guardado (de la zona que el cliente eligió al principio). Es un UUID interno, nunca se lo pidas al cliente ni le pidas su dirección completa: eso se pide más adelante, en el paso de datos del cliente.",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -685,7 +685,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nCAMBIO A TARJETA\nSi el cliente pide pagar con tarjeta/crédito/cuotas o cambiar el medio de pago: confirmá breve (ej. \"Dale, armamos el pago con tarjeta.\") y NO insistas en confirmar la compra en efectivo/transferencia. No cotices de nuevo acá con card si todavía no tenés banco/cuotas/recargo; el flujo siguiente pide esos datos.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nDIRECCIÓN: en este paso todavía NO tenés la dirección real del cliente, solo la zona que eligió al principio (facts.locality_id / localityid). Usá ese dato para cotizar. No le pidas la dirección completa ni le digas que hubo un error de dirección acá — la dirección real se pide más adelante, en el paso de datos del cliente.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nCAMBIO A TARJETA\nSi el cliente pide pagar con tarjeta/crédito/cuotas o cambiar el medio de pago: confirmá breve (ej. \"Dale, armamos el pago con tarjeta.\") y NO insistas en confirmar la compra en efectivo/transferencia. No cotices de nuevo acá con card si todavía no tenés banco/cuotas/recargo; el flujo siguiente pide esos datos.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
@@ -701,8 +701,8 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
+                  "locality_id": "@AI(\"usar dato ya guardado: facts.locality_id\", optional:false, isArray:false)",
                   "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)",
-                  "address": "@AI(\"usar dato ya guardado: facts.address\", optional:false, isArray:false)",
                   "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false, isArray:false)"
                 },
                 "method": "POST",
@@ -717,11 +717,11 @@
               "credential_id": "",
               "sections_config": {
                 "body": {
-                  "json": "{\n  \"address\": {\n    \"address\": \"@AI(\\\"dirección completa: calle y número, ciudad, provincia y código postal\\\", optional:false)\"\n  },\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
+                  "json": "{\n  \"locality_id\": \"@AI(\\\"usar facts.locality_id o facts.localityid ya guardado\\\", optional:false)\",\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
                   "list": [
                     {
-                      "name": "address",
-                      "value": "usar dato ya guardado: facts.address",
+                      "name": "locality_id",
+                      "value": "usar dato ya guardado: facts.locality_id",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -3632,8 +3632,8 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
+                  "locality_id": "@AI(\"OBLIGATORIO: usar facts.locality_id o facts.localityid ya guardado (de la zona que el cliente eligió al principio). Es un UUID interno, nunca se lo pidas al cliente ni le pidas su dirección completa: eso se pide más adelante, en el paso de datos del cliente.\", optional:false, isArray:false)",
                   "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)",
-                  "address": "@AI(\"usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.\", optional:false, isArray:false)",
                   "payment_method": "@AI(\"OBLIGATORIO: usar facts.payment_method exactamente (cash, transfer o card). Si el fact está en español, mapear efectivo→cash, transferencia→transfer, tarjeta→card. Si NO hay facts.payment_method, NO llames esta tool. NUNCA inventes cash ni otro valor.\", optional:false, isArray:false)"
                 },
                 "method": "POST",
@@ -3648,11 +3648,11 @@
               "credential_id": "",
               "sections_config": {
                 "body": {
-                  "json": "{\n  \"address\": {\n    \"address\": \"@AI(\\\"dirección completa: calle y número, ciudad, provincia y código postal\\\", optional:false)\"\n  },\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
+                  "json": "{\n  \"locality_id\": \"@AI(\\\"usar facts.locality_id o facts.localityid ya guardado\\\", optional:false)\",\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
                   "list": [
                     {
-                      "name": "address",
-                      "value": "usar facts.direccion_completa o facts.address (dirección ya guardada). No pedirle de nuevo al usuario si ya existe.",
+                      "name": "locality_id",
+                      "value": "OBLIGATORIO: usar facts.locality_id o facts.localityid ya guardado (de la zona que el cliente eligió al principio). Es un UUID interno, nunca se lo pidas al cliente ni le pidas su dirección completa: eso se pide más adelante, en el paso de datos del cliente.",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",
@@ -3878,7 +3878,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, zona (facts.locality_id) y carrito ya están; todavía no hay dirección real. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nDIRECCIÓN: en este paso todavía NO tenés la dirección real del cliente, solo la zona que eligió al principio (facts.locality_id / localityid). Usá ese dato para cotizar. No le pidas la dirección completa ni le digas que hubo un error de dirección acá — la dirección real se pide más adelante, en el paso de datos del cliente.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
@@ -3894,8 +3894,8 @@
               "parameters": {
                 "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/quote",
                 "body": {
+                  "locality_id": "@AI(\"usar dato ya guardado: facts.locality_id\", optional:false, isArray:false)",
                   "items": "@AI(\"product_id separados por coma, formato id:cantidad (ej: id1:2,id2,id3:1)\", optional:false, isArray:false)",
-                  "address": "@AI(\"usar dato ya guardado: facts.address\", optional:false, isArray:false)",
                   "payment_method": "@AI(\"cómo vas a pagar: efectivo, transferencia o tarjeta\", optional:false, isArray:false)"
                 },
                 "method": "POST",
@@ -3910,11 +3910,11 @@
               "credential_id": "",
               "sections_config": {
                 "body": {
-                  "json": "{\n  \"address\": {\n    \"address\": \"@AI(\\\"dirección completa: calle y número, ciudad, provincia y código postal\\\", optional:false)\"\n  },\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
+                  "json": "{\n  \"locality_id\": \"@AI(\\\"usar facts.locality_id o facts.localityid ya guardado\\\", optional:false)\",\n  \"quantity\": \"@AI(\\\"cantidad, normalmente 1\\\", optional:true)\",\n  \"product_id\": \"@AI(\\\"el product_id real del producto puntual que el cliente confirmó (nunca inventado, copiado literal de una tool de catálogo)\\\", optional:false)\",\n  \"payment_method\": \"@AI(\\\"cómo vas a pagar: efectivo, transferencia o tarjeta\\\", optional:false)\"\n}",
                   "list": [
                     {
-                      "name": "address",
-                      "value": "usar dato ya guardado: facts.address",
+                      "name": "locality_id",
+                      "value": "usar dato ya guardado: facts.locality_id",
                       "isArray": false,
                       "required": true,
                       "valueMode": "text",

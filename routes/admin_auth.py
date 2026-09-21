@@ -6,6 +6,7 @@ from functools import wraps
 import jwt
 from datetime import datetime, timedelta
 from config import Config
+from utils.admin_permissions import check_admin_permission
 
 admin_auth_bp = Blueprint('admin_auth', __name__)
 
@@ -71,9 +72,15 @@ def admin_required(f):
         
         # Agregar el usuario admin al contexto de la request
         request.admin_user = admin_user
-        
+
+        if not check_admin_permission(admin_user):
+            return jsonify({
+                'success': False,
+                'error': 'No tenés permiso para acceder a esta sección'
+            }), 403
+
         return f(*args, **kwargs)
-    
+
     return decorated_function
 
 @admin_auth_bp.route('/register', methods=['POST'])
