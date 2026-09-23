@@ -12,6 +12,7 @@ ROLE_ALLOWED_BLUEPRINTS = {
         'images',        # Imágenes
         'blog',          # Blog
         'faq_items',     # Preguntas Frecuentes
+        'homepage_distribution',  # Distribución Inicio
         'admin_auth',    # /admin/auth/me — necesario para cualquier sesión admin
     },
 }
