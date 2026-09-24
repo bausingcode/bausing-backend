@@ -18,6 +18,7 @@ from models.product import (
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
     apply_manual_colors_from_payload,
+    assign_unique_product_slug,
     MAX_MANUAL_COLOR_LABEL_LEN,
 )
 from models.image import ProductImage
@@ -1018,11 +1019,12 @@ def get_products():
             'error': str(e)
         }), 500
 
-@products_bp.route('/<uuid:product_id>', methods=['GET'])
+@products_bp.route('/<string:product_id>', methods=['GET'])
 def get_product(product_id):
     """
-    Obtener un producto por ID con toda la información del ecommerce
-    
+    Obtener un producto por ID (UUID) o por slug con toda la información del ecommerce.
+    La URL con el ID sigue funcionando siempre; el slug es una alternativa más linda.
+
     Query parameters:
     - include_variants: incluir variantes (default: true)
     - include_images: incluir todas las imágenes (default: true)
@@ -1069,7 +1071,7 @@ def get_product(product_id):
         # a Supabase antes que varios round-trips en serie (selectinload por nivel):
         # cada round-trip mide ~100-150ms acá, y son ese es el costo real del endpoint (ver
         # medición con SQLALCHEMY_ECHO: ~10 queries en serie == la demora del PDP).
-        product = Product.query.options(
+        product_query = Product.query.options(
             joinedload(Product.images),
             joinedload(Product.category),
             joinedload(Product.category_option),
@@ -1082,7 +1084,12 @@ def get_product(product_id):
                 joinedload(ProductPrice.catalog),
                 joinedload(ProductPrice.locality),
             ),
-        ).get(product_id)
+        )
+
+        try:
+            product = product_query.get(uuid_lib.UUID(product_id))
+        except (ValueError, AttributeError, TypeError):
+            product = product_query.filter(Product.slug == product_id).first()
 
         if not product:
             return jsonify({
@@ -1434,14 +1441,21 @@ def get_product(product_id):
             'traceback': error_trace if current_app.config.get('DEBUG') else None
         }), 500
 
-@products_bp.route('/<uuid:product_id>/combos', methods=['GET'])
+@products_bp.route('/<string:product_id>/combos', methods=['GET'])
 def get_product_combos(product_id):
     """
-    Obtener combos que contienen este producto
+    Obtener combos que contienen este producto (acepta ID o slug)
     Busca en crm_product_combo_items donde crm_item_product_id = crm_product_id del producto
     """
     try:
-        product = Product.query.get_or_404(product_id)
+        import uuid as uuid_lib
+        try:
+            product = Product.query.get(uuid_lib.UUID(product_id))
+        except (ValueError, AttributeError, TypeError):
+            product = Product.query.filter(Product.slug == product_id).first()
+        if not product:
+            from flask import abort
+            abort(404)
 
         if not _storefront_may_view_product_detail(product):
             return jsonify({
@@ -1569,10 +1583,11 @@ def create_product():
             category_id=data.get('category_id'),
             is_active=data.get('is_active', True)
         )
-        
+        assign_unique_product_slug(product)
+
         db.session.add(product)
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'data': product.to_dict()
@@ -1652,7 +1667,8 @@ def create_complete_product():
             category_id=category_id,
             is_active=data.get('is_active', True)
         )
-        
+        assign_unique_product_slug(product)
+
         db.session.add(product)
         db.session.flush()  # Para obtener el ID del producto
 
@@ -1838,6 +1854,8 @@ def update_product(product_id):
         
         if 'name' in data:
             product.name = data['name']
+            if not product.slug:
+                assign_unique_product_slug(product, exclude_id=product.id)
         if 'description' in data:
             product.description = data.get('description')
         if 'sku' in data:

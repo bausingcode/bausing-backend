@@ -4,9 +4,45 @@ from sqlalchemy import or_
 from datetime import datetime, timezone
 import json
 import logging
+import random
+import re
+import unicodedata
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def generate_product_slug(name):
+    """Slug legible a partir del nombre del producto (mismo criterio que blog.generate_slug)."""
+    slug = (name or "").lower()
+    slug = unicodedata.normalize('NFKD', slug).encode('ascii', 'ignore').decode('ascii')
+    slug = re.sub(r'[^a-z0-9]+', '-', slug)
+    slug = slug.strip('-')
+    return slug or 'producto'
+
+
+def assign_unique_product_slug(product, exclude_id=None):
+    """
+    Genera y asigna un slug único a partir de product.name.
+    Si el slug base ya está en uso por otro producto, agrega un número largo
+    al final para evitar colisiones (ej: colchon-queen-482913).
+    """
+    base_slug = generate_product_slug(product.name)
+
+    def _taken(candidate):
+        q = Product.query.filter(Product.slug == candidate)
+        if exclude_id is not None:
+            q = q.filter(Product.id != exclude_id)
+        return q.first() is not None
+
+    if not _taken(base_slug):
+        product.slug = base_slug
+        return
+
+    candidate = f"{base_slug}-{random.randint(100000, 999999)}"
+    while _taken(candidate):
+        candidate = f"{base_slug}-{random.randint(100000, 999999)}"
+    product.slug = candidate
 
 # Precio lista tarjeta vs efectivo/transferencia
 PRICE_KIND_TRANSFER = "transfer"
@@ -288,6 +324,8 @@ class Product(db.Model):
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = db.Column(db.String(255), nullable=False)
+    # Slug legible para la URL pública (ej: colchon-queen-inducol); la URL por ID sigue funcionando siempre
+    slug = db.Column(db.String(300), nullable=True)
     description = db.Column(db.Text)
     technical_description = db.Column(db.Text)
     warranty_months = db.Column(db.Integer)
@@ -490,6 +528,7 @@ class Product(db.Model):
     def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None, precalculated_promos=None):
         data = {
             'id': str(self.id),
+            'slug': self.slug,
             'name': self.name,
             'description': self.description,
             'technical_description': self.technical_description,

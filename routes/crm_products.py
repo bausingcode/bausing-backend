@@ -8,6 +8,7 @@ from models.product import (
     PRICE_KIND_TRANSFER,
     PRICE_KIND_CARD,
     apply_manual_colors_from_payload,
+    assign_unique_product_slug,
 )
 from models.locality import Locality
 from models.catalog import Catalog
@@ -442,6 +443,8 @@ def complete_crm_product(product_id):
             if not product.crm_product_id:
                 product.crm_product_id = crm_product_id_int
             apply_manual_colors_from_payload(product, data)
+            if not product.slug:
+                assign_unique_product_slug(product, exclude_id=product.id)
         else:
             # Crear nuevo producto
             # Determinar si es combo basado en el crm_product usando SQL directo
@@ -498,8 +501,9 @@ def complete_crm_product(product_id):
                 freezer_capacity_liters=data.get('freezer_capacity_liters'),
             )
             apply_manual_colors_from_payload(product, data)
+            assign_unique_product_slug(product)
             db.session.add(product)
-        
+
         db.session.flush()  # Para obtener el ID del producto
 
         # Permitir que el admin marque manualmente si el producto tiene stock,
