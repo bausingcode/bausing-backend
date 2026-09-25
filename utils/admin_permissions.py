@@ -13,16 +13,23 @@ ROLE_ALLOWED_BLUEPRINTS = {
         'blog',          # Blog
         'faq_items',     # Preguntas Frecuentes
         'homepage_distribution',  # Distribución Inicio
+        'redirects',     # SEO: redirecciones 301/302
         'admin_auth',    # /admin/auth/me — necesario para cualquier sesión admin
     },
 }
 
 # Endpoints puntuales permitidos dentro de blueprints que mezclan varias
 # secciones (ej. 'admin', que junto con /users y /customers también expone
-# /auth/me).
+# /auth/me; o 'settings', que junto con SEO también expone wallet/seguridad).
 ROLE_ALLOWED_ENDPOINTS = {
     'Editor de Contenido': {
         'admin.get_current_user',
+        # SEO (robots.txt / sitemap.xml / llms.txt) dentro de /admin/redirects.
+        # get_settings devuelve todas las categorías juntas (no hay un endpoint
+        # separado solo para SEO): el Editor puede leerlas, pero solo puede
+        # escribir vía update_seo_settings (no wallet/seguridad/general/etc).
+        'settings.get_settings',
+        'settings.update_seo_settings',
     },
 }
 

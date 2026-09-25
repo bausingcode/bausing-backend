@@ -19,6 +19,7 @@ from models.product import (
     PRICE_KIND_CARD,
     apply_manual_colors_from_payload,
     assign_unique_product_slug,
+    generate_product_slug,
     MAX_MANUAL_COLOR_LABEL_LEN,
 )
 from models.image import ProductImage
@@ -1583,7 +1584,7 @@ def create_product():
             category_id=data.get('category_id'),
             is_active=data.get('is_active', True)
         )
-        assign_unique_product_slug(product)
+        assign_unique_product_slug(product, preferred_slug=data.get('slug'))
 
         db.session.add(product)
         db.session.commit()
@@ -1667,7 +1668,7 @@ def create_complete_product():
             category_id=category_id,
             is_active=data.get('is_active', True)
         )
-        assign_unique_product_slug(product)
+        assign_unique_product_slug(product, preferred_slug=data.get('slug'))
 
         db.session.add(product)
         db.session.flush()  # Para obtener el ID del producto
@@ -1854,8 +1855,17 @@ def update_product(product_id):
         
         if 'name' in data:
             product.name = data['name']
-            if not product.slug:
+
+        if 'slug' in data:
+            desired_slug = (data.get('slug') or '').strip()
+            if desired_slug:
+                if generate_product_slug(desired_slug) != (product.slug or ''):
+                    assign_unique_product_slug(product, exclude_id=product.id, preferred_slug=desired_slug)
+            elif not product.slug:
                 assign_unique_product_slug(product, exclude_id=product.id)
+        elif 'name' in data and not product.slug:
+            assign_unique_product_slug(product, exclude_id=product.id)
+
         if 'description' in data:
             product.description = data.get('description')
         if 'sku' in data:

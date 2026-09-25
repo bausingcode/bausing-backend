@@ -165,6 +165,34 @@ def get_public_pdp_cross_sell():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@public_settings_bp.route('/settings/public/seo', methods=['GET'])
+def get_public_seo():
+    """
+    Obtener configuración de SEO editable (robots.txt, sitemap.xml, llms.txt) sin autenticación.
+    """
+    try:
+        seo_settings = SystemSettings.query.filter_by(category='seo').all()
+        seo = {}
+        for setting in seo_settings:
+            key = setting.key.replace('seo.', '')
+            seo[key] = setting.value
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'robotsTxt': seo.get('robots_txt', ''),
+                'llmsTxt': seo.get('llms_txt', ''),
+                'sitemapExtraUrls': seo.get('sitemap_extra_urls', ''),
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @public_settings_bp.route('/settings/public/review-count', methods=['GET'])
 def get_public_review_count():
     """
@@ -317,6 +345,13 @@ def get_settings():
             else:
                 general[key] = setting.value
 
+        # Obtener configuración de SEO
+        seo_settings = SystemSettings.query.filter_by(category='seo').all()
+        seo = {}
+        for setting in seo_settings:
+            key = setting.key.replace('seo.', '')
+            seo[key] = setting.value
+
         return jsonify({
             'success': True,
             'data': {
@@ -324,7 +359,8 @@ def get_settings():
                 'messages': messages,
                 'notifications': notifications,
                 'security': security,
-                'general': general
+                'general': general,
+                'seo': seo
             }
         }), 200
 
@@ -579,6 +615,58 @@ def update_security_settings():
             'success': True,
             'data': updated_settings,
             'message': 'Configuración de seguridad actualizada correctamente'
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@settings_bp.route('/settings/seo', methods=['PUT'])
+@admin_required
+def update_seo_settings():
+    """
+    Actualizar configuración de SEO (robots.txt, sitemap.xml, llms.txt)
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'Datos requeridos'
+            }), 400
+
+        # Mapeo de campos del frontend a keys de la base de datos
+        seo_mappings = {
+            'robotsTxt': ('seo.robots_txt', 'string', 'Contenido completo personalizado de robots.txt (vacío = automático)'),
+            'llmsTxt': ('seo.llms_txt', 'string', 'Contenido completo personalizado de llms.txt (vacío = automático)'),
+            'sitemapExtraUrls': ('seo.sitemap_extra_urls', 'string', 'URLs adicionales para sitemap.xml (una por línea)'),
+        }
+
+        updated_settings = []
+        for key, value in data.items():
+            if key in seo_mappings:
+                db_key, value_type, description = seo_mappings[key]
+                setting = SystemSettings.set_value(
+                    key=db_key,
+                    value=value or '',
+                    value_type=value_type,
+                    category='seo',
+                    description=description,
+                    updated_by=request.admin_user.id
+                )
+                updated_settings.append(setting.to_dict())
+
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'data': updated_settings,
+            'message': 'Configuración de SEO actualizada correctamente'
         }), 200
 
     except Exception as e:

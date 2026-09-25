@@ -21,13 +21,14 @@ def generate_product_slug(name):
     return slug or 'producto'
 
 
-def assign_unique_product_slug(product, exclude_id=None):
+def assign_unique_product_slug(product, exclude_id=None, preferred_slug=None):
     """
-    Genera y asigna un slug único a partir de product.name.
+    Genera y asigna un slug único. Si se pasa preferred_slug (editado a mano desde
+    el admin), se usa como base; si no, se genera a partir de product.name.
     Si el slug base ya está en uso por otro producto, agrega un número largo
     al final para evitar colisiones (ej: colchon-queen-482913).
     """
-    base_slug = generate_product_slug(product.name)
+    base_slug = generate_product_slug(preferred_slug if preferred_slug else product.name)
 
     def _taken(candidate):
         q = Product.query.filter(Product.slug == candidate)

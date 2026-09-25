@@ -9,6 +9,7 @@ from models.product import (
     PRICE_KIND_CARD,
     apply_manual_colors_from_payload,
     assign_unique_product_slug,
+    generate_product_slug,
 )
 from models.locality import Locality
 from models.catalog import Catalog
@@ -415,6 +416,8 @@ def complete_crm_product(product_id):
                 # has_stock/get_total_stock colisionan con métodos de Product (setattr los pisaría con
                 # un valor no-callable); has_crm_stock se maneja aparte contra crm_products.stock.
                 'has_stock', 'get_total_stock', 'has_crm_stock',
+                # slug se maneja aparte (sanitiza y evita colisiones); no pisarlo con el valor crudo
+                'slug',
             }
             
             for key, value in data.items():
@@ -443,7 +446,14 @@ def complete_crm_product(product_id):
             if not product.crm_product_id:
                 product.crm_product_id = crm_product_id_int
             apply_manual_colors_from_payload(product, data)
-            if not product.slug:
+            if 'slug' in data:
+                desired_slug = (data.get('slug') or '').strip()
+                if desired_slug:
+                    if generate_product_slug(desired_slug) != (product.slug or ''):
+                        assign_unique_product_slug(product, exclude_id=product.id, preferred_slug=desired_slug)
+                elif not product.slug:
+                    assign_unique_product_slug(product, exclude_id=product.id)
+            elif not product.slug:
                 assign_unique_product_slug(product, exclude_id=product.id)
         else:
             # Crear nuevo producto
@@ -501,7 +511,7 @@ def complete_crm_product(product_id):
                 freezer_capacity_liters=data.get('freezer_capacity_liters'),
             )
             apply_manual_colors_from_payload(product, data)
-            assign_unique_product_slug(product)
+            assign_unique_product_slug(product, preferred_slug=data.get('slug'))
             db.session.add(product)
 
         db.session.flush()  # Para obtener el ID del producto
