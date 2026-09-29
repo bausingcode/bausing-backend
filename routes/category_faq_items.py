@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.category_faq_item import CategoryFaqItem
+from models.category import Category
 from routes.admin import admin_required
 import uuid as uuid_lib
 
@@ -14,19 +15,41 @@ def _parse_uuid(raw):
         return None
 
 
+def _published_items_for_category(category_id):
+    return (
+        CategoryFaqItem.query.filter_by(category_id=category_id, is_published=True)
+        .order_by(CategoryFaqItem.sort_order.asc(), CategoryFaqItem.created_at.asc())
+        .all()
+    )
+
+
+def _resolve_category_faq_items(category_id):
+    """
+    Preguntas de `category_id`, o si no tiene ninguna publicada, las de su
+    categoría padre (y así subiendo la cadena) — una subcategoría configurada
+    tiene prioridad sobre lo heredado de la categoría padre.
+    """
+    current_id = category_id
+    visited = set()
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        rows = _published_items_for_category(current_id)
+        if rows:
+            return rows
+        category = Category.query.get(current_id)
+        current_id = category.parent_id if category else None
+    return []
+
+
 @category_faq_items_bp.route("/public/category-faq-items", methods=["GET"])
 def public_list_category_faq_items():
-    """Listado público: solo publicadas de una categoría, orden por sort_order."""
+    """Listado público: preguntas publicadas de la categoría (con fallback a la categoría padre)."""
     try:
         category_id = _parse_uuid(request.args.get("category_id", ""))
         if not category_id:
             return jsonify({"success": False, "error": "category_id inválido"}), 400
 
-        rows = (
-            CategoryFaqItem.query.filter_by(category_id=category_id, is_published=True)
-            .order_by(CategoryFaqItem.sort_order.asc(), CategoryFaqItem.created_at.asc())
-            .all()
-        )
+        rows = _resolve_category_faq_items(category_id)
         return jsonify(
             {
                 "success": True,
