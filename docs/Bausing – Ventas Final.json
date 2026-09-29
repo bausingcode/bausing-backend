@@ -247,6 +247,33 @@
             "selected_credentials": {
               "custom_request": ""
             }
+          },
+          {
+            "id": "103",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/@AI(\"product_id\", optional:false)",
+                "query": {},
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Detalle de Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR PARA: la opción PRINCIPAL que mostrás de una búsqueda (la que mejor matchea lo que pidió el cliente), llamala apenas la elijas para conseguir main_image y compartir el link de la foto junto con el resto de los datos, sin que el cliente tenga que pedirla. Para cualquier OTRA opción (alternativas resumidas, o un producto ya listado antes) usala solo si el cliente pide más info o la foto de ese producto puntual. Esta es la ÚNICA tool cuya respuesta trae main_image. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
           }
         ],
         "outputSchema": {
@@ -261,17 +288,19 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Nunca inventes datos.\n\nOBJETIVO\nMostrar opciones del catálogo para la subcategoría ya elegida y armar el carrito. El medio de pago y la cotización son pasos siguientes: no cotices totales ni asumas efectivo.\n\nCONTEXTO\n- Subcategoría: subcategory_name / subcategory_id en memoria o historial.\n- Categorías de referencia: {{categorias}}\n- Localidad: localityid (o locality_id) ya guardada.\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" una sola vez con el subcategory_id real.\n- Si falta el id, buscalo en {{categorias}} por el nombre. Nunca inventes IDs ni uses textos como \"2 plazas\" como id.\n- No busques varias subcategorías en el mismo turno ni amplíes a toda la categoría padre.\n- Si cambia de subcategoría, confirmá y recién ahí buscá de nuevo.\n\nPRODUCTOS\n- Mostrá 3 o 4 opciones con nombre y price_transfer (o price_card si no hay transfer).\n- Si nombra un producto puntual, buscá ese (sin inventar product_id).\n- Imágenes solo si las pide para un producto puntual.\n\nAL ENTRAR\nSi ya hay subcategory_name/medida en memoria o historial: resolvé el id en {{categorias}}, llamá el catálogo ya y listá productos. No vuelvas a preguntar la medida.\n\nCARRITO\nConsultar precios no es comprar. Agregá solo con intención clara (\"quiero ese\", \"lo llevo\", etc.).\n- Sumá a cart_items objetos {product_id, quantity, name} con product_id real (quantity=1 si no dice otra). No borres ítems previos al agregar.\n- Después de agregar, terminá SIEMPRE con exactamente: \"¿Algo más o cotizamos así?\"\n- Si elige otro producto: agregalo y volvé a preguntar.\n- Si pide sacar o cambiar cantidad: actualizá cart_items.\n- Si cart_items queda con un solo producto, guardá también product_id con ese id.\n\nNo digas que avanzás de nodo ni que cotizás acá. Cuando el cliente confirme que el carrito está listo, solo confirmá breve el/los producto(s); el flujo sigue solo.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos.\nFORMATO: esto es WhatsApp, no markdown de otras plataformas. Nunca uses doble asterisco **texto** (queda literal, feo). Para negrita usá UN asterisco de cada lado: *texto*. Para cursiva, un guión bajo: _texto_. No uses numerales (#) ni bloques de código.\n\nOBJETIVO\nMostrar opciones del catálogo para la subcategoría ya elegida y armar el carrito. El medio de pago y la cotización son pasos siguientes: no cotices totales ni asumas efectivo.\n\nCONTEXTO\n- Subcategoría: subcategory_name / subcategory_id en memoria o historial.\n- Categorías de referencia: {{categorias}}\n- Localidad: localityid (o locality_id) ya guardada.\n\nBÚSQUEDA\n- Llamá \"Bausing - Buscar Catalogo\" una sola vez con el subcategory_id real.\n- Si falta el id, buscalo en {{categorias}} por el nombre. Nunca inventes IDs ni uses textos como \"2 plazas\" como id.\n- No busques varias subcategorías en el mismo turno ni amplíes a toda la categoría padre.\n- Si cambia de subcategoría, confirmá y recién ahí buscá de nuevo.\n\nPRODUCTOS\n- De los resultados, elegí UNA opción principal (la que mejor matchee lo que pidió el cliente; si no hay forma de priorizar, la primera).\n- Llamá \"Bausing - Detalle de Producto\" con su product_id para conseguir main_image y compartir la foto junto con este mensaje, sin que el cliente la pida.\n- Mostrá la principal con este formato exacto (emojis fijos, *negrita* con un asterisco de cada lado):\n\nTe recomiendo principalmente este 👇\n\n🛏️ *{nombre}*\n📏 *Medida:* {medida, SOLO si el nombre o la descripción la menciona, ej. \"2 plazas, 140 x 190 cm\"}\n💰 *Precio transferencia:* ${price_transfer} (o price_card si no hay transfer)\n⚖️ *Soporta:* {capacidad/peso, SOLO si la descripción lo menciona, ej. \"hasta 90 kg por lado\"}\n\n✨ *¿Por qué te lo recomiendo?*\n{1 o 2 líneas resumiendo la descripción real del producto en tono vendedor; nunca inventes un dato que la descripción no tenga, y si falta medida o capacidad simplemente omití esa línea}\n\n- Si hay más resultados, sumá UNA alternativa, bien RESUMIDA (sin descripción larga ni foto), con este formato:\n\n*Otra opción {más económica / distinta, según corresponda}:*\n🔹 *{nombre}*, {medida si se puede extraer}\n💰 ${price_transfer o price_card} por transferencia\n{una frase corta de diferenciador si sale de la descripción; si no hay dato, omitila}\n\n- Cerrá preguntando (variá la frase) si quiere ver más opciones.\n- Si el cliente pide ver más, mostrá las siguientes 2 (una principal completa + una alternativa resumida, mismo formato), sin repetir las ya mostradas.\n- Si nombra un producto puntual, buscá ese (sin inventar product_id) y mostralo con el formato de opción principal (completo, con foto).\n\nAL ENTRAR\nSi ya hay subcategory_name/medida en memoria o historial: resolvé el id en {{categorias}}, llamá el catálogo ya y listá productos. No vuelvas a preguntar la medida.\n\nCARRITO\nConsultar precios no es comprar. Agregá solo con intención clara (\"quiero ese\", \"lo llevo\", etc.).\n- Sumá a cart_items objetos {product_id, quantity, name} con product_id real (quantity=1 si no dice otra). No borres ítems previos al agregar.\n- Después de agregar, terminá SIEMPRE con exactamente: \"¿Algo más o cotizamos así?\"\n- Si elige otro producto: agregalo y volvé a preguntar.\n- Si pide sacar o cambiar cantidad: actualizá cart_items.\n- Si cart_items queda con un solo producto, guardá también product_id con ese id.\n\nNo digas que avanzás de nodo ni que cotizás acá. Cuando el cliente confirme que el carrito está listo, solo confirmá breve el/los producto(s); el flujo sigue solo.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
         "savedVariables": [],
+        "nextStartNodeId": "",
         "factDescriptions": {},
         "continueCondition": "Avanzar solo si el asistente ya mostró productos y preguntó si cotizan así (o equivalente), Y el último mensaje del cliente confirma que quiere seguir con lo elegido (sí, dale, exacto, confirmo, así está bien, cotizame, eso es todo, nada más, listo). No avances si sigue eligiendo productos, pide otra medida, pregunta precios o agrega/cambia ítems.",
         "dataSourceConfigs": {
@@ -385,6 +414,33 @@
             "selected_credentials": {
               "custom_request": ""
             }
+          },
+          "103": {
+            "id": "103",
+            "active": true,
+            "metadata": {
+              "parameters": {
+                "url": "https://bausing-api-qy2vc.ondigitalocean.app/atendium/v1/catalog/@AI(\"product_id\", optional:false)",
+                "query": {},
+                "method": "GET",
+                "headers": {
+                  "X-API-Key": "MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs",
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer MUCJ-T0RKkjjwh5PkL4moDMIVP7ytb-EUOQtG9pmThs"
+                },
+                "timeout": 20000
+              },
+              "custom_title": "Bausing - Detalle de Producto",
+              "credential_id": "",
+              "include_metadata": true,
+              "tool_description": "USAR PARA: la opción PRINCIPAL que mostrás de una búsqueda (la que mejor matchea lo que pidió el cliente), llamala apenas la elijas para conseguir main_image y compartir el link de la foto junto con el resto de los datos, sin que el cliente tenga que pedirla. Para cualquier OTRA opción (alternativas resumidas, o un producto ya listado antes) usala solo si el cliente pide más info o la foto de ese producto puntual. Esta es la ÚNICA tool cuya respuesta trae main_image. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "credential_provider": "api_rest",
+              "credential_providers": [
+                "api_rest"
+              ]
+            },
+            "templateName": "custom_api_rest",
+            "selected_credentials": {}
           }
         },
         "captureFactsEnabled": true,
@@ -692,13 +748,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nDIRECCIÓN: en este paso todavía NO tenés la dirección real del cliente, solo la zona que eligió al principio (facts.locality_id / localityid). Usá ese dato para cotizar. No le pidas la dirección completa ni le digas que hubo un error de dirección acá — la dirección real se pide más adelante, en el paso de datos del cliente.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nCAMBIO A TARJETA\nSi el cliente pide pagar con tarjeta/crédito/cuotas o cambiar el medio de pago: confirmá breve (ej. \"Dale, armamos el pago con tarjeta.\") y NO insistas en confirmar la compra en efectivo/transferencia. No cotices de nuevo acá con card si todavía no tenés banco/cuotas/recargo; el flujo siguiente pide esos datos.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nDIRECCIÓN: en este paso todavía NO tenés la dirección real del cliente, solo la zona que eligió al principio (facts.locality_id / localityid). Usá ese dato para cotizar. No le pidas la dirección completa ni le digas que hubo un error de dirección acá — la dirección real se pide más adelante, en el paso de datos del cliente.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nCAMBIO A TARJETA\nSi el cliente pide pagar con tarjeta/crédito/cuotas o cambiar el medio de pago: confirmá breve (ej. \"Dale, armamos el pago con tarjeta.\") y NO insistas en confirmar la compra en efectivo/transferencia. No cotices de nuevo acá con card si todavía no tenés banco/cuotas/recargo; el flujo siguiente pide esos datos.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -1212,7 +1269,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nEl cliente YA confirmó el resumen. Este nodo SOLO crea la orden.\n\nSI LA TOOL FALLA POR DIRECCIÓN: pedí corregir calle/altura/ciudad/CP y reintentá recién con la dirección nueva.\n\n1) Llamá \"Bausing - Crear Orden\" con:\n - items: string desde cart_items (ids separados por coma, formato id:cantidad). Todos los productos. Nunca vacío ni inventado.\n - address desde address/direccion_completa\n - payment_method: cash|transfer|card\n - payment_method_quote, customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n - si card: installments, bank, card_type\n2) Solo si la tool responde OK: confirmá con datos reales (order_id si viene). Si es tarjeta, mencioná cuotas y que el total incluye recargo (price_final / card_surcharge_percent) si están.\n3) Si falla, deci que hubo un error y que tendra que terminar la compra al numero +3510000000. Y mostrale el resumen de compra para que lo copie y pegue a ese numero.\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo.",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nEl cliente YA confirmó el resumen. Este nodo SOLO crea la orden.\n\nSI LA TOOL FALLA POR DIRECCIÓN: pedí corregir calle/altura/ciudad/CP y reintentá recién con la dirección nueva.\n\n1) Llamá \"Bausing - Crear Orden\" con:\n - items: string desde cart_items (ids separados por coma, formato id:cantidad). Todos los productos. Nunca vacío ni inventado.\n - address desde address/direccion_completa\n - payment_method: cash|transfer|card\n - payment_method_quote, customer_first_name, customer_last_name, customer_dni, customer_email, customer_phone\n - si card: installments, bank, card_type\n2) Solo si la tool responde OK: confirmá con datos reales (order_id si viene). Si es tarjeta, mencioná cuotas y que el total incluye recargo (price_final / card_surcharge_percent) si están.\n3) Si falla, deci que hubo un error y que tendra que terminar la compra al numero +3510000000. Y mostrale el resumen de compra para que lo copie y pegue a ese numero.\n\nPROHIBIDO crear la orden sin llamar la tool. PROHIBIDO volver a pedir el resumen completo.",
         "clearFactKeys": [],
         "executionMode": "respond_and_end",
         "requiredSlots": [],
@@ -1505,17 +1562,19 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como atención al cliente de Bausing por WhatsApp: breve, cálida y clara. Sin markdown. No inventes datos.\n\nSALUDO\nSi no hay mensaje tuyo previo en el historial, empezá con: \"¡Hola! Gracias por comunicarte con Bausing.\" Luego pedí lo necesario. Si ya saludaste, no repitas el saludo.\n\nTOOLS\n- \"Bausing - Listar Pedidos\": listado general → pedí teléfono y/o DNI.\n- \"Bausing - Estado de Pedido\": un pedido puntual → pedí número/ID + teléfono.\n\nRespondé solo con datos reales de las tools.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como atención al cliente de Bausing por WhatsApp: breve, cálida y clara. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes datos.\n\nSALUDO\nSi no hay mensaje tuyo previo en el historial, empezá con: \"¡Hola! Gracias por comunicarte con Bausing.\" Luego pedí lo necesario. Si ya saludaste, no repitas el saludo.\n\nTOOLS\n- \"Bausing - Listar Pedidos\": listado general → pedí teléfono y/o DNI.\n- \"Bausing - Estado de Pedido\": un pedido puntual → pedí número/ID + teléfono.\n\nRespondé solo con datos reales de las tools.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
         "savedVariables": [],
+        "nextStartNodeId": "",
         "factDescriptions": {},
         "continueCondition": "Avanzar solo si el cliente cerró el tema de seguimiento (gracias, listo, no necesito nada más) o pidió explícitamente otra cosa fuera de pedidos. Si sigue preguntando por pedidos o estado, no avances.",
         "dataSourceConfigs": {
@@ -1767,7 +1826,7 @@
               "custom_title": "Bausing - Detalle de Producto",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "tool_description": "USAR PARA: la opción PRINCIPAL que mostrás de una búsqueda (la que mejor matchea lo que pidió el cliente), llamala apenas la elijas para conseguir main_image y compartir el link de la foto junto con el resto de los datos, sin que el cliente tenga que pedirla. Para cualquier OTRA opción (alternativas resumidas, o un producto ya listado antes) usala solo si el cliente pide más info o la foto de ese producto puntual. Esta es la ÚNICA tool cuya respuesta trae main_image. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -1789,17 +1848,19 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Nunca inventes datos.\n\nOBJETIVO\nAyudar a identificar un producto puntual y armar el carrito. No cotices totales ni preguntes medio de pago salvo que el cliente lo mencione.\n\nTOOLS\n- Producto por nombre: \"Bausing - Buscar Producto\".\n- Detalle: \"Bausing - Detalle de Producto\".\n- locality_id/localityid ya guardado para búsquedas. Nunca inventes product_id.\n\nPRODUCTOS\nMostrá pocas opciones claras con nombre y price_transfer (o price_card). Imágenes solo si las pide.\n\nCARRITO\nAgregá solo con intención de compra (\"quiero ese\", \"lo llevo\", etc.).\n- Sumá a cart_items {product_id, quantity, name}. No borres ítems previos.\n- Después de agregar, terminá SIEMPRE con: \"¿Algo más o cotizamos así?\"\n- Si confirma que está listo: confirmá breve los productos; no digas que pasás de nodo.\n- Si cart_items queda con un solo producto, guardá también product_id.\n\nSi cambia la dirección, pedí la nueva completa (el flujo de zona la resuelve en otro paso).\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Nunca inventes datos.\nFORMATO: esto es WhatsApp, no markdown de otras plataformas. Nunca uses doble asterisco **texto** (queda literal, feo). Para negrita usá UN asterisco de cada lado: *texto*. Para cursiva, un guión bajo: _texto_. No uses numerales (#) ni bloques de código.\n\nOBJETIVO\nAyudar a identificar un producto puntual y armar el carrito. No cotices totales ni preguntes medio de pago salvo que el cliente lo mencione.\n\nTOOLS\n- Producto por nombre: \"Bausing - Buscar Producto\".\n- Detalle: \"Bausing - Detalle de Producto\".\n- locality_id/localityid ya guardado para búsquedas. Nunca inventes product_id.\n\nPRODUCTOS\n- De los resultados, elegí UNA opción principal (la que mejor matchee lo que pidió el cliente; si no hay forma de priorizar, la primera).\n- Llamá \"Bausing - Detalle de Producto\" con su product_id para conseguir main_image y compartir la foto junto con este mensaje, sin que el cliente la pida.\n- Mostrá la principal con este formato exacto (emojis fijos, *negrita* con un asterisco de cada lado):\n\nTe recomiendo principalmente este 👇\n\n🛏️ *{nombre}*\n📏 *Medida:* {medida, SOLO si el nombre o la descripción la menciona, ej. \"2 plazas, 140 x 190 cm\"}\n💰 *Precio transferencia:* ${price_transfer} (o price_card si no hay transfer)\n⚖️ *Soporta:* {capacidad/peso, SOLO si la descripción lo menciona, ej. \"hasta 90 kg por lado\"}\n\n✨ *¿Por qué te lo recomiendo?*\n{1 o 2 líneas resumiendo la descripción real del producto en tono vendedor; nunca inventes un dato que la descripción no tenga, y si falta medida o capacidad simplemente omití esa línea}\n\n- Si hay más resultados, sumá UNA alternativa, bien RESUMIDA (sin descripción larga ni foto), con este formato:\n\n*Otra opción {más económica / distinta, según corresponda}:*\n🔹 *{nombre}*, {medida si se puede extraer}\n💰 ${price_transfer o price_card} por transferencia\n{una frase corta de diferenciador si sale de la descripción; si no hay dato, omitila}\n\n- Cerrá preguntando (variá la frase) si quiere ver más opciones.\n- Si el cliente pide ver más, mostrá las siguientes 2 (una principal completa + una alternativa resumida, mismo formato), sin repetir las ya mostradas.\n- Si nombra un producto puntual, buscá ese (sin inventar product_id) y mostralo con el formato de opción principal (completo, con foto).\n\nCARRITO\nAgregá solo con intención de compra (\"quiero ese\", \"lo llevo\", etc.).\n- Sumá a cart_items {product_id, quantity, name}. No borres ítems previos.\n- Después de agregar, terminá SIEMPRE con: \"¿Algo más o cotizamos así?\"\n- Si confirma que está listo: confirmá breve los productos; no digas que pasás de nodo.\n- Si cart_items queda con un solo producto, guardá también product_id.\n\nSi cambia la dirección, pedí la nueva completa (el flujo de zona la resuelve en otro paso).\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
         "savedVariables": [],
+        "nextStartNodeId": "",
         "factDescriptions": {},
         "continueCondition": "Avanzar solo si el asistente ya ofreció producto(s) y preguntó si cotizan así, Y el cliente confirma que quiere seguir con lo elegido (sí, dale, cotizame, eso es todo, listo, etc.). No avances si sigue buscando o cambiando productos.",
         "dataSourceConfigs": {
@@ -1821,7 +1882,7 @@
               "custom_title": "Bausing - Detalle de Producto",
               "credential_id": "",
               "include_metadata": true,
-              "tool_description": "USAR CUANDO: el cliente pide más información o LA FOTO de UN producto puntual que ya apareció en el listado (tenés su product_id). Esta es la ÚNICA tool cuya respuesta trae main_image — compartila SOLO si el cliente pidió la foto explícitamente. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
+              "tool_description": "USAR PARA: la opción PRINCIPAL que mostrás de una búsqueda (la que mejor matchea lo que pidió el cliente), llamala apenas la elijas para conseguir main_image y compartir el link de la foto junto con el resto de los datos, sin que el cliente tenga que pedirla. Para cualquier OTRA opción (alternativas resumidas, o un producto ya listado antes) usala solo si el cliente pide más info o la foto de ese producto puntual. Esta es la ÚNICA tool cuya respuesta trae main_image. La respuesta NO trae precio: el precio real sale de \"Bausing - Cotizar Pedido\" después de resolver la zona. NO la uses para buscar productos nuevos ni para listar varias opciones. GET /catalog/:product_id.",
               "credential_provider": "api_rest",
               "credential_providers": [
                 "api_rest"
@@ -2060,7 +2121,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown.\n\nSaludo / dudas generales. Empezá siempre con: \"¡Hola! Gracias por comunicarte con Bausing, ¿cómo te puedo ayudar?\"\nSolo resolvé dudas generales. Si preguntan productos, precios u opciones concretas, no inventes: invitá a decir qué busca (ej. colchones) para ayudarlo.\n{{workflow.rag.context}}\n",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase.\n\nSaludo / dudas generales. Empezá siempre con: \"¡Hola! Gracias por comunicarte con Bausing, ¿cómo te puedo ayudar?\"\nSolo resolvé dudas generales. Si preguntan productos, precios u opciones concretas, no inventes: invitá a decir qué busca (ej. colchones) para ayudarlo.\n{{workflow.rag.context}}\n",
         "clearFactKeys": [],
         "executionMode": "respond_and_end",
         "requiredSlots": [],
@@ -2069,11 +2130,13 @@
             "05e8b2d4-c4a8-44e0-968d-300bcb820487",
             "ed274f2c-f3c8-4e1c-bd62-8226dd42d8b6",
             "48002cdc-8155-4796-8a81-a2ff255a0412",
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
         "savedVariables": [],
+        "nextStartNodeId": "",
         "factDescriptions": {},
         "dataSourceConfigs": {},
         "captureFactsEnabled": false,
@@ -2124,7 +2187,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nCategorías (fuente de verdad):\n{{categorias}}\n\nÚNICO TRABAJO: detectar si el cliente YA eligió una medida/tipo real de esa lista.\n\nCategorías sin hijos: si nombró una categoría/subcategoría que aparece en {{categorias}} y no tiene subcategorías listadas debajo, tratála como elección completa (ej. \"almohadas\").\n\nCuenta como elegida (normalizá al nombre canónico de {{categorias}}): 1 plaza / una plaza, plaza y media, 2 plazas / dos plazas, queen, king, extra queen, cuna u otra subcategoría real.\n\nSI YA HAY medida/tipo en el historial:\n1) Guardá subcategory_name (canónico) y subcategory_id si está en {{categorias}}.\n2) Respondé UNA frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/genérico):\n1) subcategory_name = null (no inventes).\n2) Respondé exactamente string vacío: \"\"\n\nProhibido listar productos o precios.\n",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nCategorías (fuente de verdad):\n{{categorias}}\n\nÚNICO TRABAJO: detectar si el cliente YA eligió una medida/tipo real de esa lista.\n\nCategorías sin hijos: si nombró una categoría/subcategoría que aparece en {{categorias}} y no tiene subcategorías listadas debajo, tratála como elección completa (ej. \"almohadas\").\n\nCuenta como elegida (normalizá al nombre canónico de {{categorias}}): 1 plaza / una plaza, plaza y media, 2 plazas / dos plazas, queen, king, extra queen, cuna u otra subcategoría real.\n\nSI YA HAY medida/tipo en el historial:\n1) Guardá subcategory_name (canónico) y subcategory_id si está en {{categorias}}.\n2) Respondé UNA frase corta de confirmación (ej. \"Dale, 2 plazas.\").\n3) No preguntes de nuevo. No listes productos.\n\nSI NO HAY medida/tipo (solo \"colchón\"/genérico):\n1) subcategory_name = null (no inventes).\n2) Respondé exactamente string vacío: \"\"\n\nProhibido listar productos o precios.\n",
         "executionMode": "execute_and_continue",
         "ragDataSources": {},
         "dataSourceConfigs": {},
@@ -2173,7 +2236,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nÚNICO TRABAJO: que elija medio de pago. El pago es al recibir en domicilio.\n\nPROHIBIDO\n- Asumir efectivo o transferencia.\n- Cotizar, mostrar totales o llamar tools.\n- Decir que la compra/pedido/orden fue creada o confirmada.\n- Tratar la elección de producto como medio de pago.\n- Explicar cómo funcionan las cuotas (fijas/variables), preguntar cuántas cuotas quiere, o pedir banco/tipo de tarjeta: eso lo hace el paso siguiente, nunca vos acá. No uses el material de referencia (RAG) para responder preguntas sobre cuotas: ese tema lo resuelve el paso siguiente con datos reales.\n\nFLUJO\n1) Si falta el medio, preguntá una vez: \"El pago se hace al recibir el pedido en tu domicilio. ¿Preferís efectivo, transferencia o tarjeta?\"\n2) Al responder:\n   - efectivo → payment_method=cash\n   - transferencia → payment_method=transfer\n   - tarjeta/crédito/cuotas, EN CUALQUIER FORMA (\"tarjeta\", \"crédito\", \"en cuotas\", \"cuánto sale en cuotas\", \"cuánto queda en cuotas\", \"tienen cuotas?\", \"a cuántas cuotas\") → payment_method=card\n\n   CUALQUIER mención de \"cuotas\", \"tarjeta\" o \"crédito\" significa que el cliente eligió tarjeta, aunque venga en forma de pregunta sobre el precio o las cuotas. No le expliques cuotas fijas/variables ni le preguntes cuántas cuotas quiere ni banco: guardá payment_method=card de una, confirmá breve, y dejá que el paso siguiente pida esos datos con la tool real.\n3) Guardá payment_method_quote con la frase del cliente.\n4) Confirmá breve. Si es tarjeta, no pidas banco/cuotas acá.\n\npayment_method en hechos debe ser exactamente: cash, transfer o card.\n\nSi el cliente cambia de opinión en este mismo paso (ej. dijo efectivo y ahora tarjeta), guardá payment_method=card y confirmá breve. El siguiente paso pedirá banco/cuotas si es tarjeta.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor humano de Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nÚNICO TRABAJO: que elija medio de pago. El pago es al recibir en domicilio.\n\nPROHIBIDO\n- Asumir efectivo o transferencia.\n- Cotizar, mostrar totales o llamar tools.\n- Decir que la compra/pedido/orden fue creada o confirmada.\n- Tratar la elección de producto como medio de pago.\n- Explicar cómo funcionan las cuotas (fijas/variables), preguntar cuántas cuotas quiere, o pedir banco/tipo de tarjeta: eso lo hace el paso siguiente, nunca vos acá. No uses el material de referencia (RAG) para responder preguntas sobre cuotas: ese tema lo resuelve el paso siguiente con datos reales.\n\nFLUJO\n1) Si falta el medio, preguntá una vez: \"El pago se hace al recibir el pedido en tu domicilio. ¿Preferís efectivo, transferencia o tarjeta?\"\n2) Al responder:\n   - efectivo → payment_method=cash\n   - transferencia → payment_method=transfer\n   - tarjeta/crédito/cuotas, EN CUALQUIER FORMA (\"tarjeta\", \"crédito\", \"en cuotas\", \"cuánto sale en cuotas\", \"cuánto queda en cuotas\", \"tienen cuotas?\", \"a cuántas cuotas\") → payment_method=card\n\n   CUALQUIER mención de \"cuotas\", \"tarjeta\" o \"crédito\" significa que el cliente eligió tarjeta, aunque venga en forma de pregunta sobre el precio o las cuotas. No le expliques cuotas fijas/variables ni le preguntes cuántas cuotas quiere ni banco: guardá payment_method=card de una, confirmá breve, y dejá que el paso siguiente pida esos datos con la tool real.\n3) Guardá payment_method_quote con la frase del cliente.\n4) Confirmá breve. Si es tarjeta, no pidas banco/cuotas acá.\n\npayment_method en hechos debe ser exactamente: cash, transfer o card.\n\nSi el cliente cambia de opinión en este mismo paso (ej. dijo efectivo y ahora tarjeta), guardá payment_method=card y confirmá breve. El siguiente paso pedirá banco/cuotas si es tarjeta.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -2185,7 +2248,8 @@
         ],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -2254,7 +2318,7 @@
           "payment_method_quote": "Frase de pago",
           "card_surcharge_percent": "Recargo % tarjeta"
         },
-        "ragEnabled": false,
+        "ragEnabled": true,
         "dataSources": [
           {
             "id": "112",
@@ -2390,7 +2454,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -2410,9 +2474,16 @@
             "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
-        "ragDataSources": {},
+        "ragDataSources": {
+          "trainingFileIds": [
+            "f020b739-8606-4793-8ad1-1ed603709f17",
+            "c790998e-91b3-4b11-9425-64ec801e4d91"
+          ],
+          "alwaysSendResourceFileIds": []
+        },
         "savedVariables": [],
         "nextStartNodeId": "",
+        "factDescriptions": {},
         "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
@@ -2601,7 +2672,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown.\n\nEl cliente aún no eligió medida/tipo. Pedí UNA vez con opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza → 1 plaza, dos plazas → 2 plazas.\n\nNo listes productos ni cotices. No inventes tipos que no estén en {{categorias}}.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase.\n\nEl cliente aún no eligió medida/tipo. Pedí UNA vez con opciones reales de:\n{{categorias}}\n\nEjemplo: \"¿Cuál te queda mejor? 1 plaza, 2 plazas, queen…\"\n\nCuando responda, guardá subcategory_name (canónico de {{categorias}}) y subcategory_id si está.\nSinónimos: una plaza → 1 plaza, dos plazas → 2 plazas.\n\nNo listes productos ni cotices. No inventes tipos que no estén en {{categorias}}.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -2613,11 +2684,13 @@
         ],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
         "savedVariables": [],
+        "nextStartNodeId": "",
         "factDescriptions": {},
         "continueCondition": "",
         "dataSourceConfigs": {},
@@ -2674,7 +2747,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nÚNICO TRABAJO: completar datos del comprador y su dirección real de entrega:\n- customer_first_name (nombre)\n- customer_last_name (apellido)\n- customer_dni (DNI)\n- customer_email (email)\n- customer_phone (teléfono)\n- direccion_completa / address (calle y número, ciudad, provincia y código postal)\n\nHasta ahora el envío se cotizó por zona aproximada. Cuando pidas la dirección, aclaralo en una frase (ej. \"para calcular el envío exacto, ¿me pasás tu dirección completa? calle y número, ciudad, provincia y código postal\").\n\nSi ya están todos en memoria/historial: confirmá en una frase corta y no los vuelvas a pedir.\nSi faltan: pedí solo lo pendiente.\n\nDIRECCIÓN\n- Aceptala aunque tenga typos o falte un detalle menor.\n- Guardá direccion_completa y address en el mismo formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si vino sin comas o con otro separador, normalizalo vos.\n- Confirmá en una frase corta repitiendo la dirección normalizada.\n\nPROHIBIDO\n- Decir que la orden/compra fue creada o confirmada.\n- Inventar fecha de entrega o número de orden.\n- Cotizar vos mismo el total o volver a pedir confirmación de compra (eso lo hace el paso siguiente con la dirección real).\n\nSi pide cambiar a tarjeta: decile que lo vemos en un momento y seguí completando datos faltantes.\n\nCAMBIO A TARJETA\nSi pide tarjeta/cuotas: confirmá breve (\"Dale, lo vemos con tarjeta.\") y no digas que la orden se creó. Seguí pidiendo datos solo si no pidió cambiar el pago.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nÚNICO TRABAJO: completar datos del comprador y su dirección real de entrega:\n- customer_first_name (nombre)\n- customer_last_name (apellido)\n- customer_dni (DNI)\n- customer_email (email)\n- customer_phone (teléfono)\n- direccion_completa / address (calle y número, ciudad, provincia y código postal)\n\nHasta ahora el envío se cotizó por zona aproximada. Cuando pidas la dirección, aclaralo en una frase (ej. \"para calcular el envío exacto, ¿me pasás tu dirección completa? calle y número, ciudad, provincia y código postal\").\n\nSi ya están todos en memoria/historial: confirmá en una frase corta y no los vuelvas a pedir.\nSi faltan: pedí solo lo pendiente.\n\nDIRECCIÓN\n- Aceptala aunque tenga typos o falte un detalle menor.\n- Guardá direccion_completa y address en el mismo formato, separado por comas: \"calle y altura, ciudad, provincia, código postal\" (ej: \"Rodolfo Martinez 6034, Córdoba, Córdoba, 5021\"). Si vino sin comas o con otro separador, normalizalo vos.\n- Confirmá en una frase corta repitiendo la dirección normalizada.\n\nPROHIBIDO\n- Decir que la orden/compra fue creada o confirmada.\n- Inventar fecha de entrega o número de orden.\n- Cotizar vos mismo el total o volver a pedir confirmación de compra (eso lo hace el paso siguiente con la dirección real).\n\nSi pide cambiar a tarjeta: decile que lo vemos en un momento y seguí completando datos faltantes.\n\nCAMBIO A TARJETA\nSi pide tarjeta/cuotas: confirmá breve (\"Dale, lo vemos con tarjeta.\") y no digas que la orden se creó. Seguí pidiendo datos solo si no pidió cambiar el pago.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -2686,11 +2759,13 @@
         ],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
         "savedVariables": [],
+        "nextStartNodeId": "",
         "factDescriptions": {},
         "continueCondition": "Avanzar si se cumple CUALQUIERA: (A) ya están nombre, apellido, DNI, email, teléfono Y una dirección de entrega usable (calle/altura y ciudad al menos) del comprador; (B) el cliente quiere pagar con tarjeta / crédito / cuotas o cambiar a tarjeta (aunque falten datos). No avances con saludos ni mensajes sin datos ni sin pedido de tarjeta.",
         "dataSourceConfigs": {},
@@ -2999,13 +3074,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nPRIMERO, EN SILENCIO: el total que tenés hasta ahora (quote_total/price_final/display_total) se calculó con una zona aproximada, no con la dirección exacta del cliente. Antes de mostrar nada, llamá \"Bausing - Cotizar Pedido (dirección real)\" UNA VEZ con cart_items, payment_method y la dirección real (direccion_completa/address) ya guardada, y actualizá quote_total, price_final, display_total y el envío con la respuesta. No le digas al cliente que estás recalculando, hacelo antes de tu mensaje.\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"): no muestres el resumen todavía. Pedile al cliente que corrija calle, altura, ciudad y CP, y recién cuando la corrija volvé a llamar la tool antes de mostrar el resumen.\nSi la tool devuelve requires_human_handoff en true, avisale al cliente que un asesor va a seguir con él y no muestres el resumen para crear la orden.\n\nLUEGO, mostrá el resumen completo ANTES de crear la orden:\n1) Producto(s) y cantidad: si cart_items tiene varios, listalos TODOS (nombre, cantidad, precio).\n2) Precio: usá price_final/display_total ya actualizados; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir recargo.\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nRecargo tarjeta: price_final = base * (1 + card_surcharge_percent/100). Mostrá ese total. Guardá price_final/display_total. Sin recargo si cash/transfer.\n\nCerrá con: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO: actualizá solo ese dato, recalculá precio si cambian cuotas (tool \"Bausing - Validar Cuotas Tarjeta\" si hace falta) o si cambia la dirección (volvé a llamar \"Bausing - Cotizar Pedido (dirección real)\"), y volvé a mostrar el resumen COMPLETO con todos los datos ya conocidos. Nunca digas \"no se especificó\" de un dato que ya estaba.\n\nSi cambia tarjeta/cuotas, usá la tool \"Bausing - Validar Cuotas Tarjeta\":\n- bank → card_types\n- bank+card_type → installments\n- bank+card_type+installments → card_surcharge_percent y card_validation_ok=true\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" No digas que ya se creó. No llames Crear Orden acá.\n\nCAMBIO A TARJETA\nSi pide tarjeta/crédito/cuotas: confirmá breve y no digas que creaste la orden. El flujo siguiente valida banco/cuotas y recotiza.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nPRIMERO, EN SILENCIO: el total que tenés hasta ahora (quote_total/price_final/display_total) se calculó con una zona aproximada, no con la dirección exacta del cliente. Antes de mostrar nada, llamá \"Bausing - Cotizar Pedido (dirección real)\" UNA VEZ con cart_items, payment_method y la dirección real (direccion_completa/address) ya guardada, y actualizá quote_total, price_final, display_total y el envío con la respuesta. No le digas al cliente que estás recalculando, hacelo antes de tu mensaje.\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"): no muestres el resumen todavía. Pedile al cliente que corrija calle, altura, ciudad y CP, y recién cuando la corrija volvé a llamar la tool antes de mostrar el resumen.\nSi la tool devuelve requires_human_handoff en true, avisale al cliente que un asesor va a seguir con él y no muestres el resumen para crear la orden.\n\nLUEGO, mostrá el resumen completo ANTES de crear la orden:\n1) Producto(s) y cantidad: si cart_items tiene varios, listalos TODOS (nombre, cantidad, precio).\n2) Precio: usá price_final/display_total ya actualizados; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir recargo.\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nRecargo tarjeta: price_final = base * (1 + card_surcharge_percent/100). Mostrá ese total. Guardá price_final/display_total. Sin recargo si cash/transfer.\n\nCerrá con: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO: actualizá solo ese dato, recalculá precio si cambian cuotas (tool \"Bausing - Validar Cuotas Tarjeta\" si hace falta) o si cambia la dirección (volvé a llamar \"Bausing - Cotizar Pedido (dirección real)\"), y volvé a mostrar el resumen COMPLETO con todos los datos ya conocidos. Nunca digas \"no se especificó\" de un dato que ya estaba.\n\nSi cambia tarjeta/cuotas, usá la tool \"Bausing - Validar Cuotas Tarjeta\":\n- bank → card_types\n- bank+card_type → installments\n- bank+card_type+installments → card_surcharge_percent y card_validation_ok=true\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" No digas que ya se creó. No llames Crear Orden acá.\n\nCAMBIO A TARJETA\nSi pide tarjeta/crédito/cuotas: confirmá breve y no digas que creaste la orden. El flujo siguiente valida banco/cuotas y recotiza.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -3347,7 +3423,7 @@
           "payment_method_quote": "Frase de pago",
           "card_surcharge_percent": "Recargo % tarjeta"
         },
-        "ragEnabled": false,
+        "ragEnabled": true,
         "dataSources": [
           {
             "id": "112",
@@ -3483,7 +3559,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
+        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [
@@ -3503,9 +3579,16 @@
             "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
-        "ragDataSources": {},
+        "ragDataSources": {
+          "trainingFileIds": [
+            "f020b739-8606-4793-8ad1-1ed603709f17",
+            "c790998e-91b3-4b11-9425-64ec801e4d91"
+          ],
+          "alwaysSendResourceFileIds": []
+        },
         "savedVariables": [],
         "nextStartNodeId": "",
+        "factDescriptions": {},
         "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
@@ -3939,13 +4022,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, zona (facts.locality_id) y carrito ya están; todavía no hay dirección real. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nDIRECCIÓN: en este paso todavía NO tenés la dirección real del cliente, solo la zona que eligió al principio (facts.locality_id / localityid). Usá ese dato para cotizar. No le pidas la dirección completa ni le digas que hubo un error de dirección acá — la dirección real se pide más adelante, en el paso de datos del cliente.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.\n{{workflow.rag.context}}",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, zona (facts.locality_id) y carrito ya están; todavía no hay dirección real. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nDIRECCIÓN: en este paso todavía NO tenés la dirección real del cliente, solo la zona que eligió al principio (facts.locality_id / localityid). Usá ese dato para cotizar. No le pidas la dirección completa ni le digas que hubo un error de dirección acá — la dirección real se pide más adelante, en el paso de datos del cliente.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -4288,7 +4372,7 @@
           "payment_method_quote": "Frase de pago",
           "card_surcharge_percent": "Recargo % tarjeta"
         },
-        "ragEnabled": false,
+        "ragEnabled": true,
         "dataSources": [
           {
             "id": "112",
@@ -4424,7 +4508,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
+        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n{{workflow.rag.context}}",
         "clearFactKeys": [
           "quote_total",
           "quote_confirmed",
@@ -4456,9 +4540,16 @@
             "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
-        "ragDataSources": {},
+        "ragDataSources": {
+          "trainingFileIds": [
+            "f020b739-8606-4793-8ad1-1ed603709f17",
+            "c790998e-91b3-4b11-9425-64ec801e4d91"
+          ],
+          "alwaysSendResourceFileIds": []
+        },
         "savedVariables": [],
         "nextStartNodeId": "",
+        "factDescriptions": {},
         "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
@@ -4892,13 +4983,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.\n{{workflow.rag.context}}",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -5241,7 +5333,7 @@
           "payment_method_quote": "Frase de pago",
           "card_surcharge_percent": "Recargo % tarjeta"
         },
-        "ragEnabled": false,
+        "ragEnabled": true,
         "dataSources": [
           {
             "id": "112",
@@ -5377,7 +5469,7 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n",
+        "systemPrompt": "CONTEXTO: el cliente cambió a tarjeta (o banco/cuotas). Productos, dirección y carrito ya están: no los vuelvas a pedir.\n\nHablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes cuotas ni recargos.\n\nContexto: paga con tarjeta al recibir. Forzá payment_method=card si hace falta.\n\nTOOL \"Bausing - Validar Cuotas Tarjeta\" (obligatoria para tarjetas/cuotas/recargo):\n- Solo bank → usá data.card_types aunque status=false.\n- bank + card_type → usá data.installments (cuotas y recargoPorcentaje). Nunca digas \"generalmente hasta 12\".\n- bank + card_type + installments → validá; guardá card_validation_ok=true y card_surcharge_percent=recargo_porcentaje.\n\nFLUJO\n1) Pedí banco si falta.\n2) Con banco, si falta tipo o pregunta cuántas cuotas: llamá la tool ya; mostrá opciones reales y pedí que elija.\n3) Cuando elija cuotas: llamá la tool con los tres datos y guardá bank, card_type, installments, card_surcharge_percent, payment_method_quote (ej. \"Visa Santander 12 cuotas\"), card_validation_ok=true.\n4) Confirmá breve banco + tarjeta + cuotas + % de recargo real. No cotices el total del producto acá.\n\nPROHIBIDO inventar % o cuotas sin tool. No digas que creaste la orden.\n{{workflow.rag.context}}",
         "clearFactKeys": [
           "quote_total",
           "quote_confirmed",
@@ -5409,9 +5501,16 @@
             "description": "Cantidad de cuotas elegida de las opciones mostradas."
           }
         ],
-        "ragDataSources": {},
+        "ragDataSources": {
+          "trainingFileIds": [
+            "f020b739-8606-4793-8ad1-1ed603709f17",
+            "c790998e-91b3-4b11-9425-64ec801e4d91"
+          ],
+          "alwaysSendResourceFileIds": []
+        },
         "savedVariables": [],
         "nextStartNodeId": "",
+        "factDescriptions": {},
         "continueCondition": "Avanzar solo si en el historial el asistente YA confirmó banco, tipo de tarjeta, cantidad de cuotas Y un porcentaje de recargo concreto. No avances si el cliente recién está eligiendo banco, tarjeta o cuotas y el asistente todavía no confirmó el recargo.",
         "dataSourceConfigs": {
           "112": {
@@ -5845,13 +5944,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.\n{{workflow.rag.context}}",
+        "systemPrompt": "CONTEXTO: recotizar con tarjeta. Productos, dirección y carrito ya están. payment_method=card. Usá card_surcharge_percent guardado.\n\nHablá como vendedor Bausing por WhatsApp: breve, cálido y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nSOLO COTIZAR. No crees órdenes ni digas que la orden se creó.\n\nSI LA TOOL FALLA POR DIRECCIÓN (\"No pudimos ubicar la dirección exacta...\"):\nNo reintentes con los mismos datos. Pedí corregir calle, altura, ciudad y CP; recién ahí volvé a cotizar.\n\nPASOS\n1) Llamá \"Bausing - Cotizar Pedido\" con items = UN string (no array) desde cart_items: product_id separados por coma, formato id:cantidad (ej. id1:2,id2:1). Incluí todos. Usá payment_method ya guardado (cash|transfer|card); no inventes cash.\n2) Guardá quote_total (total base de la tool).\n3) Si payment_method=card y hay card_surcharge_percent: price_final = quote_total * (1 + card_surcharge_percent/100). Mostrá SIEMPRE ese total y podés aclarar el % de recargo. Guardá price_final y display_total. Si es cash/transfer, no apliques recargo.\n4) Mostrá cada producto (nombre, cantidad, precio), envío, medio de pago (al recibir) y total final.\n5) Preguntá si quiere seguir para cerrar la compra.\n6) Si confirma: \"Dale, ahora te pido/confirmamos los datos.\" Nunca digas que la orden se creó.\n\nENVÍO: usá zone.shipping_summary.message (o shipping_cost / shipping_kind) de la tool. Nunca asumas envío gratis. shipping_kind: free | third_party | accessories | viacargo.\n\nSi pide otra vez cambiar tarjeta/banco/cuotas: confirmá breve; el flujo siguiente lo atiende. No fuerces “¿procedemos?” en efectivo.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -6275,13 +6375,14 @@
           },
           "additionalProperties": false
         },
-        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. No inventes.\n\nMostrá el resumen completo ANTES de crear la orden:\n1) Producto(s) y cantidad: si cart_items tiene varios, listalos TODOS (nombre, cantidad, precio).\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir recargo.\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nRecargo tarjeta: price_final = base * (1 + card_surcharge_percent/100). Mostrá ese total. Guardá price_final/display_total. Sin recargo si cash/transfer.\n\nCerrá con: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO: actualizá solo ese dato, recalculá precio si cambian cuotas (tool \"Bausing - Validar Cuotas Tarjeta\" si hace falta) y volvé a mostrar el resumen COMPLETO con todos los datos ya conocidos. Nunca digas \"no se especificó\" de un dato que ya estaba.\n\nSi cambia tarjeta/cuotas, usá la tool:\n- bank → card_types\n- bank+card_type → installments\n- bank+card_type+installments → card_surcharge_percent y card_validation_ok=true\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" No digas que ya se creó. No llames Crear Orden acá.\n\n\nEste resumen es post-recotización: usá los totales/recargo actualizados.\n\nCAMBIO A TARJETA\nSi pide tarjeta/crédito/cuotas: confirmá breve y no digas que creaste la orden. El flujo siguiente valida banco/cuotas y recotiza.\n{{workflow.rag.context}}",
+        "systemPrompt": "Hablá como vendedor Bausing por WhatsApp: breve y natural. Sin markdown. Podés (y conviene) usar algún emoji cálido en tus mensajes (☺️ 😊 🙌, entre otros que encajen con lo que estás diciendo) para sonar más humano y cercano — sin exagerar ni meter uno en cada frase. No inventes.\n\nMostrá el resumen completo ANTES de crear la orden:\n1) Producto(s) y cantidad: si cart_items tiene varios, listalos TODOS (nombre, cantidad, precio).\n2) Precio: usá price_final/display_total si existe; si payment_method=card y hay card_surcharge_percent, el total DEBE incluir recargo.\n3) Envío\n4) Dirección\n5) Medio de pago (si tarjeta: banco, tipo, cuotas y % de recargo)\n6) Cliente: nombre, apellido, DNI, email, teléfono\n\nRecargo tarjeta: price_final = base * (1 + card_surcharge_percent/100). Mostrá ese total. Guardá price_final/display_total. Sin recargo si cash/transfer.\n\nCerrá con: \"¿Confirmás estos datos para crear la orden, o querés cambiar algo?\"\n\nSI PIDE CAMBIAR ALGO: actualizá solo ese dato, recalculá precio si cambian cuotas (tool \"Bausing - Validar Cuotas Tarjeta\" si hace falta) y volvé a mostrar el resumen COMPLETO con todos los datos ya conocidos. Nunca digas \"no se especificó\" de un dato que ya estaba.\n\nSi cambia tarjeta/cuotas, usá la tool:\n- bank → card_types\n- bank+card_type → installments\n- bank+card_type+installments → card_surcharge_percent y card_validation_ok=true\n\nSOLO cuando confirme: \"Perfecto, creo la orden.\" No digas que ya se creó. No llames Crear Orden acá.\n\n\nEste resumen es post-recotización: usá los totales/recargo actualizados.\n\nCAMBIO A TARJETA\nSi pide tarjeta/crédito/cuotas: confirmá breve y no digas que creaste la orden. El flujo siguiente valida banco/cuotas y recotiza.\n{{workflow.rag.context}}",
         "clearFactKeys": [],
         "executionMode": "wait_for_user",
         "requiredSlots": [],
         "ragDataSources": {
           "trainingFileIds": [
-            "c790998e-91b3-4b11-9425-64ec801e4d91"
+            "c790998e-91b3-4b11-9425-64ec801e4d91",
+            "f020b739-8606-4793-8ad1-1ed603709f17"
           ],
           "alwaysSendResourceFileIds": []
         },
@@ -6539,7 +6640,7 @@
         "rules": [],
         "tools": [],
         "headers": [],
-        "message": "Para mostrarte lo que tenemos disponible en tu zona, contame dónde estás:\n1) Córdoba Capital\n2) Provincia de Córdoba\n3) La Pampa\n4) Mendoza\n5) Otras provincias (San Luis, San Juan, Santa Fe, La Rioja, Catamarca, Santiago del Estero, Tucumán)\n6) Resto del país",
+        "message": "¡Hola! 😊 Gracias por escribirnos a Bausing. Para mostrarte lo que tenemos disponible en tu zona, contame dónde estás 👇\n1) Córdoba Capital\n2) Provincia de Córdoba\n3) La Pampa\n4) Mendoza\n5) Otras provincias (San Luis, San Juan, Santa Fe, La Rioja, Catamarca, Santiago del Estero, Tucumán)\n6) Resto del país 🙌",
         "factKeys": [],
         "bodyFiles": [],
         "bodyParams": [],
@@ -6779,7 +6880,7 @@
         "rules": [],
         "tools": [],
         "headers": [],
-        "message": "No llegué a ubicar bien tu zona. Decime con cuál de estas coincide más:\n1) Córdoba Capital\n2) Provincia de Córdoba\n3) La Pampa\n4) Mendoza\n5) Otras provincias\n6) Resto del país",
+        "message": "¡Uy, no llegué a ubicar bien tu zona! 🙈 Decime con cuál de estas coincide más:\n1) Córdoba Capital\n2) Provincia de Córdoba\n3) La Pampa\n4) Mendoza\n5) Otras provincias\n6) Resto del país 🙏",
         "factKeys": [],
         "bodyFiles": [],
         "bodyParams": [],
