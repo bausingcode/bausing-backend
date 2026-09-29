@@ -30,6 +30,7 @@ def register_routes(app):
     from .delivery_zones import delivery_zones_bp
     from .referrals import referrals_bp
     from .faq_items import faq_items_bp
+    from .category_faq_items import category_faq_items_bp
     from .coupons import coupons_bp
     from .viacargo_shipping import viacargo_shipping_bp
     from .atendium import atendium_bp
@@ -68,6 +69,7 @@ def register_routes(app):
     app.register_blueprint(delivery_zones_bp, url_prefix='/admin/delivery-zones')
     app.register_blueprint(referrals_bp, url_prefix='/api')
     app.register_blueprint(faq_items_bp, url_prefix='')
+    app.register_blueprint(category_faq_items_bp, url_prefix='')
     app.register_blueprint(coupons_bp, url_prefix='')
     app.register_blueprint(viacargo_shipping_bp, url_prefix='')
     app.register_blueprint(atendium_bp, url_prefix='/atendium/v1')

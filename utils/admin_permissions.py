@@ -14,6 +14,8 @@ ROLE_ALLOWED_BLUEPRINTS = {
         'faq_items',     # Preguntas Frecuentes
         'homepage_distribution',  # Distribución Inicio
         'redirects',     # SEO: redirecciones 301/302
+        'canonicals',    # SEO: etiquetas canonical
+        'category_faq_items',  # Preguntas Frecuentes por categoría
         'admin_auth',    # /admin/auth/me — necesario para cualquier sesión admin
     },
 }
