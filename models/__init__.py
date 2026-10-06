@@ -33,6 +33,7 @@ from .coupon import Coupon
 from .coupon_category_discount import CouponCategoryDiscount
 from .category_pdp_cross_sell import CategoryPdpCrossSell
 from .whatsapp_click import WhatsappClick
+from .creator_program_content import CreatorProgramContent
 
 __all__ = [
     'Category',
@@ -88,5 +89,6 @@ __all__ = [
     'CouponCategoryDiscount',
     'CategoryPdpCrossSell',
     'WhatsappClick',
+    'CreatorProgramContent',
 ]
 

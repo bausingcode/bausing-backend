@@ -38,6 +38,7 @@ def register_routes(app):
     from .redirects import redirects_bp
     from .canonicals import canonicals_bp
     from .page_metadata import page_metadata_bp
+    from .creator_program import creator_program_bp
 
     app.register_blueprint(categories_bp, url_prefix='/categories')
     app.register_blueprint(products_bp, url_prefix='/products')
@@ -78,4 +79,5 @@ def register_routes(app):
     app.register_blueprint(redirects_bp, url_prefix='')
     app.register_blueprint(canonicals_bp, url_prefix='')
     app.register_blueprint(page_metadata_bp, url_prefix='')
+    app.register_blueprint(creator_program_bp, url_prefix='')
 

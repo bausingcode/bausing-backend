@@ -17,6 +17,7 @@ ROLE_ALLOWED_BLUEPRINTS = {
         'canonicals',    # SEO: etiquetas canonical
         'page_metadata', # SEO: metadatos de páginas de catálogo e institucionales
         'category_faq_items',  # Preguntas Frecuentes por categoría
+        'creator_program',  # Programa de Creadores (contenido de la página pública)
         'admin_auth',    # /admin/auth/me — necesario para cualquier sesión admin
     },
 }
