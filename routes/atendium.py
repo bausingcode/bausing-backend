@@ -10,7 +10,7 @@ import json
 import uuid
 from functools import wraps
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, redirect, request
 
 from sqlalchemy.orm import joinedload
 
@@ -18,6 +18,7 @@ from config import Config
 from database import db
 from models.category import Category
 from models.order import Order
+from models.product import Product
 from models.user import User
 from routes.orders import create_order_for_user, order_to_dict
 from services import atendium_commerce as commerce
@@ -27,6 +28,11 @@ from utils.crm_payment_methods import (
 )
 
 atendium_bp = Blueprint("atendium", __name__)
+
+# Misma URL pública que ya está hardcodeada en todas las tools del workflow de
+# Atendium (ver docs/Bausing – Ventas Final.json) — la usamos acá también para
+# no depender de cómo el proxy de DigitalOcean arme request.host_url.
+PUBLIC_API_BASE_URL = "https://bausing-api-qy2vc.ondigitalocean.app"
 
 
 def _ok(data=None, message="OK", http_status=200):
@@ -288,16 +294,53 @@ def categories_list():
         return _err(f"Error al obtener categorías: {e}", 500)
 
 
+def _short_image_code(product_id) -> str:
+    """8 caracteres hex del UUID del producto, sin guiones — suficiente para
+    identificarlo sin colisión real a esta escala de catálogo, y mucho más
+    corto (y menos propenso a que el bot lo tipee mal) que reproducir el link
+    completo de Supabase con su hash random."""
+    return str(product_id).replace("-", "")[:8]
+
+
 @atendium_bp.route("/catalog/<product_id>", methods=["GET"])
 @atendium_api_key_required
 def catalog_detail(product_id):
     try:
         detail = commerce.product_detail(product_id, request.args.get("locality_id"))
+        if detail.get("main_image"):
+            code = _short_image_code(detail["id"])
+            detail["main_image"] = f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{code}"
         return _ok(detail)
     except ValueError as e:
         return _err(str(e), 404)
     except Exception as e:
         return _err(f"Error al obtener producto: {e}", 500)
+
+
+@atendium_bp.route("/img/<code>", methods=["GET"])
+def product_image_redirect(code):
+    """Link corto y PÚBLICO (sin X-API-Key) para la foto de un producto — el
+    cliente o WhatsApp lo abren directo, sin poder mandar headers custom, así
+    que esta ruta no puede pedir API key como el resto de /atendium/v1."""
+    import re
+
+    if not re.fullmatch(r"[0-9a-fA-F]{6,8}", code or ""):
+        return _err("Código inválido", 400)
+
+    code_norm = code.lower()
+    products = Product.query.filter(Product.is_active.is_(True)).all()
+    match = next(
+        (p for p in products if str(p.id).replace("-", "").startswith(code_norm)),
+        None,
+    )
+    if not match:
+        return _err("No encontrado", 404)
+
+    main_image = match.get_main_image()
+    if not main_image:
+        return _err("Este producto no tiene foto cargada", 404)
+
+    return redirect(main_image, code=302)
 
 
 @atendium_bp.route("/validate-coupon", methods=["POST"])
