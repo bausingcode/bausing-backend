@@ -317,6 +317,29 @@ def catalog_detail(product_id):
         return _err(f"Error al obtener producto: {e}", 500)
 
 
+@atendium_bp.route("/catalog/detail", methods=["GET"])
+@atendium_api_key_required
+def catalog_detail_query():
+    """Igual que /catalog/<product_id> pero con product_id como query param
+    en vez de path param — la tool "Bausing - Detalle de Producto" del bot
+    necesita esto porque el motor de Atendium no resuelve un @AI(...) metido
+    dentro del path de la URL (mismo mecanismo que ya usan el resto de las
+    tools del workflow para sus valores dinámicos: query/body, nunca el path)."""
+    product_id = request.args.get("product_id")
+    if not product_id:
+        return _err("product_id es requerido", 400)
+    try:
+        detail = commerce.product_detail(product_id, request.args.get("locality_id"))
+        if detail.get("main_image"):
+            code = _short_image_code(detail["id"])
+            detail["main_image"] = f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{code}"
+        return _ok(detail)
+    except ValueError as e:
+        return _err(str(e), 404)
+    except Exception as e:
+        return _err(f"Error al obtener producto: {e}", 500)
+
+
 @atendium_bp.route("/img/<code>", methods=["GET"])
 def product_image_redirect(code):
     """Link corto y PÚBLICO (sin X-API-Key) para la foto de un producto — el
