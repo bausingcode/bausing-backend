@@ -1675,6 +1675,7 @@ def create_complete_product():
 
         # Campos técnicos / colchón (opcionales, mismo criterio que complete CRM)
         _optional_product_fields = (
+            'meta_title', 'meta_description',
             'technical_description', 'warranty_months', 'warranty_description', 'materials',
             'filling_type', 'max_supported_weight_kg', 'has_pillow_top', 'is_bed_in_box',
             'mattress_firmness', 'mattress_height_cm', 'mattress_fabric_type',
@@ -1868,6 +1869,10 @@ def update_product(product_id):
 
         if 'description' in data:
             product.description = data.get('description')
+        if 'meta_title' in data:
+            product.meta_title = data.get('meta_title')
+        if 'meta_description' in data:
+            product.meta_description = data.get('meta_description')
         if 'sku' in data:
             product.sku = data.get('sku')
         if 'category_id' in data:
@@ -1899,6 +1904,50 @@ def update_product(product_id):
             'success': False,
             'error': str(e)
         }), 500
+
+@products_bp.route('/meta-bulk', methods=['PUT'])
+@admin_required
+def bulk_update_product_meta():
+    """
+    Herramienta SEO: edición masiva de meta_title/meta_description de productos.
+    Body: {"items": [{"id": "<product_id>", "meta_title": "...", "meta_description": "..."}]}
+    Un item con ambos campos vacíos borra el override (vuelve al título/descripción
+    calculados automáticamente a partir de nombre/descripción del producto).
+    """
+    import uuid as uuid_lib
+    from flask import current_app
+    try:
+        data = request.get_json()
+        if not data or not isinstance(data.get("items"), list):
+            return jsonify({"success": False, "error": "Se requiere una lista de items"}), 400
+
+        updated = 0
+        not_found = []
+        for item in data["items"]:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            try:
+                product_id = uuid_lib.UUID(str(item["id"]))
+            except (ValueError, AttributeError):
+                not_found.append(item.get("id"))
+                continue
+            product = Product.query.get(product_id)
+            if not product:
+                not_found.append(str(product_id))
+                continue
+            meta_title = (item.get("meta_title") or "").strip()
+            meta_description = (item.get("meta_description") or "").strip()
+            product.meta_title = meta_title or None
+            product.meta_description = meta_description or None
+            updated += 1
+
+        db.session.commit()
+        return jsonify({"success": True, "data": {"updated": updated, "not_found": not_found}}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error("Error interno: %s", str(e), exc_info=True)
+        return jsonify({"success": False, "error": "Error interno del servidor"}), 500
+
 
 @products_bp.route('/<uuid:product_id>', methods=['DELETE'])
 @admin_required

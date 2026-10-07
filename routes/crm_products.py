@@ -468,6 +468,8 @@ def complete_crm_product(product_id):
             product = Product(
                 name=data.get('name', ''),
                 description=data.get('description'),
+                meta_title=data.get('meta_title'),
+                meta_description=data.get('meta_description'),
                 technical_description=data.get('technical_description'),
                 warranty_months=data.get('warranty_months'),
                 warranty_description=data.get('warranty_description'),

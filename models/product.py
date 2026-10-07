@@ -328,6 +328,10 @@ class Product(db.Model):
     # Slug legible para la URL pública (ej: colchon-queen-inducol); la URL por ID sigue funcionando siempre
     slug = db.Column(db.String(300), nullable=True)
     description = db.Column(db.Text)
+    # SEO: título/descripción para <title>/<meta description>, independientes de name/description.
+    # NULL = se usa name/description para calcularlos automáticamente.
+    meta_title = db.Column(db.Text, nullable=True)
+    meta_description = db.Column(db.Text, nullable=True)
     technical_description = db.Column(db.Text)
     warranty_months = db.Column(db.Integer)
     warranty_description = db.Column(db.Text)
@@ -532,6 +536,8 @@ class Product(db.Model):
             'slug': self.slug,
             'name': self.name,
             'description': self.description,
+            'meta_title': self.meta_title,
+            'meta_description': self.meta_description,
             'technical_description': self.technical_description,
             'warranty_months': self.warranty_months,
             'warranty_description': self.warranty_description,
