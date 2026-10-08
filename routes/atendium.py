@@ -9,8 +9,11 @@ from __future__ import annotations
 import json
 import uuid
 from functools import wraps
+from io import BytesIO
 
-from flask import Blueprint, jsonify, redirect, request
+import requests
+from flask import Blueprint, Response, jsonify, request
+from PIL import Image
 
 from sqlalchemy.orm import joinedload
 
@@ -344,7 +347,11 @@ def catalog_detail_query():
 def product_image_redirect(code):
     """Link corto y PÚBLICO (sin X-API-Key) para la foto de un producto — el
     cliente o WhatsApp lo abren directo, sin poder mandar headers custom, así
-    que esta ruta no puede pedir API key como el resto de /atendium/v1."""
+    que esta ruta no puede pedir API key como el resto de /atendium/v1.
+
+    Sirve la imagen convertida a PNG (no redirige al .webp original): WhatsApp
+    no genera preview de imagen para links que apuntan a un .webp, así que un
+    redirect ahí no "carga" del lado del cliente."""
     import re
 
     if not re.fullmatch(r"[0-9a-fA-F]{6,8}", code or ""):
@@ -363,7 +370,23 @@ def product_image_redirect(code):
     if not main_image:
         return _err("Este producto no tiene foto cargada", 404)
 
-    return redirect(main_image, code=302)
+    try:
+        source = requests.get(main_image, timeout=10)
+        source.raise_for_status()
+        img = Image.open(BytesIO(source.content))
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+    except Exception as e:
+        return _err(f"No se pudo convertir la imagen: {e}", 502)
+
+    return Response(
+        buffer.getvalue(),
+        mimetype="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @atendium_bp.route("/validate-coupon", methods=["POST"])
