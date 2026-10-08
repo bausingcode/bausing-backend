@@ -1033,6 +1033,7 @@ def get_product(product_id):
     - locality_id: filtrar precios por localidad
     - include_all_variant_prices: si true, en cada opción se devuelven todas las filas de precio (todos los catálogos);
       si false (default), sin locality_id se filtra al catálogo Córdoba capital para la vitrina.
+    - include_bot_image: si true, incluye bot_image_url/bot_image_is_custom (uso interno/admin; no pedir desde la vitrina).
     """
     # Limpiar cualquier transacción abortada antes de comenzar
     try:
@@ -1047,6 +1048,8 @@ def get_product(product_id):
         locality_id = request.args.get('locality_id')
         # Incluir todas las filas de precio por catálogo/localidad (admin/edición; evita filtrar solo a Córdoba capital)
         include_all_variant_prices = request.args.get('include_all_variant_prices', 'false').lower() == 'true'
+        # Imagen "para bot" (uso interno): solo se pide desde el admin, nunca desde la vitrina pública
+        include_bot_image = request.args.get('include_bot_image', 'false').lower() == 'true'
 
         import uuid as uuid_lib
         from models.catalog import LocalityCatalog
@@ -1389,6 +1392,7 @@ def get_product(product_id):
             precalculated_max_price=precalc_max_price,
             include_inventory=False,
             include_all_variant_prices=include_all_variant_prices,
+            include_bot_image=include_bot_image,
         )
         if include_all_variant_prices and product_dict.get("variants"):
             price_rows = 0

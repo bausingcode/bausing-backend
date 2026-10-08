@@ -378,6 +378,11 @@ class Product(db.Model):
     wm_wash_capacity_kg = db.Column(db.Numeric(10, 2), nullable=True)
     fridge_capacity_liters = db.Column(db.Numeric(10, 2), nullable=True)
     freezer_capacity_liters = db.Column(db.Numeric(10, 2), nullable=True)
+    # Imagen "para bot" (uso interno, nunca se expone en la vitrina): por defecto la primera
+    # imagen del producto; si se carga una propia (bot_image_is_custom=True) queda fija en su
+    # formato original, sin recomprimir.
+    bot_image_url = db.Column(db.Text, nullable=True)
+    bot_image_is_custom = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -509,7 +514,17 @@ class Product(db.Model):
                 if img and img.image_url and img.image_url.strip():
                     return img.image_url
         return None
-    
+
+    def get_bot_image_url(self):
+        """
+        Imagen "para bot" (uso interno, nunca se muestra en la vitrina): si se cargó una imagen
+        propia (bot_image_is_custom) se devuelve esa; si no, por defecto la primera imagen del
+        producto (misma que get_main_image).
+        """
+        if self.bot_image_is_custom and self.bot_image_url:
+            return self.bot_image_url
+        return self.get_main_image()
+
     def manual_color_labels_list(self):
         """Lista etiquetas de color cargadas manualmente en admin ([] si no hay o JSON inválido)."""
         if not self.manual_color_labels:
@@ -530,7 +545,7 @@ class Product(db.Model):
         except (json.JSONDecodeError, TypeError):
             return []
     
-    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None, precalculated_promos=None):
+    def to_dict(self, include_variants=False, include_images=False, locality_id=None, include_promos=False, locality_to_catalog_map=None, precalculated_min_price=None, precalculated_max_price=None, include_inventory=True, include_all_variant_prices=False, precalculated_main_image=None, precalculated_promos=None, include_bot_image=False):
         data = {
             'id': str(self.id),
             'slug': self.slug,
@@ -628,7 +643,13 @@ class Product(db.Model):
 
         if main_image:
             data['main_image'] = main_image
-        
+
+        # Imagen "para bot": solo se expone cuando se pide explícitamente (admin), nunca en
+        # las respuestas de vitrina/catálogo.
+        if include_bot_image:
+            data['bot_image_url'] = self.get_bot_image_url()
+            data['bot_image_is_custom'] = bool(self.bot_image_is_custom)
+
         # Variantes
         if include_variants:
             data['variants'] = [

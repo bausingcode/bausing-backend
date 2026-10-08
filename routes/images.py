@@ -161,6 +161,146 @@ def update_product_image(image_id):
             'error': str(e)
         }), 500
 
+def _try_delete_supabase_product_file(image_url):
+    """Elimina un objeto del bucket product-images a partir de la URL pública (best-effort)."""
+    if not image_url:
+        return
+    try:
+        import os
+        import re
+        import ssl
+        from urllib.request import Request, urlopen
+        from urllib.error import HTTPError
+
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        bucket = 'product-images'
+        if not supabase_url or not supabase_key:
+            return
+        match = re.search(r'/product-images/(.+)$', image_url)
+        if not match:
+            return
+        file_path = match.group(1)
+        delete_url = f"{supabase_url}/storage/v1/object/{bucket}/{file_path}"
+        req = Request(
+            delete_url,
+            method='DELETE',
+            headers={
+                "Authorization": f"Bearer {supabase_key}",
+                "apikey": supabase_key
+            }
+        )
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        try:
+            with urlopen(req, context=ssl_context) as response:
+                if response.status not in [200, 204]:
+                    pass
+        except HTTPError as e:
+            if e.code not in [200, 204]:
+                pass
+    except Exception:
+        pass
+
+
+# ==================== PRODUCT BOT IMAGE ====================
+# Imagen "para bot" (uso interno): se guarda en su formato original (sin recompresión) y nunca
+# se expone en la vitrina. Por defecto es la primera imagen del producto (calculado al leer);
+# si se carga una propia queda fija hasta que se quite.
+
+@images_bp.route('/products/<uuid:product_id>/bot-image', methods=['POST'])
+@admin_required
+def set_product_bot_image(product_id):
+    """
+    Fija una imagen personalizada "para bot" (reemplaza el default de la primera imagen).
+
+    Body esperado:
+    {
+        "image_url": "https://..."
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data or not data.get('image_url'):
+            return jsonify({
+                'success': False,
+                'error': 'image_url es requerido'
+            }), 400
+
+        from models.product import Product
+        product = Product.query.get(product_id)
+        if not product:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no encontrado'
+            }), 404
+
+        previous_custom_url = product.bot_image_url if product.bot_image_is_custom else None
+        new_url = data['image_url']
+        if previous_custom_url and previous_custom_url != new_url:
+            _try_delete_supabase_product_file(previous_custom_url)
+
+        product.bot_image_url = new_url
+        product.bot_image_is_custom = True
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'bot_image_url': product.bot_image_url,
+                'bot_image_is_custom': product.bot_image_is_custom,
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@images_bp.route('/products/<uuid:product_id>/bot-image', methods=['DELETE'])
+@admin_required
+def clear_product_bot_image(product_id):
+    """
+    Quita la imagen personalizada "para bot": vuelve a usar la primera imagen del producto
+    (calculada automáticamente) como default.
+    """
+    try:
+        from models.product import Product
+        product = Product.query.get(product_id)
+        if not product:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no encontrado'
+            }), 404
+
+        if product.bot_image_is_custom:
+            _try_delete_supabase_product_file(product.bot_image_url)
+
+        product.bot_image_url = None
+        product.bot_image_is_custom = False
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'bot_image_url': product.get_bot_image_url(),
+                'bot_image_is_custom': False,
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @images_bp.route('/products/images/<uuid:image_id>', methods=['DELETE'])
 @admin_required
 def delete_product_image(image_id):
