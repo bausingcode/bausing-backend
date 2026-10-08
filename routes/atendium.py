@@ -359,7 +359,7 @@ def product_image_redirect(code):
     if not match:
         return _err("No encontrado", 404)
 
-    main_image = match.get_main_image()
+    main_image = match.get_bot_image_url()
     if not main_image:
         return _err("Este producto no tiene foto cargada", 404)
 

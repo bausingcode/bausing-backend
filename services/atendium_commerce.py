@@ -1008,12 +1008,16 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
     # trae main_image (foto), reservada para cuando el cliente la pide explícitamente
     # sobre un producto puntual; el precio real sale siempre de build_full_quote
     # (Cotizar Pedido) con la zona resuelta.
+    # Usamos get_bot_image_url() (no get_main_image()) a propósito: es la imagen
+    # "para bot" cargada en el admin, sin compresión ni conversión a WebP, pensada
+    # específicamente para este consumo; si no se cargó una propia, cae sola a la
+    # primera imagen del producto (mismo default que get_main_image()).
     return {
         "id": str(product.id),
         "name": product.name,
         "description": product.description,
         "category_id": str(product.category_id) if product.category_id else None,
-        "main_image": product.get_main_image(),
+        "main_image": product.get_bot_image_url(),
         "estimated_delivery": estimated_delivery_payload(catalog),
         "locality_id": loc,
     }
