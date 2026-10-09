@@ -255,6 +255,18 @@ def catalog_search():
         return _err(f"Error al buscar catálogo: {e}", 500)
 
 
+@atendium_bp.route("/promos", methods=["GET"])
+@atendium_api_key_required
+def atendium_promos():
+    try:
+        result = commerce.active_promo_products(request.args.get("locality_id"))
+        return _ok(result)
+    except ValueError as e:
+        return _err(str(e), 400)
+    except Exception as e:
+        return _err(f"Error al buscar ofertas: {e}", 500)
+
+
 @atendium_bp.route("/categories", methods=["GET"])
 @atendium_api_key_required
 def categories_list():

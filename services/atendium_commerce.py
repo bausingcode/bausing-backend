@@ -1023,6 +1023,102 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
     }
 
 
+def active_promo_products(locality_id: Optional[str]) -> Dict[str, Any]:
+    """Productos con oferta activa y vigente, con el precio final YA
+    calculado acá (no le pedimos al bot que haga la cuenta del descuento,
+    es plata real). Solo contempla promos tipo fixed/percentage, que son
+    las que tienen un descuento numérico claro — 2x1/bundle/wallet_multiplier
+    y promotional_message (solo un badge, sin descuento real) no entran."""
+    from datetime import datetime
+
+    from models.promo import Promo
+    from routes.homepage_distribution import _build_homepage_prices_map
+    from routes.products import _descendant_category_ids_including_root
+
+    now = datetime.utcnow()
+    valid_promos = Promo.query.filter(
+        Promo.is_active.is_(True),
+        Promo.start_at <= now,
+        Promo.end_at >= now,
+        Promo.type.in_(["fixed", "percentage"]),
+    ).all()
+    if not valid_promos:
+        return {"offers": []}
+
+    promo_ids = {str(p.id) for p in valid_promos}
+    product_ids = set()
+    for promo in valid_promos:
+        for app in promo.applicability:
+            if app.applies_to == "product" and app.product_id:
+                product_ids.add(app.product_id)
+            elif app.applies_to == "category" and app.category_id:
+                cat_ids = _descendant_category_ids_including_root(app.category_id)
+                for p in Product.query.filter(
+                    Product.category_id.in_(cat_ids), Product.is_active.is_(True)
+                ).all():
+                    product_ids.add(p.id)
+            elif app.applies_to == "all":
+                for p in Product.query.filter(Product.is_active.is_(True)).all():
+                    product_ids.add(p.id)
+
+    if not product_ids:
+        return {"offers": []}
+
+    products_by_id = {
+        p.id: p
+        for p in Product.query.filter(
+            Product.id.in_(product_ids), Product.is_active.is_(True)
+        ).all()
+    }
+    loc = _normalize_locality_id(locality_id)
+    prices_map = _build_homepage_prices_map([str(pid) for pid in products_by_id], loc)
+
+    offers = []
+    for pid, product in products_by_id.items():
+        info = prices_map.get(str(pid)) or {}
+        promos_here = [
+            pd for pd in (info.get("promos") or []) if pd.get("id") in promo_ids
+        ]
+        if not promos_here:
+            continue
+        base_price = _positive_price(info.get("min_price"))
+        if not base_price:
+            continue
+        best = None
+        for pd in promos_here:
+            ptype = pd.get("type")
+            try:
+                value = float(pd.get("value") or 0)
+            except (TypeError, ValueError):
+                continue
+            if ptype == "fixed":
+                final_price = max(0.0, base_price - value)
+            elif ptype == "percentage":
+                final_price = max(0.0, base_price * (1 - value / 100))
+            else:
+                continue
+            if best is None or final_price < best["final_price"]:
+                best = {
+                    "final_price": round(final_price, 2),
+                    "promo_title": pd.get("title"),
+                }
+        if not best:
+            continue
+        offers.append(
+            {
+                "product_id": str(pid),
+                "name": product.name,
+                "base_price": base_price,
+                "final_price": best["final_price"],
+                "savings": round(base_price - best["final_price"], 2),
+                "promo_title": best["promo_title"],
+            }
+        )
+
+    offers.sort(key=lambda o: o["savings"], reverse=True)
+    return {"offers": offers, "locality_id": loc}
+
+
 MAX_QUOTE_ITEMS = 5
 
 
