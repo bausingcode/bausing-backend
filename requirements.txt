@@ -4,6 +4,10 @@ Werkzeug==3.0.1
 Flask-SQLAlchemy==3.1.1
 Flask-Migrate==4.0.5
 psycopg2
+# psycopg (v3): algunos entornos de producción arman DATABASE_URL con el prefijo
+# postgresql+psycopg:// (recomendado por Supabase para el pooler/pgbouncer) en vez
+# de postgresql:// (psycopg2). Lo dejamos instalado para cubrir ambos casos.
+psycopg[binary]
 SQLAlchemy>=2.0.36
 PyJWT>=2.10,<3
 supabase==2.23.0
