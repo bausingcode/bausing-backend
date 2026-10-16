@@ -221,7 +221,7 @@ def api_key_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         api_key = None
-        
+
         if 'X-API-Key' in request.headers:
             api_key = request.headers['X-API-Key']
         elif 'Authorization' in request.headers:
@@ -230,7 +230,11 @@ def api_key_required(f):
                 api_key = auth_header.split(' ')[1]
             else:
                 api_key = auth_header
-        
+        elif 'api_key' in request.args:
+            # Fallback para servicios de cron externos (cron-job.org, etc.) que
+            # solo pueden pegarle a una URL por GET sin poder setear headers custom.
+            api_key = request.args.get('api_key')
+
         if not api_key:
             return authentication_error("Token inválido o no proporcionado")
         
@@ -3760,7 +3764,7 @@ def send_review_reminders():
         }), 500
 
 
-@public_api_bp.route('/public/reviews/send-30-day-emails', methods=['POST'])
+@public_api_bp.route('/public/reviews/send-30-day-emails', methods=['GET', 'POST'])
 @api_key_required
 def send_30_day_emails():
     """
@@ -3842,7 +3846,7 @@ def send_30_day_emails():
         }), 500
 
 
-@public_api_bp.route('/public/reviews/send-60-day-emails', methods=['POST'])
+@public_api_bp.route('/public/reviews/send-60-day-emails', methods=['GET', 'POST'])
 @api_key_required
 def send_60_day_emails():
     """
