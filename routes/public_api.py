@@ -3653,7 +3653,7 @@ def process_sale_retries():
         return server_error()
 
 
-@public_api_bp.route('/public/reviews/send-reminders', methods=['POST'])
+@public_api_bp.route('/public/reviews/send-reminders', methods=['GET', 'POST'])
 @api_key_required
 def send_review_reminders():
     """
@@ -3666,6 +3666,8 @@ def send_review_reminders():
         from models.user import User
         from models.order import Order
         from models.settings import SystemSettings
+        from models.wallet import WalletMovement
+        from routes.wallet import get_or_create_wallet, calculate_wallet_balance, calculate_expiration_date
         from sqlalchemy import text
         from datetime import datetime, timedelta
 
@@ -3716,11 +3718,44 @@ def send_review_reminders():
 
         emails_sent = 0
         emails_failed = 0
+        credits_applied = 0
         frontend_url = Config.FRONTEND_URL
 
         for user_id, (order, receipt_number) in users_to_notify.items():
             user = User.query.get(user_id)
             if not user or not user.email:
+                continue
+
+            # Evitar acreditar/mandar el regalo dos veces por la misma orden
+            # (el cron puede correr varias veces y la orden sigue calificando).
+            already_credited = WalletMovement.query.filter_by(
+                order_id=order.id,
+                type='accreditation'
+            ).first()
+            if already_credited:
+                continue
+
+            try:
+                wallet = get_or_create_wallet(user_id)
+                movement = WalletMovement(
+                    wallet_id=wallet.id,
+                    type='accreditation',
+                    amount=fixed_amount,
+                    description=f'Regalo por compra - Orden {receipt_number}',
+                    order_id=order.id,
+                    expires_at=calculate_expiration_date()
+                )
+                db.session.add(movement)
+                db.session.flush()
+
+                wallet.balance = calculate_wallet_balance(wallet.id, include_expired=False)
+                wallet.updated_at = datetime.utcnow()
+
+                db.session.commit()
+                credits_applied += 1
+            except Exception:
+                db.session.rollback()
+                # Si no se pudo acreditar, no mandamos el mail prometiendo un regalo que no existe.
                 continue
 
             first_name = user.first_name or 'Cliente'
@@ -3752,7 +3787,8 @@ def send_review_reminders():
 
         return jsonify({
             'success': True,
-            'message': f'Proceso completado. {emails_sent} emails enviados, {emails_failed} fallidos',
+            'message': f'Proceso completado. {credits_applied} créditos acreditados, {emails_sent} emails enviados, {emails_failed} fallidos',
+            'credits_applied': credits_applied,
             'emails_sent': emails_sent,
             'emails_failed': emails_failed
         }), 200
