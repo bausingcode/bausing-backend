@@ -165,6 +165,38 @@ def _normalize_payment_method(value):
     return PAYMENT_METHOD_ALIASES.get(v, v or None)
 
 
+def _parse_payment_method_token(token):
+    """Igual que _parse_item_token pero para payment_methods: cada método del
+    split viaja como string suelto "metodo:monto" (mismo motivo que items: el
+    motor de Atendium no serializa bien un array de objetos anidados)."""
+    if isinstance(token, dict):
+        method = _normalize_payment_method(token.get("method"))
+        amount = token.get("amount")
+        return {"method": method, "amount": amount} if method else None
+    text = str(token if token is not None else "").strip()
+    if not text or ":" not in text:
+        return None
+    raw_method, _, raw_amount = text.rpartition(":")
+    method = _normalize_payment_method(raw_method)
+    if not method:
+        return None
+    return {"method": method, "amount": raw_amount.strip()}
+
+
+def _payment_methods_from_body(body):
+    """payment_methods para combinar medios de pago: lista de strings
+    "metodo:monto" (ej. "transfer:50000"), o el formato objeto si la tool ya
+    lo manda así. None si no vino (pago con un solo método, caso normal)."""
+    raw = _coerce_list(body.get("payment_methods"))
+    if isinstance(raw, str):
+        raw = [tok for tok in raw.split(",") if tok.strip()]
+    if not isinstance(raw, list) or not raw:
+        return None
+    parsed = [_parse_payment_method_token(tok) for tok in raw]
+    parsed = [p for p in parsed if p]
+    return parsed or None
+
+
 def _coerce_list(value):
     """El bot a veces manda arrays (items) serializados como string en vez de array
     real (JSON válido o incluso estilo Python con comillas simples). Si es un string
@@ -494,6 +526,8 @@ def quote():
     address = _address_from_body(body, default=body)
     items = _items_from_body(body)
     payment_method = _normalize_payment_method(body.get("payment_method"))
+    payment_methods = _payment_methods_from_body(body)
+    card_surcharge_percent = body.get("card_surcharge_percent")
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 
@@ -515,6 +549,8 @@ def quote():
             coupon_code=coupon_code,
             referral_code=referral_code,
             user_id=user_id,
+            payment_methods=payment_methods,
+            card_surcharge_percent=card_surcharge_percent,
         )
         msg = (
             "Cotización lista — requiere asesor"
@@ -702,6 +738,8 @@ def create_order():
     items = _items_from_body(body) or []
     payment_method = _normalize_payment_method(body.get("payment_method"))
     payment_method_quote = (body.get("payment_method_quote") or "").strip()
+    payment_methods_split = _payment_methods_from_body(body)
+    card_surcharge_percent = body.get("card_surcharge_percent")
     coupon_code = body.get("coupon_code")
     referral_code = body.get("referral_code")
 
@@ -731,11 +769,18 @@ def create_order():
             payment_method=payment_method,
             coupon_code=coupon_code,
             referral_code=referral_code,
+            payment_methods=payment_methods_split,
+            card_surcharge_percent=card_surcharge_percent,
         )
     except ValueError as e:
         return _err(str(e), 200)
     except Exception as e:
         return _err(f"Error al validar cotización: {e}", 200)
+
+    # Si hubo split, quote_data["payment_method"] queda como "transfer,card" —
+    # lo usamos de acá en más (ya validado/normalizado por build_full_quote).
+    payment_method = quote_data["payment_method"]
+    payment_methods_list = payment_method.split(",")
 
     if quote_data.get("requires_human_handoff"):
         return _err(
@@ -793,14 +838,15 @@ def create_order():
 
     # TEMPORAL: en Atendium mandamos el medios_pago_id de efectivo también para
     # tarjeta (en vez de CRM_MEDIOS_PAGO_TARJETA). Sacar este override cuando esté
-    # resuelto del lado del CRM para pedidos que vienen del bot.
-    if payment_method == "card":
-        medios_pago_id = CRM_MEDIOS_PAGO_EFECTIVO
-    else:
-        medios_pago_id = crm_medios_pago_id_for_checkout_method(payment_method)
+    # resuelto del lado del CRM para pedidos que vienen del bot. Se aplica por
+    # entrada del split, no solo cuando el pago es 100% tarjeta.
+    def _medios_pago_id_for(method):
+        return CRM_MEDIOS_PAGO_EFECTIVO if method == "card" else crm_medios_pago_id_for_checkout_method(method)
+
+    medios_pago_id = _medios_pago_id_for(payment_method if "," not in payment_method else payment_methods_list[0])
     observations = (body.get("observations") or "").strip()
 
-    if payment_method == "card":
+    if "card" in payment_methods_list:
         card_type = (body.get("card_type") or "").strip()
         bank = (body.get("bank") or "").strip()
         installments = body.get("installments")
@@ -815,6 +861,27 @@ def create_order():
 
     origin_note = "Origen: Atendium bot"
     observations = f"{observations}\n{origin_note}".strip() if observations else origin_note
+
+    payment_breakdown = quote_data.get("payment_breakdown")
+    if payment_breakdown:
+        payment_methods_entries = [
+            {
+                "method": entry["method"],
+                "amount": entry["final_amount"],
+                "processed": False,
+                "medios_pago_id": _medios_pago_id_for(entry["method"]),
+            }
+            for entry in payment_breakdown
+        ]
+    else:
+        payment_methods_entries = [
+            {
+                "method": payment_method,
+                "amount": server_total,
+                "processed": False,
+                "medios_pago_id": medios_pago_id,
+            }
+        ]
 
     order_payload = {
         "customer": {
@@ -842,14 +909,7 @@ def create_order():
         "crm_sale_type_id": body.get("crm_sale_type_id") or 1,
         "crm_zone_id": body.get("crm_zone_id") or zone.get("crm_zone_id"),
         "total": server_total,
-        "payment_methods": [
-            {
-                "method": payment_method,
-                "amount": server_total,
-                "processed": False,
-                "medios_pago_id": medios_pago_id,
-            }
-        ],
+        "payment_methods": payment_methods_entries,
         "items": priced_items,
         "observations": observations,
         "coupon_code": (quote_data.get("coupon") or {}).get("code") or coupon_code,

@@ -1122,6 +1122,42 @@ def active_promo_products(locality_id: Optional[str]) -> Dict[str, Any]:
 MAX_QUOTE_ITEMS = 5
 
 
+VALID_PAYMENT_METHODS = ("cash", "transfer", "card")
+
+
+def _normalize_payment_split(payment_methods: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Valida y normaliza el array payment_methods: [{method, amount}, ...] que
+    manda el bot cuando el cliente quiere combinar métodos de pago. No hace la
+    cuenta del recargo acá — solo valida forma y suma; el ajuste de precio por
+    tarjeta se hace en build_full_quote, que sí conoce el total de referencia."""
+    if not isinstance(payment_methods, list) or len(payment_methods) < 2:
+        raise ValueError(
+            "payment_methods debe tener al menos 2 métodos para combinar pago"
+        )
+    seen = set()
+    normalized = []
+    for entry in payment_methods:
+        if not isinstance(entry, dict):
+            raise ValueError("cada entrada de payment_methods debe ser un objeto")
+        method = str(entry.get("method") or "").strip().lower()
+        if method not in VALID_PAYMENT_METHODS:
+            raise ValueError(
+                f"método inválido en payment_methods: {entry.get('method')!r} "
+                "(debe ser cash, transfer o card)"
+            )
+        if method in seen:
+            raise ValueError(f"payment_methods tiene el método '{method}' repetido")
+        seen.add(method)
+        try:
+            amount = round(float(entry.get("amount")), 2)
+        except (TypeError, ValueError):
+            raise ValueError(f"amount inválido para el método '{method}'")
+        if amount <= 0:
+            raise ValueError(f"amount debe ser mayor a 0 para el método '{method}'")
+        normalized.append({"method": method, "amount": amount})
+    return normalized
+
+
 def build_full_quote(
     address: Dict[str, Any],
     items: List[Dict[str, Any]],
@@ -1129,6 +1165,8 @@ def build_full_quote(
     coupon_code: Optional[str] = None,
     referral_code: Optional[str] = None,
     user_id=None,
+    payment_methods: Optional[List[Dict[str, Any]]] = None,
+    card_surcharge_percent: Optional[float] = None,
 ) -> Dict[str, Any]:
     if not items:
         raise ValueError("items es requerido")
@@ -1138,15 +1176,23 @@ def build_full_quote(
             f"confirmá con el cliente cuál o cuáles productos puntuales quiere (máximo {MAX_QUOTE_ITEMS} "
             "por pedido) antes de volver a cotizar"
         )
-    if not payment_method:
+
+    split = _normalize_payment_split(payment_methods) if payment_methods else None
+    if not split and not payment_method:
         raise ValueError("payment_method es requerido: cash, transfer o card")
-    method = str(payment_method).lower()
-    if method not in ("cash", "transfer", "card"):
+    method = str(payment_method or "transfer").lower()
+    if not split and method not in VALID_PAYMENT_METHODS:
         raise ValueError("payment_method debe ser cash, transfer o card")
 
     zone = resolve_zone_from_address(address)
+
+    # Precio de referencia: SIEMPRE a tarifa transferencia/efectivo (son iguales).
+    # Si hay split con tarjeta, cotizamos el carrito una segunda vez a tarifa
+    # tarjeta para saber el markup real de catálogo (no es solo un % de recargo,
+    # son filas de precio distintas) y lo prorrateamos según qué fracción del
+    # total el cliente decide pagar con tarjeta.
     priced_lines, subtotal = price_lines_for_items(
-        items, zone["locality"]["id"], method
+        items, zone["locality"]["id"], "card" if (not split and method == "card") else "transfer"
     )
     if not priced_lines:
         raise ValueError("No hay ítems válidos para cotizar")
@@ -1165,9 +1211,57 @@ def build_full_quote(
     # quedado desactualizado respecto al shipping_kind/shipping_cost reales de acá.
     zone["shipping_summary"] = _shipping_summary_for_kind(shipping_kind, shipping_cost)
     subtotal_after = max(0.0, round(subtotal - coupon_discount, 2))
-    total = round(subtotal_after + shipping_cost, 2)
+    base_total = round(subtotal_after + shipping_cost, 2)
 
-    handoff = evaluate_handoff(zone, method)
+    payment_breakdown = None
+    total = base_total
+    methods_for_handoff = [method]
+
+    if split:
+        methods_for_handoff = [e["method"] for e in split]
+        declared_sum = round(sum(e["amount"] for e in split), 2)
+        if abs(declared_sum - base_total) > 1.0:
+            raise ValueError(
+                f"La suma de payment_methods ({declared_sum}) no coincide con el "
+                f"total a cotizar ({base_total}). Pedile al cliente que ajuste los montos."
+            )
+
+        card_markup = 0.0
+        if any(e["method"] == "card" for e in split):
+            _card_lines, card_subtotal = price_lines_for_items(
+                items, zone["locality"]["id"], "card"
+            )
+            card_markup = round(card_subtotal - subtotal, 2)
+
+        payment_breakdown = []
+        total = 0.0
+        for entry in split:
+            declared_amount = entry["amount"]
+            final_amount = declared_amount
+            if entry["method"] == "card":
+                card_fraction = declared_amount / base_total if base_total else 0.0
+                final_amount = declared_amount + card_fraction * card_markup
+                if card_surcharge_percent:
+                    final_amount *= 1 + float(card_surcharge_percent) / 100
+            final_amount = round(final_amount, 2)
+            payment_breakdown.append(
+                {
+                    "method": entry["method"],
+                    "declared_amount": declared_amount,
+                    "final_amount": final_amount,
+                }
+            )
+            total += final_amount
+        total = round(total, 2)
+        method = ",".join(e["method"] for e in split)
+    elif method == "card" and card_surcharge_percent:
+        total = round(base_total * (1 + float(card_surcharge_percent) / 100), 2)
+
+    handoff = None
+    for m in methods_for_handoff:
+        handoff = evaluate_handoff(zone, m)
+        if handoff:
+            break
     can_create = handoff is None
 
     result = {
@@ -1181,7 +1275,9 @@ def build_full_quote(
         "referral_code": referral,
         "shipping_cost": shipping_cost,
         "shipping_kind": shipping_kind,
+        "base_total": base_total,
         "total": total,
+        "payment_breakdown": payment_breakdown,
         "estimated_delivery": zone.get("estimated_delivery"),
         "can_create_order": can_create,
         "requires_human_handoff": not can_create,
@@ -1194,5 +1290,6 @@ def build_full_quote(
             "coupon_discount": coupon_discount,
             "shipping_cost": shipping_cost,
             "total": total,
+            "payment_breakdown": payment_breakdown,
         }
     return result
