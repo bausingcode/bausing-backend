@@ -124,7 +124,7 @@ def create_blog_post():
             }), 400
         
         # Generar slug si no se proporciona
-        slug = data.get('slug') or generate_slug(data['title'])
+        slug = generate_slug(data.get('slug') or '') or generate_slug(data['title'])
         
         # Verificar que el slug sea único
         existing_post = BlogPost.query.filter_by(slug=slug).first()
@@ -223,8 +223,8 @@ def update_blog_post(post_id):
             post.title = data['title']
         
         # Actualizar slug si se proporciona o si cambió el título
-        if 'slug' in data:
-            new_slug = data['slug']
+        if 'slug' in data and generate_slug(data['slug'] or ''):
+            new_slug = generate_slug(data['slug'])
         elif 'title' in data:
             new_slug = generate_slug(data['title'])
         else:
