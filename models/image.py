@@ -38,6 +38,8 @@ class HeroImage(db.Model):
     cta_text = db.Column(db.String(255))
     cta_link = db.Column(db.String(500))
     position = db.Column(db.Integer, default=0, nullable=False)
+    # Orden manual dentro del carrusel (position)
+    display_order = db.Column(db.Integer, default=0, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
@@ -51,6 +53,7 @@ class HeroImage(db.Model):
             'cta_text': self.cta_text,
             'cta_link': self.cta_link,
             'position': self.position,
+            'display_order': self.display_order,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

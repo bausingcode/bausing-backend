@@ -1,3 +1,4 @@
+import uuid
 from flask import Blueprint, request, jsonify, current_app
 from database import db
 from models.image import ProductImage, HeroImage
@@ -357,6 +358,12 @@ def upload_hero_image():
         mobile_raw = data.get('image_url_mobile')
         image_url_mobile = None if mobile_raw in (None, '') else mobile_raw
 
+        position = data.get('position', 0)
+        # Las nuevas imágenes van al final de su carrusel
+        max_order = db.session.query(db.func.max(HeroImage.display_order)).filter(
+            HeroImage.position == position
+        ).scalar()
+
         hero_image = HeroImage(
             image_url=data['image_url'],
             image_url_mobile=image_url_mobile,
@@ -364,7 +371,8 @@ def upload_hero_image():
             subtitle=data.get('subtitle'),
             cta_text=data.get('cta_text'),
             cta_link=data.get('cta_link'),
-            position=data.get('position', 0),
+            position=position,
+            display_order=(max_order + 1) if max_order is not None else 0,
             is_active=data.get('is_active', True)
         )
         
@@ -403,7 +411,7 @@ def get_hero_images():
             query = query.filter_by(is_active=True)
         
         hero_images = query.order_by(
-            HeroImage.position, HeroImage.created_at.asc()
+            HeroImage.position, HeroImage.display_order.asc(), HeroImage.created_at.asc()
         ).all()
         
         return jsonify({
@@ -434,6 +442,60 @@ def get_hero_image(image_id):
         }), 200
         
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@images_bp.route('/hero-images/reorder', methods=['PUT'])
+@admin_required
+def reorder_hero_images():
+    """
+    Reordenar las imágenes de un carrusel (requiere token admin)
+
+    Body esperado:
+    {
+        "position": 1,
+        "ids": ["uuid-1", "uuid-2", ...]   // orden final deseado
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        position = data.get('position')
+        ids = data.get('ids')
+
+        if not isinstance(position, int) or not isinstance(ids, list) or not ids:
+            return jsonify({
+                'success': False,
+                'error': 'position (int) e ids (lista) son requeridos'
+            }), 400
+        try:
+            uuids = [uuid.UUID(str(i)) for i in ids]
+        except ValueError:
+            return jsonify({'success': False, 'error': 'ids inválidos'}), 400
+        if len(set(uuids)) != len(uuids):
+            return jsonify({'success': False, 'error': 'ids duplicados'}), 400
+
+        images = HeroImage.query.filter(
+            HeroImage.position == position,
+            HeroImage.id.in_(uuids)
+        ).all()
+        by_id = {img.id: img for img in images}
+        if len(by_id) != len(uuids):
+            return jsonify({
+                'success': False,
+                'error': 'Alguna imagen no existe o no pertenece a ese carrusel'
+            }), 400
+
+        for index, image_uuid in enumerate(uuids):
+            by_id[image_uuid].display_order = index
+
+        db.session.commit()
+
+        return jsonify({'success': True}), 200
+
+    except Exception as e:
+        db.session.rollback()
         return jsonify({
             'success': False,
             'error': str(e)
