@@ -42,15 +42,19 @@ def _card_detail_suffix(card_payment_details: Any) -> str:
     if installments is not None:
         try:
             n = int(installments)
-            if n > 1:
-                parts.append(f"{n} cuotas")
+            if n >= 1:
+                parts.append(f"{n} cuota" if n == 1 else f"{n} cuotas")
         except (TypeError, ValueError):
             pass
 
     return f" ({', '.join(parts)})" if parts else ""
 
 
-def _payment_breakdown_text(data: Mapping[str, Any]) -> str:
+_NO_CARD_DETAILS_SUFFIX = " (sin detalle de tarjeta ni cuotas)"
+_LEGACY_CARD_NOTE_PREFIX = "Pago con tarjeta:"
+
+
+def _payment_breakdown_text(data: Mapping[str, Any], custom_note: str = "") -> str:
     """
     Detalle de cada medio de pago usado y su monto, distinguiendo lo ya
     cobrado ("Pagado con...") de lo pendiente de cobro al recibir
@@ -59,6 +63,9 @@ def _payment_breakdown_text(data: Mapping[str, Any]) -> str:
 
     Ej.: "Pagado con Billetera Bausing: $5.000 | A pagar con Efectivo: $30.000 |
     A pagar con Tarjeta: $50.000 (Visa Crédito, Banco Galicia, 3 cuotas)"
+
+    Si el pago es con tarjeta y no llegó ningún detalle (ni `card_payment_details`
+    ni cuotas en la nota libre), se deja marcado para que se note en el CRM.
     """
     methods = data.get("payment_methods")
     if not isinstance(methods, list) or not methods:
@@ -79,7 +86,11 @@ def _payment_breakdown_text(data: Mapping[str, Any]) -> str:
 
         method = str(pm.get("method") or "").strip().lower()
         label = _METHOD_LABELS.get(method, method.capitalize() or "Pago")
-        suffix = _card_detail_suffix(card_payment_details) if method == "card" else ""
+        suffix = ""
+        if method == "card":
+            suffix = _card_detail_suffix(card_payment_details)
+            if not suffix and "cuota" not in custom_note.lower():
+                suffix = _NO_CARD_DETAILS_SUFFIX
         prefix = "Pagado con" if pm.get("processed") else "A pagar con"
         lines.append(f"{prefix} {label}: {_format_amount(amount)}{suffix}")
 
@@ -95,7 +106,12 @@ def resolve_order_observations(data: Mapping[str, Any], *, max_len: int = 2000) 
     entre varios.
     """
     custom_note = str(data.get("observations") or "").strip()
-    breakdown = _payment_breakdown_text(data)
+    # Fronts viejos mandaban "Pago con tarjeta: ..." como nota; el desglose ya lo incluye.
+    if custom_note.startswith(_LEGACY_CARD_NOTE_PREFIX) and isinstance(
+        data.get("card_payment_details"), Mapping
+    ):
+        custom_note = ""
+    breakdown = _payment_breakdown_text(data, custom_note)
 
     if custom_note and breakdown:
         text = f"{custom_note} | {breakdown}"

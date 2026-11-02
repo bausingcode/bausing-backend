@@ -298,6 +298,9 @@ def get_installments():
             card_types_query = card_types_query.filter_by(is_active=True)
         card_types = card_types_query.order_by(CardType.display_order, CardType.name).all()
         
+        # Bancos en una sola consulta (antes era un Bank.query.get por cada cuota)
+        banks_by_id = {bank.id: bank for bank in Bank.query.all()}
+
         # Construir la estructura para el checkout
         result = {}
         
@@ -315,7 +318,7 @@ def get_installments():
             banks_data = {}
             bank_display_order = {}
             for inst in installments:
-                bank = Bank.query.get(inst.bank_id)
+                bank = banks_by_id.get(inst.bank_id)
                 if not bank or (only_active and not bank.is_active):
                     continue
 
