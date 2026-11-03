@@ -219,6 +219,13 @@ def find_locality_by_coordinates(lon, lat):
         _set_coord_cache(lon, lat, result)
         return result
 
+    # Las zonas "PENDIENTES" (ej. "1.1 PENDIENTES CORDOBA") son de retención, no de entrega:
+    # si el punto también cae en otra zona, se ignoran para que no ganen por orden de BD.
+    # Si es la única que contiene el punto, se mantiene como antes.
+    non_pending = [m for m in matching_zones if 'PENDIENTES' not in m['zone'].name.upper()]
+    if non_pending:
+        matching_zones = non_pending
+
     # Si hay múltiples zonas, verificar si alguna empieza con "TERCERIZADO"
     if len(matching_zones) > 1:
         tercerizado_zone = None
