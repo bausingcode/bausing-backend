@@ -8,7 +8,9 @@ from decimal import Decimal
 from flask import Blueprint, jsonify, request
 
 from models.product import Product
+from models.province import Province
 from services.viacargo_busplus import build_payload_strings, cotizar_busplus_payload
+from services.viacargo_tarifa import precio_tarifa, tipo_tarifa_producto, zona_viacargo
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +77,9 @@ def _cm_from_db(v) -> int:
 @viacargo_shipping_bp.route("/public/viacargo-cotizar", methods=["POST"])
 def public_viacargo_cotizar():
     """
-    Carga dimensiones y peso desde productos, arma bulto(s) y devuelve solo el TOTAL
-    de VIA CARGO PLUS ED (entero, pesos) o error.
+    Productos con tarifa por subcategoría (colchón/conjunto por medida, heladera, lavarropas): precio fijo por unidad según medida y zona
+    (provincia de province_id). El resto: carga dimensiones y peso, arma bulto(s) y
+    cotiza VIA CARGO PLUS ED en Busplus. Devuelve el TOTAL (pesos) o error.
     """
     data = request.get_json(silent=True) or {}
     items = data.get("items")
@@ -132,12 +135,23 @@ def public_viacargo_cotizar():
             500,
         )
 
+    provincia_nombre = None
+    province_id = data.get("province_id")
+    if province_id:
+        try:
+            prov = Province.query.get(uuid.UUID(str(province_id)))
+        except (ValueError, TypeError):
+            prov = None
+        provincia_nombre = prov.name if prov else None
+
     total_qty = 0
     total_kg = 0.0
     max_largo_cm = 0
     max_ancho_cm = 0
     per_line_stacked_h_cm: list = []
     extra_total = 0.0
+    tarifa_total = 0
+    zona = None
 
     for raw in items:
         if not isinstance(raw, dict):
@@ -172,6 +186,30 @@ def public_viacargo_cotizar():
                 ),
                 400,
             )
+        if p.viacargo_extra_price is not None:
+            extra_total += float(p.viacargo_extra_price) * qty
+
+        # Tarifa fija por medida y zona (cada unidad paga su envío)
+        tipo_tarifa = tipo_tarifa_producto(p)
+        if tipo_tarifa:
+            if zona is None:
+                zona = zona_viacargo(provincia_nombre, cp_dest_n)
+                if zona is None:
+                    return jsonify({"success": False, "error": MSG_CP_NO_DISPONIBLE_ENVIO}), 400
+            precio = precio_tarifa(tipo_tarifa, zona)
+            if precio is None:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": f"Tarifa Vía Cargo inválida en producto {pid}",
+                        }
+                    ),
+                    400,
+                )
+            tarifa_total += precio * qty
+            continue
+
         d_cm = p.viacargo_depth_cm
         w_cm = p.viacargo_width_cm
         h_cm = p.viacargo_height_cm
@@ -206,18 +244,27 @@ def public_viacargo_cotizar():
         max_largo_cm = max(max_largo_cm, largo_cm)
         max_ancho_cm = max(max_ancho_cm, ancho_cm)
         per_line_stacked_h_cm.append(alto_unit_cm * qty)
-        if p.viacargo_extra_price is not None:
-            extra_total += float(p.viacargo_extra_price) * qty
 
     if total_qty < 1:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "No hay items válidos con quantity >= 1",
-                }
-            ),
-            400,
+        if zona is None:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "No hay items válidos con quantity >= 1",
+                    }
+                ),
+                400,
+            )
+        # Todo el carrito con tarifa fija: no hace falta cotizar en Busplus
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "total": tarifa_total + extra_total,
+                    "tarifa_zona": zona,
+                },
+            }
         )
 
     alto_cm = max(per_line_stacked_h_cm) if per_line_stacked_h_cm else 0
@@ -254,7 +301,8 @@ def public_viacargo_cotizar():
         {
             "success": True,
             "data": {
-                "total": total + extra_total,
+                "total": total + tarifa_total + extra_total,
+                "tarifa_zona": zona,
                 "busplus_payload": payload,
                 "busplus_response": busplus_response,
             },
