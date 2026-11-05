@@ -153,9 +153,64 @@ def _nominatim_search(params):
     return data if isinstance(data, list) else []
 
 
-def get_lat_lon_from_address(street, number, city, postal_code, province_name=None):
+# Prefijos de tipo de vía que el usuario escribe pero OSM suele no incluir en el
+# nombre de la calle ("Av. Calingasta" → Nominatim devuelve 0 hits; "Calingasta" sí).
+_STREET_TYPE_PREFIX_RE = re.compile(
+    r"^\s*(?:avda|avd|av|avenida|bv|bvd|bvar|blvd|boulevard|calle|cll|pje|psje|pasaje)\b\.?\s+",
+    re.IGNORECASE,
+)
+
+# Clases de Nominatim aceptables cuando solo se geocodifica ciudad+provincia:
+# evita que la búsqueda por nombre de ciudad devuelva un comercio/templo/fábrica.
+_CITY_LEVEL_CLASSES = ("boundary", "place")
+
+
+def _street_name_variants(street):
+    """
+    Variantes de la calle a geocodificar: tal cual la cargó el usuario y, si
+    tiene prefijo de tipo de vía ("Av.", "Avenida", "Bv.", "Pje."...), también
+    sin él. Se prueba primero la original porque algunas calles sí figuran en
+    OSM con el prefijo (ej. "Avenida Colón").
+    """
+    if not street:
+        return [street]
+    variants = [street]
+    stripped = _STREET_TYPE_PREFIX_RE.sub("", street, count=1).strip()
+    if stripped and stripped != street:
+        variants.append(stripped)
+    return variants
+
+
+def _strip_city_suffix(city):
+    """'Córdoba Capital' → 'Córdoba' (OSM no usa el sufijo 'Capital')."""
+    if not city:
+        return city
+    stripped = re.sub(r"\s+capital\s*$", "", city, flags=re.IGNORECASE).strip()
+    return stripped or city
+
+
+def get_lat_lon_from_address(street, number, city, postal_code, province_name=None, city_level_only=False):
     """
     Obtiene latitud y longitud de una dirección usando Nominatim (OpenStreetMap).
+    Prueba la calle tal cual y sin prefijo de tipo de vía ("Av.", "Bv."...).
+    Retorna "lat,lon" o None.
+    """
+    try:
+        for street_name in _street_name_variants(street):
+            lat_lon = _geocode_street_variant(
+                street_name, number, city, postal_code, province_name, city_level_only
+            )
+            if lat_lon:
+                return lat_lon
+        return None
+    except Exception:
+        # Si falla la geocodificación, no fallar la creación de la dirección
+        return None
+
+
+def _geocode_street_variant(street, number, city, postal_code, province_name=None, city_level_only=False):
+    """
+    Geocodifica con una variante concreta del nombre de calle.
     Usa búsqueda estructurada (street/city/state/postalcode) y, si hace falta,
     free-form. Entre varios hits elige el que mejor matchea ciudad/CP para
     evitar ambigüedades (ej. misma calle en Córdoba capital vs Carlos Paz).
@@ -198,6 +253,12 @@ def get_lat_lon_from_address(street, number, city, postal_code, province_name=No
             address_parts.append("Argentina")
             results = _nominatim_search({"q": ", ".join(address_parts)})
 
+        if city_level_only:
+            results = [
+                r for r in results
+                if (r.get("class") or r.get("category")) in _CITY_LEVEL_CLASSES
+            ]
+
         best = _pick_best_geocode_result(results, city, postal_code, province_name)
         if not best:
             return None
@@ -221,7 +282,9 @@ def geocode_address_with_fallback(street, number, city, postal_code, province_na
     """
     lat_lon = get_lat_lon_from_address(street, number, city, postal_code, province_name)
     if not lat_lon:
-        lat_lon = get_lat_lon_from_address(None, None, city, None, province_name)
+        lat_lon = get_lat_lon_from_address(
+            None, None, _strip_city_suffix(city), None, province_name, city_level_only=True
+        )
     return lat_lon
 
 def generate_token(user):
