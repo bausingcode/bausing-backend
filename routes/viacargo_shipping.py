@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import json
 import os
 import re
 import uuid
@@ -10,7 +11,21 @@ from flask import Blueprint, jsonify, request
 from models.product import Product
 from models.province import Province
 from services.viacargo_busplus import build_payload_strings, cotizar_busplus_payload
-from services.viacargo_tarifa import precio_tarifa, tipo_tarifa_producto, zona_viacargo
+from database import db
+from models.category import Category, CategoryOption
+from models.settings import SystemSettings
+from routes.admin import admin_required
+from services.viacargo_tarifa import (
+    SETTINGS_KEY,
+    TIPO_LABELS,
+    VIACARGO_TARIFAS,
+    ZONA_LABELS,
+    ZONAS,
+    precios_producto,
+    provincias_por_zona,
+    tarifas_vigentes,
+    zona_viacargo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +92,7 @@ def _cm_from_db(v) -> int:
 @viacargo_shipping_bp.route("/public/viacargo-cotizar", methods=["POST"])
 def public_viacargo_cotizar():
     """
-    Productos con tarifa por subcategoría (colchón/conjunto por medida, heladera, lavarropas): precio fijo por unidad según medida y zona
+    Productos con tarifa (tipos fijos por subcategoría o tarifas extra por categoría desde el admin): precio fijo por unidad según medida y zona
     (provincia de province_id). El resto: carga dimensiones y peso, arma bulto(s) y
     cotiza VIA CARGO PLUS ED en Busplus. Devuelve el TOTAL (pesos) o error.
     """
@@ -152,6 +167,7 @@ def public_viacargo_cotizar():
     extra_total = 0.0
     tarifa_total = 0
     zona = None
+    tarifas = tarifas_vigentes()
 
     for raw in items:
         if not isinstance(raw, dict):
@@ -189,26 +205,18 @@ def public_viacargo_cotizar():
         if p.viacargo_extra_price is not None:
             extra_total += float(p.viacargo_extra_price) * qty
 
-        # Tarifa fija por medida y zona (cada unidad paga su envío)
-        tipo_tarifa = tipo_tarifa_producto(p)
-        if tipo_tarifa:
+        # Tarifa fija por tipo/categoría y zona (cada unidad paga su envío)
+        fila_precios = precios_producto(p, tarifas)
+        if fila_precios:
             if zona is None:
                 zona = zona_viacargo(provincia_nombre, cp_dest_n)
                 if zona is None:
                     return jsonify({"success": False, "error": MSG_CP_NO_DISPONIBLE_ENVIO}), 400
-            precio = precio_tarifa(tipo_tarifa, zona)
-            if precio is None:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": f"Tarifa Vía Cargo inválida en producto {pid}",
-                        }
-                    ),
-                    400,
-                )
-            tarifa_total += precio * qty
-            continue
+            precio = fila_precios[ZONAS.index(zona)]
+            if precio is not None:
+                tarifa_total += int(precio) * qty
+                continue
+            # Precio vacío para esa zona: se cotiza en Busplus
 
         d_cm = p.viacargo_depth_cm
         w_cm = p.viacargo_width_cm
@@ -308,3 +316,127 @@ def public_viacargo_cotizar():
             },
         }
     )
+
+
+def _tarifas_payload():
+    setting = SystemSettings.query.filter_by(key=SETTINGS_KEY).first()
+    provincias = provincias_por_zona()
+    tarifas = tarifas_vigentes()
+    return {
+        "zonas": [{"key": z, "label": ZONA_LABELS[z], "provincias": provincias[z]} for z in ZONAS],
+        "tipos": [{"key": t, "label": TIPO_LABELS[t]} for t in VIACARGO_TARIFAS],
+        "precios": {t: list(p) for t, p in tarifas["precios"].items()},
+        "extras": tarifas["extras"],
+        "updated_at": setting.updated_at.isoformat() if setting and setting.updated_at else None,
+    }
+
+
+def _precios_validos(fila, nombre: str):
+    """Un precio entero > 0 o None (vacío → Busplus) por zona, o mensaje de error."""
+    if not isinstance(fila, list) or len(fila) != len(ZONAS):
+        return None, f"Faltan precios para {nombre}"
+    valores = []
+    for v in fila:
+        if v is None or v == "":
+            valores.append(None)
+            continue
+        try:
+            n = int(round(float(v)))
+        except (TypeError, ValueError):
+            return None, f"Precio inválido en {nombre}"
+        if n <= 0:
+            return None, f"Los precios deben ser mayores a 0 ({nombre})"
+        valores.append(n)
+    return valores, None
+
+
+@viacargo_shipping_bp.route("/admin/viacargo-tarifas", methods=["GET"])
+@admin_required
+def admin_get_viacargo_tarifas():
+    return jsonify({"success": True, "data": _tarifas_payload()})
+
+
+@viacargo_shipping_bp.route("/admin/viacargo-tarifas", methods=["PUT"])
+@admin_required
+def admin_update_viacargo_tarifas():
+    """
+    Body: { precios: { <tipo>: [precio por zona] },
+            extras: [{ id?, label, category_id?, category_option_id?, product_ids?, precios: [precio por zona] }] }
+    Cada tarifa extra necesita una categoría o al menos un producto.
+    """
+    data = request.get_json(silent=True) or {}
+    precios = data.get("precios")
+    extras = data.get("extras") or []
+    if not isinstance(precios, dict) or not isinstance(extras, list):
+        return jsonify({"success": False, "error": "precios requerido"}), 400
+
+    limpio = {}
+    for tipo in VIACARGO_TARIFAS:
+        valores, err = _precios_validos(precios.get(tipo), TIPO_LABELS[tipo])
+        if err:
+            return jsonify({"success": False, "error": err}), 400
+        limpio[tipo] = valores
+
+    extras_limpias = []
+    for e in extras:
+        if not isinstance(e, dict):
+            continue
+        label = (e.get("label") or "").strip()
+        if not label:
+            return jsonify({"success": False, "error": "Cada tarifa agregada necesita un nombre"}), 400
+        cat = None
+        if e.get("category_id"):
+            try:
+                cat = Category.query.get(uuid.UUID(str(e.get("category_id"))))
+            except (ValueError, TypeError):
+                cat = None
+            if not cat:
+                return jsonify({"success": False, "error": f"Categoría inválida para \"{label}\""}), 400
+        try:
+            product_ids = list(dict.fromkeys(str(uuid.UUID(str(pid))) for pid in (e.get("product_ids") or [])))
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "error": f"Producto inválido en \"{label}\""}), 400
+        if product_ids:
+            encontrados = Product.query.filter(Product.id.in_(product_ids)).count()
+            if encontrados != len(product_ids):
+                return jsonify({"success": False, "error": f"Algún producto de \"{label}\" ya no existe"}), 400
+        if not cat and not product_ids:
+            return jsonify({"success": False, "error": f"Elegí una categoría o productos para \"{label}\""}), 400
+        opt_id = (e.get("category_option_id") or None) if cat else None
+        if opt_id:
+            try:
+                opt = CategoryOption.query.get(uuid.UUID(str(opt_id)))
+            except (ValueError, TypeError):
+                opt = None
+            if not opt or opt.category_id != cat.id:
+                return jsonify({"success": False, "error": f"Opción inválida para \"{label}\""}), 400
+        valores, err = _precios_validos(e.get("precios"), label)
+        if err:
+            return jsonify({"success": False, "error": err}), 400
+        extras_limpias.append(
+            {
+                "id": str(e.get("id") or uuid.uuid4()),
+                "label": label,
+                "category_id": str(cat.id) if cat else None,
+                "category_option_id": str(opt_id) if opt_id else None,
+                "product_ids": product_ids,
+                "precios": valores,
+            }
+        )
+
+    try:
+        SystemSettings.set_value(
+            key=SETTINGS_KEY,
+            value=json.dumps({"precios": limpio, "extras": extras_limpias}),
+            value_type="json",
+            category="shipping",
+            description="Tarifa fija Vía Cargo por tipo de producto y zona",
+            updated_by=request.admin_user.id,
+        )
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Error guardando tarifas Vía Cargo")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    return jsonify({"success": True, "data": _tarifas_payload()})
