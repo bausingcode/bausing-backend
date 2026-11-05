@@ -7,8 +7,8 @@ No depende del peso, solo de la medida. Fuente: "BAUSING TARIFA.xlsx", hoja "21,
 - Conjunto = colchón + base.
 - Provincias fuera de las zonas (San Luis, Tierra del Fuego): sin envío.
 - El tipo de tarifa sale de las subcategorías del producto (Colchones / Sommier y colchón > medida,
-  Grandes electros > Heladeras / Lavarropas). Bases solas: precio de colchón 1 plaza.
-  Sin match (cuna, TV, aires): se cotiza en Busplus.
+  Grandes electros > Heladeras / Lavarropas). Bases solas, colchón de cuna y pet: precio de colchón 1 plaza.
+  Sin match (TV, aires): se cotiza en Busplus.
 - Los precios se editan desde el admin (system_settings "viacargo.tarifas"); VIACARGO_TARIFAS es el default.
 - Desde el admin se pueden agregar tarifas extra asociadas a una categoría/subcategoría (y opcionalmente
   una opción, p. ej. Grandes electros > Smart TV) y/o a productos puntuales.
@@ -40,7 +40,7 @@ ZONA_LABELS = {
 }
 
 TIPO_LABELS = {
-    "colchon_1p": "Colchón 1 plaza (y 1½) · Bases",
+    "colchon_1p": "Colchón 1 plaza (y 1½) · Bases, cuna y pet",
     "conjunto_1p": "Conjunto 1 plaza (y 1½)",
     "colchon_2p": "Colchón 2 plazas (queen, extra queen)",
     "conjunto_2p": "Conjunto 2 plazas (queen, extra queen)",
@@ -119,6 +119,8 @@ _BASES_SOMMIER = "bases de sommier"
 
 def _medida_desde_subcategoria(nombre: str) -> Optional[str]:
     n = _norm(nombre)
+    if "cuna" in n or "pet" in n.split():  # colchón de cuna / Colchón Pet → como 1 plaza
+        return "1p"
     if "king" in n or "200x200" in n:
         return "2x2"
     if "queen" in n or "dos plazas" in n or "2 plazas" in n:
