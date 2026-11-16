@@ -283,6 +283,10 @@ def catalog_search():
             page=request.args.get("page", 1, type=int),
             per_page=request.args.get("per_page", 20, type=int),
         )
+        for item in result.get("products", []):
+            if item.get("image"):
+                code = _short_image_code(item["id"])
+                item["image"] = f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{code}"
         return _ok(result)
     except ValueError as e:
         return _err(str(e), 400)

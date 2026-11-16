@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flask import current_app
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from database import db
@@ -941,7 +942,7 @@ def search_products(
         except (ValueError, TypeError):
             pass
 
-    pagination = query.order_by(Product.name.asc()).paginate(
+    pagination = query.options(selectinload(Product.images)).order_by(Product.name.asc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
     products = pagination.items
@@ -970,14 +971,20 @@ def search_products(
         # confirma un producto puntual. Solo se incluye si ya hay locality_id resuelto
         # (si loc es None, price_transfer/price_card ya vienen None desde el cálculo
         # de arriba). La foto sigue reservada para product_detail (Detalle de Producto).
+        # Cada producto es una "card" de WhatsApp: name, description, image,
+        # price_transfer y price_card es lo que ve el cliente; id y category_id
+        # son solo para el agente (carrito, cotización). La foto sale cruda acá
+        # y la ruta la convierte al link corto público (/atendium/v1/img/...).
         items.append(
             {
-                "id": str(p.id),
+                "type": "card",
                 "name": p.name,
                 "description": (p.description or "")[:280] if p.description else None,
-                "category_id": str(p.category_id) if p.category_id else None,
+                "image": p.get_bot_image_url(),
                 "price_transfer": price_transfer,
                 "price_card": price_card,
+                "id": str(p.id),
+                "category_id": str(p.category_id) if p.category_id else None,
             }
         )
 
