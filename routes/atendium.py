@@ -285,8 +285,7 @@ def catalog_search():
         )
         for item in result.get("products", []):
             if item.get("image"):
-                code = _short_image_code(item["id"])
-                item["image"] = f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{code}"
+                item["image"] = _short_image_url(item["id"])
         return _ok(result)
     except ValueError as e:
         return _err(str(e), 400)
@@ -299,6 +298,9 @@ def catalog_search():
 def atendium_promos():
     try:
         result = commerce.active_promo_products(request.args.get("locality_id"))
+        for item in result.get("offers", []):
+            if item.get("image"):
+                item["image"] = _short_image_url(item["id"])
         return _ok(result)
     except ValueError as e:
         return _err(str(e), 400)
@@ -353,14 +355,17 @@ def _short_image_code(product_id) -> str:
     return str(product_id).replace("-", "")[:8]
 
 
+def _short_image_url(product_id) -> str:
+    return f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{_short_image_code(product_id)}"
+
+
 @atendium_bp.route("/catalog/<product_id>", methods=["GET"])
 @atendium_api_key_required
 def catalog_detail(product_id):
     try:
         detail = commerce.product_detail(product_id, request.args.get("locality_id"))
         if detail.get("main_image"):
-            code = _short_image_code(detail["id"])
-            detail["main_image"] = f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{code}"
+            detail["main_image"] = detail["image"] = _short_image_url(detail["id"])
         return _ok(detail)
     except ValueError as e:
         return _err(str(e), 404)
@@ -382,8 +387,7 @@ def catalog_detail_query():
     try:
         detail = commerce.product_detail(product_id, request.args.get("locality_id"))
         if detail.get("main_image"):
-            code = _short_image_code(detail["id"])
-            detail["main_image"] = f"{PUBLIC_API_BASE_URL}/atendium/v1/img/{code}"
+            detail["main_image"] = detail["image"] = _short_image_url(detail["id"])
         return _ok(detail)
     except ValueError as e:
         return _err(str(e), 404)

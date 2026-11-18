@@ -886,6 +886,23 @@ def find_or_create_user(customer: Dict[str, Any]) -> User:
     return user
 
 
+def _product_card(product, price_transfer, price_card) -> Dict[str, Any]:
+    """Producto como "card" de WhatsApp. name, description, image, price_transfer
+    y price_card es lo que ve el cliente; id y category_id son solo para el
+    agente (carrito, cotización). La foto sale cruda acá y la ruta la convierte
+    al link corto público (/atendium/v1/img/...)."""
+    return {
+        "type": "card",
+        "name": product.name,
+        "description": (product.description or "")[:280] if product.description else None,
+        "image": product.get_bot_image_url(),
+        "price_transfer": price_transfer,
+        "price_card": price_card,
+        "id": str(product.id),
+        "category_id": str(product.category_id) if product.category_id else None,
+    }
+
+
 def search_products(
     q: Optional[str],
     locality_id: Optional[str],
@@ -971,22 +988,7 @@ def search_products(
         # confirma un producto puntual. Solo se incluye si ya hay locality_id resuelto
         # (si loc es None, price_transfer/price_card ya vienen None desde el cálculo
         # de arriba). La foto sigue reservada para product_detail (Detalle de Producto).
-        # Cada producto es una "card" de WhatsApp: name, description, image,
-        # price_transfer y price_card es lo que ve el cliente; id y category_id
-        # son solo para el agente (carrito, cotización). La foto sale cruda acá
-        # y la ruta la convierte al link corto público (/atendium/v1/img/...).
-        items.append(
-            {
-                "type": "card",
-                "name": p.name,
-                "description": (p.description or "")[:280] if p.description else None,
-                "image": p.get_bot_image_url(),
-                "price_transfer": price_transfer,
-                "price_card": price_card,
-                "id": str(p.id),
-                "category_id": str(p.category_id) if p.category_id else None,
-            }
-        )
+        items.append(_product_card(p, price_transfer, price_card))
 
     return {
         "products": items,
@@ -1011,19 +1013,28 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
         raise ValueError("Producto no encontrado")
     loc = _normalize_locality_id(locality_id)
     catalog, _cid = catalog_for_locality(loc) if loc else (None, None)
-    # Intencional: NO se incluye precio acá. Esta es la única respuesta del bot que
-    # trae main_image (foto), reservada para cuando el cliente la pide explícitamente
-    # sobre un producto puntual; el precio real sale siempre de build_full_quote
+    # Esta respuesta trae main_image (foto) para cuando el cliente la pide
+    # explícitamente sobre un producto puntual. El precio acá es solo de
+    # referencia (para la card); el precio real sale siempre de build_full_quote
     # (Cotizar Pedido) con la zona resuelta.
     # Usamos get_bot_image_url() (no get_main_image()) a propósito: es la imagen
     # "para bot" cargada en el admin, sin compresión ni conversión a WebP, pensada
     # específicamente para este consumo; si no se cargó una propia, cae sola a la
     # primera imagen del producto (mismo default que get_main_image()).
+    price_transfer = price_card = None
+    if loc:
+        info = _build_homepage_prices_map([str(product.id)], loc).get(str(product.id)) or {}
+        price_transfer = _positive_price(info.get("min_transfer_price"), info.get("min_price"))
+        price_card = _positive_price(
+            info.get("min_card_price"), info.get("min_price"), price_transfer
+        )
+    # Además de los campos de la ficha, sale como card (mismos campos que el
+    # catálogo) para que "Más info" también se muestre como card. El precio de
+    # la card es de REFERENCIA (igual que /catalog); el real sigue saliendo de
+    # build_full_quote (Cotizar Pedido).
     return {
-        "id": str(product.id),
-        "name": product.name,
+        **_product_card(product, price_transfer, price_card),
         "description": product.description,
-        "category_id": str(product.category_id) if product.category_id else None,
         "main_image": product.get_bot_image_url(),
         "estimated_delivery": estimated_delivery_payload(catalog),
         "locality_id": loc,
@@ -1113,8 +1124,10 @@ def active_promo_products(locality_id: Optional[str]) -> Dict[str, Any]:
             continue
         offers.append(
             {
+                # La card muestra el precio final con la promo ya aplicada (no
+                # hay precio de tarjeta propio en la oferta: se usa el mismo).
+                **_product_card(product, best["final_price"], best["final_price"]),
                 "product_id": str(pid),
-                "name": product.name,
                 "base_price": base_price,
                 "final_price": best["final_price"],
                 "savings": round(base_price - best["final_price"], 2),
