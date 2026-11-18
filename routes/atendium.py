@@ -427,9 +427,15 @@ def product_image_redirect(code):
         original_format = (img.format or "JPEG").upper()
         img = ImageOps.exif_transpose(img)
 
-        save_format = "JPEG" if original_format == "JPG" else original_format
+        # Meta (WhatsApp) solo acepta image/jpeg, image/png o image/webp. Pillow
+        # reporta "MPO" para los JPEG multi-foto de algunos celulares (y el
+        # mimetype salía como image/mpo, que Meta rechaza y tira abajo la card
+        # entera): cualquier formato fuera de esos tres se sirve como JPEG.
+        save_format = original_format
+        if save_format not in ("JPEG", "PNG", "WEBP"):
+            save_format = "JPEG"
         save_kwargs = {}
-        if save_format == "JPEG" and img.mode in ("RGBA", "P", "LA"):
+        if save_format == "JPEG" and img.mode != "RGB":
             img = img.convert("RGB")
 
         buffer = BytesIO()
