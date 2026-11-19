@@ -886,6 +886,28 @@ def find_or_create_user(customer: Dict[str, Any]) -> User:
     return user
 
 
+def _card_description(text: Optional[str], max_sentences: int = 2, max_chars: int = 300) -> Optional[str]:
+    """Descripción corta para la card: las primeras 2 oraciones completas (sin
+    cortar a mitad de frase). Si ni la primera entra en max_chars, se corta en
+    el último espacio y se agrega "…"."""
+    import re
+
+    clean = re.sub(r"\s+", " ", text or "").strip()
+    if not clean:
+        return None
+    sentences = re.findall(r"[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$", clean)
+    out = ""
+    for sentence in sentences[:max_sentences]:
+        candidate = (out + " " + sentence.strip()).strip()
+        if len(candidate) > max_chars:
+            break
+        out = candidate
+    if out:
+        return out
+    cut = clean[: max_chars - 1].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return cut + "…"
+
+
 def _product_card(product, price_transfer, price_card) -> Dict[str, Any]:
     """Producto como "card" de WhatsApp. name, description, image, price_transfer
     y price_card es lo que ve el cliente; id y category_id son solo para el
@@ -894,7 +916,7 @@ def _product_card(product, price_transfer, price_card) -> Dict[str, Any]:
     return {
         "type": "card",
         "name": product.name,
-        "description": (product.description or "")[:280] if product.description else None,
+        "description": _card_description(product.description),
         "image": product.get_bot_image_url(),
         "price_transfer": price_transfer,
         "price_card": price_card,
@@ -1034,7 +1056,7 @@ def product_detail(product_id: str, locality_id: Optional[str]) -> Dict[str, Any
     # build_full_quote (Cotizar Pedido).
     return {
         **_product_card(product, price_transfer, price_card),
-        "description": product.description,
+        "full_description": product.description,
         "main_image": product.get_bot_image_url(),
         "estimated_delivery": estimated_delivery_payload(catalog),
         "locality_id": loc,
