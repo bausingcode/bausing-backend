@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Tarifa fija Vía Cargo (retiro en agencia): precio por unidad según tipo de producto y zona.
-No depende del peso, solo de la medida. Fuente: "BAUSING TARIFA.xlsx", hoja "21,04" (tarifa 01/07/26).
+No depende del peso, solo de la medida. Fuente: "BAUSING TARIFA.xlsx", hoja "21,04" (tarifa 19/11/2026; heladera y lavarropas de la 01/07/26).
 
 - 1 plaza incluye 1½ plaza; 2 plazas incluye queen y extra queen; 2x2 = king (200x200).
 - Conjunto = colchón + base.
@@ -52,12 +52,12 @@ TIPO_LABELS = {
 
 # Precio por unidad (ARS) en el orden de ZONAS
 VIACARGO_TARIFAS = {
-    "colchon_1p": (87000, 62000, 57000, 76000, 105000, 138000),
-    "conjunto_1p": (134000, 106000, 97000, 131000, 184000, 214000),
-    "colchon_2p": (118000, 103000, 94000, 128000, 179000, 188000),
-    "conjunto_2p": (189000, 160000, 145000, 199000, 279000, 304000),
-    "colchon_2x2": (174000, 122000, 111000, 151000, 211000, 280000),
-    "conjunto_2x2": (266000, 185000, 168000, 230000, 323000, 429000),
+    "colchon_1p": (95000, 67000, 62000, 83000, 115000, 151000),
+    "conjunto_1p": (147000, 116000, 106000, 144000, 201000, 235000),
+    "colchon_2p": (129000, 113000, 103000, 140000, 196000, 206000),
+    "conjunto_2p": (207000, 175000, 159000, 218000, 306000, 334000),
+    "colchon_2x2": (191000, 133000, 121000, 166000, 232000, 307000),
+    "conjunto_2x2": (292000, 202000, 184000, 252000, 355000, 471000),
     "heladera": (146000, 134000, 122000, 166000, 233000, 233000),
     "lavarropas": (88000, 81000, 74000, 100000, 138000, 138000),
 }
